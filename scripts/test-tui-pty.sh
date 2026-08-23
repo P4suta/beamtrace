@@ -15,7 +15,11 @@ trap cleanup EXIT
 
 mkfifo "$input"
 cd "$repo_root/packages/beamtrace_tui"
-timeout 30s script --quiet --return --command 'gleam run' "$transcript" <"$input" \
+# GitHub's non-interactive shell can advertise TERM=dumb even though script(1)
+# creates a capable PTY. etui intentionally uses TERM when it enables raw input,
+# so make the emulated terminal explicit and flush its output for synchronization.
+timeout 30s script --quiet --return --flush --echo never \
+  --command 'env TERM=xterm-256color gleam run' "$transcript" <"$input" \
   | tee "$output" &
 script_pid=$!
 exec 3>"$input"
