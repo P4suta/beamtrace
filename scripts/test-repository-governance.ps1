@@ -24,7 +24,7 @@ $requiredFiles = @(
     'SUPPORT.md',
     'scripts/audit-github.ps1',
     'scripts/configure-github.ps1',
-    'tests/property/page_loader.test.mjs'
+    'tests/property/page_loader.test.js'
 )
 
 foreach ($relativePath in $requiredFiles) {
@@ -50,7 +50,7 @@ $fastCheckVersion = $rootPackage.devDependencies.'fast-check'
 if ($fastCheckVersion -notmatch '^\d+\.\d+\.\d+$') {
     throw 'fast-check must be an exact dependency for reproducible property tests.'
 }
-if ($rootPackage.scripts.'test:property' -ne 'node --test tests/property/*.test.mjs') {
+if ($rootPackage.scripts.'test:property' -ne 'node --test tests/property/*.test.js') {
     throw 'The root package does not expose the property-test suite.'
 }
 $rootLock = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'package-lock.json') | ConvertFrom-Json -AsHashtable
@@ -62,8 +62,8 @@ if ($lockedRoot['devDependencies']['fast-check'] -ne $fastCheckVersion -or $lock
 if ($lockedFastCheck['integrity'] -notmatch '^sha512-[A-Za-z0-9+/]+={0,2}$') {
     throw 'The npm lockfile does not preserve fast-check integrity metadata.'
 }
-$propertyTest = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'tests/property/page_loader.test.mjs')
-foreach ($marker in @('from "fast-check"', 'fc.assert', 'fc.property')) {
+$propertyTest = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'tests/property/page_loader.test.js')
+foreach ($marker in @('require("fast-check")', 'fc.assert', 'fc.property')) {
     if (-not $propertyTest.Contains($marker)) {
         throw "The URL boundary property test is missing: $marker"
     }

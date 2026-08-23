@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-import assert from "node:assert/strict";
-import test from "node:test";
-import fc from "fast-check";
-
-import { pageUrl } from "../../packages/beamtrace_web/src/beamtrace_web/page_loader_ffi.mjs";
+const assert = require("node:assert/strict");
+const test = require("node:test");
+const fc = require("fast-check");
 
 const unicodeScalar = fc
   .integer({ min: 0, max: 0x10ffff })
@@ -13,7 +11,10 @@ const searchText = fc
   .array(unicodeScalar, { maxLength: 128 })
   .map((codePoints) => String.fromCodePoint(...codePoints));
 
-test("event page URL preserves arbitrary Unicode search text as one query value", () => {
+test("event page URL preserves arbitrary Unicode search text as one query value", async () => {
+  const { pageUrl } = await import(
+    "../../packages/beamtrace_web/src/beamtrace_web/page_loader_ffi.mjs"
+  );
   fc.assert(
     fc.property(
       fc.integer({ min: 0, max: 10_000_000 }),
