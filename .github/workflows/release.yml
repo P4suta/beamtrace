@@ -4,19 +4,36 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release-please tag to recover
+        required: true
+        type: string
+      commit:
+        description: Full immutable commit SHA expected for the tag
+        required: true
+        type: string
 
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
   cancel-in-progress: false
 
 permissions:
   contents: read
+
+env:
+  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  RELEASE_SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.commit || github.sha }}
 
 jobs:
   draft-release:
     name: Require release-please draft
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      # GitHub only exposes draft releases to tokens with push-equivalent access.
+      contents: write
     steps:
       - name: Verify the corresponding prerelease is still a draft
         shell: bash
@@ -24,10 +41,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
+          [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          resolved_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)"
+          if [[ "$resolved_sha" != "$RELEASE_SHA" ]]; then
+            echo "Release tag $RELEASE_TAG resolves to $resolved_sha, expected $RELEASE_SHA." >&2
+            exit 1
+          fi
           for _attempt in {1..12}; do
-            if release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" 2>/dev/null)" && \
+            if release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" 2>/dev/null)" && \
               jq --exit-status \
-                --arg tag "$GITHUB_REF_NAME" \
+                --arg tag "$RELEASE_TAG" \
                 '.tag_name == $tag and .draft == true and .prerelease == true' \
                 <<<"$release"; then
               exit 0
@@ -69,6 +93,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.RELEASE_SHA }}
           persist-credentials: false
       - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
@@ -77,14 +102,14 @@ jobs:
           rebar3-version: '3.27.0'
       - name: Verify release version
         shell: pwsh
-        run: ./scripts/assert-release-version.ps1 -Tag '${{ github.ref_name }}'
+        run: ./scripts/assert-release-version.ps1 -Tag $env:RELEASE_TAG
       - name: Build portable archive and SBOM
         shell: pwsh
         run: ./scripts/package.ps1 -SkipTests
       - name: Verify native artifact identity
         shell: pwsh
         run: |
-          $version = '${{ github.ref_name }}'.Substring(1)
+          $version = $env:RELEASE_TAG.Substring(1)
           $archive = "dist/beamtrace-$version-${{ matrix.platform }}-${{ matrix.architecture }}.zip"
           if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
             throw "Native package was not produced: $archive"
@@ -116,6 +141,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.RELEASE_SHA }}
           persist-credentials: false
       - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
@@ -124,7 +150,7 @@ jobs:
           rebar3-version: '3.27.0'
       - name: Verify release version
         shell: pwsh
-        run: ./scripts/assert-release-version.ps1 -Tag '${{ github.ref_name }}'
+        run: ./scripts/assert-release-version.ps1 -Tag $env:RELEASE_TAG
       - name: Build and inspect Hex tarball
         shell: pwsh
         run: ./scripts/test-hex-package.ps1
@@ -161,10 +187,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.RELEASE_SHA }}
           persist-credentials: false
       - name: Verify release version
         shell: pwsh
-        run: ./scripts/assert-release-version.ps1 -Tag '${{ github.ref_name }}'
+        run: ./scripts/assert-release-version.ps1 -Tag $env:RELEASE_TAG
       - name: Build and smoke-test OCI image
         shell: pwsh
         run: ./scripts/test-oci.ps1 -Build
@@ -172,10 +199,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_TAG#v}"
           mkdir -p dist
           docker build \
-            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.revision=$RELEASE_SHA" \
             --label "org.opencontainers.image.version=$version" \
             --tag "beamtrace-release:$version" \
             --file packaging/Dockerfile .
@@ -210,6 +237,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.RELEASE_SHA }}
           persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -220,7 +248,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/build-distribution-metadata.ps1 `
-            -BaseUrl "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}" `
+            -BaseUrl "https://github.com/${{ github.repository }}/releases/download/$env:RELEASE_TAG" `
             -Homepage "https://github.com/${{ github.repository }}"
       - name: Attest package-manager metadata
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -250,6 +278,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.RELEASE_SHA }}
           persist-credentials: false
       - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
@@ -265,7 +294,7 @@ jobs:
         env:
           HEXPM_API_KEY: ${{ secrets.HEXPM_API_KEY }}
         run: |
-          $version = '${{ github.ref_name }}'.Substring(1)
+          $version = $env:RELEASE_TAG.Substring(1)
           ./scripts/publish-hex.ps1 `
             -Version $version `
             -Tarball "dist/beamtrace_core-$version.tar"
@@ -300,10 +329,10 @@ jobs:
         run: |
           set -euo pipefail
           image_name="$(echo "ghcr.io/$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_TAG#v}"
           local_ref="beamtrace-release:$version"
           version_ref="$image_name:$version"
-          sha_ref="$image_name:sha-$GITHUB_SHA"
+          sha_ref="$image_name:sha-$RELEASE_SHA"
           docker load --input "dist/beamtrace-oci-$version-linux-amd64.tar"
           local_id="$(docker image inspect --format '{{.Id}}' "$local_ref")"
 
@@ -323,7 +352,7 @@ jobs:
             local remote_id revision
             remote_id="$(docker image inspect --format '{{.Id}}' "$ref")"
             revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$ref")"
-            if [[ "$revision" != "$GITHUB_SHA" || "$remote_id" != "$local_id" ]]; then
+            if [[ "$revision" != "$RELEASE_SHA" || "$remote_id" != "$local_id" ]]; then
               echo "Refusing to reuse mismatched immutable image tag: $ref" >&2
               exit 1
             fi
@@ -367,6 +396,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.RELEASE_SHA }}
           persist-credentials: false
       - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
@@ -381,7 +411,7 @@ jobs:
       - name: Verify clean Hex consumer, HexDocs, and pulled OCI digest
         shell: pwsh
         run: |
-          $version = '${{ github.ref_name }}'.Substring(1)
+          $version = $env:RELEASE_TAG.Substring(1)
           ./scripts/verify-published-release.ps1 `
             -Version $version `
             -Image '${{ needs.publish-image.outputs.name }}' `
@@ -415,13 +445,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME")"
+          release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
           release_id="$(jq --exit-status --raw-output 'select(.draft == true and .prerelease == true) | .id' <<<"$release")"
-          [[ "$(find dist -maxdepth 1 -type f -name 'beamtrace-*.zip' | wc -l)" -eq 6 ]]
-          [[ "$(find dist -maxdepth 1 -type f -name 'beamtrace-*.zip.sha256' | wc -l)" -eq 6 ]]
+          [[ "$(find dist -maxdepth 1 -type f -name 'beamtrace-*.zip' | wc -l)" -eq 5 ]]
+          [[ "$(find dist -maxdepth 1 -type f -name 'beamtrace-*.zip.sha256' | wc -l)" -eq 5 ]]
           [[ "$(find dist -maxdepth 1 -type f -name 'beamtrace_core-*.tar' | wc -l)" -eq 1 ]]
-          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          gh release upload "$RELEASE_TAG" dist/* --clobber
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
             -F draft=false \
             -F prerelease=true \
-            -f name="BeamTrace $GITHUB_REF_NAME" >/dev/null
+            -f name="BeamTrace $RELEASE_TAG" >/dev/null
