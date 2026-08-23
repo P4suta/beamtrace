@@ -5,12 +5,23 @@ param(
     [ValidatePattern('^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?$')]
     [string] $Version,
     [Parameter(Mandatory)]
-    [string] $Tarball
+    [string] $Tarball,
+    [string] $RepositoryRoot
 )
 
 $ErrorActionPreference = 'Stop'
-$repoRoot = Split-Path -Parent $PSScriptRoot
-. (Join-Path $PSScriptRoot 'project-version.ps1')
+if ([string]::IsNullOrWhiteSpace($RepositoryRoot)) {
+    $RepositoryRoot = Split-Path -Parent $PSScriptRoot
+}
+$repoRoot = [IO.Path]::GetFullPath($RepositoryRoot)
+if (-not (Test-Path -LiteralPath $repoRoot -PathType Container)) {
+    throw "Release source root is missing: $repoRoot"
+}
+$versionReader = Join-Path $repoRoot 'scripts/project-version.ps1'
+if (-not (Test-Path -LiteralPath $versionReader -PathType Leaf)) {
+    throw "Release source version reader is missing: $versionReader"
+}
+. $versionReader
 $projectVersion = Get-BeamTraceVersion -RepositoryRoot $repoRoot
 if ($Version -ne $projectVersion) {
     throw "Requested Hex version $Version does not match project version $projectVersion."

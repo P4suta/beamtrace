@@ -271,7 +271,11 @@ foreach ($marker in @(
     './scripts/test-oci.ps1 -Build',
     './scripts/build-distribution-metadata.ps1',
     'needs: [package, hex, image, metadata]',
-    './scripts/publish-hex.ps1',
+    'ref: ${{ github.workflow_sha }}',
+    'path: release-source',
+    'path: release-tools',
+    './release-tools/scripts/publish-hex.ps1',
+    '-RepositoryRoot $releaseSource',
     'sha-$RELEASE_SHA',
     'org.opencontainers.image.revision',
     'manifest unknown',
@@ -312,6 +316,16 @@ $releaseCheckoutCount = [regex]::Matches(
 if ($releaseCheckoutCount -ne 6) {
     throw "Every release source checkout must use the verified immutable commit; found $releaseCheckoutCount."
 }
+$releaseToolingCheckoutCount = [regex]::Matches(
+    $releaseWorkflow,
+    [regex]::Escape('ref: ${{ github.workflow_sha }}')
+).Count
+if ($releaseToolingCheckoutCount -ne 1) {
+    throw "The Hex publisher must use exactly one checkout of the audited workflow tooling; found $releaseToolingCheckoutCount."
+}
+if ($releaseWorkflow -notmatch '(?ms)^  publish-hex:.*?ref: \$\{\{ env\.RELEASE_SHA \}\}.*?path: release-source.*?ref: \$\{\{ github\.workflow_sha \}\}.*?path: release-tools.*?\./release-tools/scripts/publish-hex\.ps1.*?-RepositoryRoot \$releaseSource') {
+    throw 'The Hex publisher must keep immutable release source separate from the audited workflow tooling.'
+}
 foreach ($legacyContext in @('$GITHUB_REF_NAME', '$GITHUB_SHA')) {
     if ($releaseWorkflow.Contains($legacyContext)) {
         throw "Release workflow bypasses the verified recovery context: $legacyContext"
@@ -334,6 +348,8 @@ foreach ($marker in @(
     'metadata.config',
     'contents.tar.gz',
     'Get-FileHash',
+    '[string] $RepositoryRoot',
+    "Join-Path `$repoRoot 'scripts/project-version.ps1'",
     "'I am not using semantic versioning' | & gleam publish --yes",
     'already exists',
     'repo.hex.pm/tarballs'
