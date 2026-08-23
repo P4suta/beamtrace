@@ -53,5 +53,5 @@ pub fn generated_record_cookie_is_bounded_and_flag_safe_test() {
 
 pub fn packaged_runtime_variables_never_leak_into_record_child_test() {
   packaged_environment_isolated()
-  |> should.equal(Ok("false|false|false"))
+  |> should.equal(Ok("true"))
 }

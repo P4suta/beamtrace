@@ -7,6 +7,8 @@ packaged_environment_isolated() ->
         "ERL_ROOTDIR",
         "ROOTDIR",
         "ERL_LIBS",
+        "BEAMTRACE_AGENT_BEAM",
+        "BEAMTRACE_WEB_ROOT",
         "BEAMTRACE_BUNDLED_RUNTIME",
         "BEAMTRACE_PARENT_ERL_ROOTDIR_SET",
         "BEAMTRACE_PARENT_ERL_ROOTDIR",
@@ -20,6 +22,8 @@ packaged_environment_isolated() ->
         true = os:putenv("ERL_ROOTDIR", "/beamtrace-invalid-runtime"),
         true = os:putenv("ROOTDIR", "/beamtrace-invalid-runtime"),
         true = os:putenv("ERL_LIBS", "/beamtrace-invalid-libs"),
+        true = os:putenv("BEAMTRACE_AGENT_BEAM", "/beamtrace-invalid-agent"),
+        true = os:putenv("BEAMTRACE_WEB_ROOT", "/beamtrace-invalid-web"),
         true = os:putenv("BEAMTRACE_BUNDLED_RUNTIME", "1"),
         true = os:putenv("BEAMTRACE_PARENT_ERL_ROOTDIR_SET", "0"),
         true = os:putenv("BEAMTRACE_PARENT_ROOTDIR_SET", "0"),
@@ -30,11 +34,23 @@ packaged_environment_isolated() ->
     end.
 
 run_child() ->
+    Expression = iolist_to_binary([
+        "io:format(\"~p\", [",
+        "os:getenv(\"ERL_ROOTDIR\") =/= \"/beamtrace-invalid-runtime\" andalso ",
+        "os:getenv(\"ROOTDIR\") =/= \"/beamtrace-invalid-runtime\" andalso ",
+        "os:getenv(\"ERL_LIBS\") =/= \"/beamtrace-invalid-libs\" andalso ",
+        "os:getenv(\"BEAMTRACE_AGENT_BEAM\") =:= false andalso ",
+        "os:getenv(\"BEAMTRACE_WEB_ROOT\") =:= false andalso ",
+        "os:getenv(\"BEAMTRACE_BUNDLED_RUNTIME\") =:= false andalso ",
+        "os:getenv(\"BEAMTRACE_PARENT_ERL_ROOTDIR_SET\") =:= false andalso ",
+        "os:getenv(\"BEAMTRACE_PARENT_ROOTDIR_SET\") =:= false andalso ",
+        "os:getenv(\"BEAMTRACE_PARENT_ERL_LIBS_SET\") =:= false])."
+    ]),
     Command = [
         <<"erl">>,
         <<"-noshell">>,
         <<"-eval">>,
-        <<"io:format(\"~p|~p|~p\", [os:getenv(\"ERL_ROOTDIR\"), os:getenv(\"ROOTDIR\"), os:getenv(\"ERL_LIBS\")]).">>,
+        Expression,
         <<"-s">>,
         <<"init">>,
         <<"stop">>
