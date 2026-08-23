@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "test:e2e": "playwright test",
-    "test:property": "node --test tests/property/*.test.mjs"
+    "test:property": "node --test tests/property/*.test.js"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.10.2",
