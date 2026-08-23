@@ -5,12 +5,41 @@ on:
   push:
     tags: ['v*']
 
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
 jobs:
+  draft-release:
+    name: Require release-please draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify the corresponding prerelease is still a draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for _attempt in {1..12}; do
+            if release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME" 2>/dev/null)" && \
+              jq --exit-status \
+                --arg tag "$GITHUB_REF_NAME" \
+                '.tag_name == $tag and .draft == true and .prerelease == true' \
+                <<<"$release"; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "The matching release-please draft prerelease does not exist." >&2
+          exit 1
+
   package:
     name: Package / ${{ matrix.platform }} / ${{ matrix.architecture }}
+    needs: draft-release
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -79,6 +108,7 @@ jobs:
 
   hex:
     name: Hex package
+    needs: draft-release
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -122,13 +152,12 @@ jobs:
           if-no-files-found: error
 
   image:
-    name: OCI image
+    name: OCI image archive
+    needs: draft-release
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    environment: release
     permissions:
       contents: read
-      packages: write
       id-token: write
       attestations: write
     steps:
@@ -138,33 +167,42 @@ jobs:
       - name: Verify release version
         shell: pwsh
         run: ./scripts/assert-release-version.ps1 -Tag '${{ github.ref_name }}'
-      - name: Authenticate to GHCR
-        shell: bash
-        env:
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: echo "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-      - name: Build and push OCI image
-        id: image
+      - name: Build and smoke-test OCI image
+        shell: pwsh
+        run: ./scripts/test-oci.ps1 -Build
+      - name: Export the exact OCI image for later publication
         shell: bash
         run: |
           set -euo pipefail
-          image_name="$(echo "ghcr.io/$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
           version="${GITHUB_REF_NAME#v}"
-          docker build --file packaging/Dockerfile --tag "$image_name:$version" .
-          docker push "$image_name:$version"
-          repo_digest="$(docker inspect --format='{{index .RepoDigests 0}}' "$image_name:$version")"
-          echo "name=$image_name" >> "$GITHUB_OUTPUT"
-          echo "digest=${repo_digest#*@}" >> "$GITHUB_OUTPUT"
-      - name: Attest OCI image
+          mkdir -p dist
+          docker build \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --label "org.opencontainers.image.version=$version" \
+            --tag "beamtrace-release:$version" \
+            --file packaging/Dockerfile .
+          archive="dist/beamtrace-oci-$version-linux-amd64.tar"
+          docker save --output "$archive" "beamtrace-release:$version"
+          hash="$(sha256sum "$archive" | cut -d' ' -f1)"
+          printf '%s  %s\n' "$hash" "$(basename "$archive")" > "$archive.sha256"
+      - name: Attest OCI image archive
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
-          subject-name: ${{ steps.image.outputs.name }}
-          subject-digest: ${{ steps.image.outputs.digest }}
-          push-to-registry: true
+          subject-path: |
+            dist/beamtrace-oci-*.tar
+            dist/beamtrace-oci-*.tar.sha256
+      - name: Upload OCI image archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: oci-image
+          path: |
+            dist/beamtrace-oci-*.tar
+            dist/beamtrace-oci-*.tar.sha256
+          if-no-files-found: error
 
   metadata:
     name: Homebrew and Scoop metadata
-    needs: package
+    needs: [draft-release, package]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -183,25 +221,14 @@ jobs:
       - name: Build checksum inventory and package-manager metadata
         shell: pwsh
         run: |
-          $archives = @(Get-ChildItem -LiteralPath dist -Filter 'beamtrace-*.zip' -File)
-          if ($archives.Count -ne 6) { throw "Expected six native archives, found $($archives.Count)." }
-          $checksums = [ordered]@{}
-          foreach ($archive in $archives) {
-            $checksums[$archive.Name] = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive.FullName).Hash.ToLowerInvariant()
-          }
-          $inventory = Join-Path $PWD 'dist/release-checksums.json'
-          $checksums | ConvertTo-Json | Set-Content -LiteralPath $inventory -Encoding utf8NoBOM
-          $version = '${{ github.ref_name }}'.Substring(1)
-          ./scripts/generate-distribution-metadata.ps1 `
-            -Version $version `
-            -BaseUrl "https://github.com/$env:GITHUB_REPOSITORY/releases/download/${{ github.ref_name }}" `
-            -Homepage "https://github.com/$env:GITHUB_REPOSITORY" `
-            -ChecksumsPath $inventory `
-            -OutputDirectory dist
+          ./scripts/build-distribution-metadata.ps1 `
+            -BaseUrl "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}" `
+            -Homepage "https://github.com/${{ github.repository }}"
       - name: Attest package-manager metadata
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
+            dist/release-checksums.json
             dist/beamtrace.rb
             dist/beamtrace.json
       - name: Upload package-manager metadata
@@ -209,13 +236,162 @@ jobs:
         with:
           name: distribution-metadata
           path: |
+            dist/release-checksums.json
             dist/beamtrace.rb
             dist/beamtrace.json
           if-no-files-found: error
 
-  publish:
-    name: Publish GitHub release
+  publish-hex:
+    name: Publish Hex
     needs: [package, hex, image, metadata]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: '29'
+          gleam-version: '1.18.1'
+          rebar3-version: '3.27.0'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hex-package
+          path: dist
+      - name: Publish or verify the immutable Hex version
+        shell: pwsh
+        env:
+          HEXPM_API_KEY: ${{ secrets.HEXPM_API_KEY }}
+        run: |
+          $version = '${{ github.ref_name }}'.Substring(1)
+          ./scripts/publish-hex.ps1 `
+            -Version $version `
+            -Tarball "dist/beamtrace_core-$version.tar"
+
+  publish-image:
+    name: Publish GHCR
+    needs: publish-hex
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      name: ${{ steps.publish.outputs.name }}
+      digest: ${{ steps.publish.outputs.digest }}
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: oci-image
+          path: dist
+      - name: Authenticate to GHCR
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Publish immutable version and commit tags
+        id: publish
+        shell: bash
+        run: |
+          set -euo pipefail
+          image_name="$(echo "ghcr.io/$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')"
+          version="${GITHUB_REF_NAME#v}"
+          local_ref="beamtrace-release:$version"
+          version_ref="$image_name:$version"
+          sha_ref="$image_name:sha-$GITHUB_SHA"
+          docker load --input "dist/beamtrace-oci-$version-linux-amd64.tar"
+          local_id="$(docker image inspect --format '{{.Id}}' "$local_ref")"
+
+          validate_existing() {
+            local ref="$1"
+            local inspect_result normalized
+            if ! inspect_result="$(docker manifest inspect "$ref" 2>&1)"; then
+              normalized="${inspect_result,,}"
+              if [[ "$normalized" == *"manifest unknown"* || "$normalized" == *"no such manifest"* ]]; then
+                return 1
+              fi
+              echo "Could not safely determine whether immutable image tag exists: $ref" >&2
+              echo "$inspect_result" >&2
+              exit 1
+            fi
+            docker pull "$ref"
+            local remote_id revision
+            remote_id="$(docker image inspect --format '{{.Id}}' "$ref")"
+            revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$ref")"
+            if [[ "$revision" != "$GITHUB_SHA" || "$remote_id" != "$local_id" ]]; then
+              echo "Refusing to reuse mismatched immutable image tag: $ref" >&2
+              exit 1
+            fi
+            return 0
+          }
+
+          if ! validate_existing "$version_ref"; then
+            docker tag "$local_ref" "$version_ref"
+            docker push "$version_ref"
+          fi
+          if ! validate_existing "$sha_ref"; then
+            docker tag "$local_ref" "$sha_ref"
+            docker push "$sha_ref"
+          fi
+
+          docker pull "$version_ref"
+          docker pull "$sha_ref"
+          version_digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "$version_ref" | cut -d@ -f2)"
+          sha_digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "$sha_ref" | cut -d@ -f2)"
+          if [[ ! "$version_digest" =~ ^sha256:[0-9a-f]{64}$ || "$version_digest" != "$sha_digest" ]]; then
+            echo 'GHCR version and commit tags do not resolve to one digest.' >&2
+            exit 1
+          fi
+          echo "name=$image_name" >> "$GITHUB_OUTPUT"
+          echo "digest=$version_digest" >> "$GITHUB_OUTPUT"
+      - name: Attest published OCI image
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.publish.outputs.name }}
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          push-to-registry: true
+
+  verify-published:
+    name: Verify published registries
+    needs: publish-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: '29'
+          gleam-version: '1.18.1'
+          rebar3-version: '3.27.0'
+      - name: Authenticate to GHCR for registry smoke tests
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Verify clean Hex consumer, HexDocs, and pulled OCI digest
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.Substring(1)
+          ./scripts/verify-published-release.ps1 `
+            -Version $version `
+            -Image '${{ needs.publish-image.outputs.name }}' `
+            -Digest '${{ needs.publish-image.outputs.digest }}'
+
+  publish-release:
+    name: Publish GitHub prerelease
+    needs: verify-published
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: release
@@ -224,10 +400,30 @@ jobs:
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
+          pattern: package-*
           path: dist
           merge-multiple: true
-      - name: Create release
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hex-package
+          path: dist
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: distribution-metadata
+          path: dist
+      - name: Upload assets to the existing draft and publish it last
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes --title "BeamTrace ${GITHUB_REF_NAME#v}"
+        run: |
+          set -euo pipefail
+          release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME")"
+          release_id="$(jq --exit-status --raw-output 'select(.draft == true and .prerelease == true) | .id' <<<"$release")"
+          [[ "$(find dist -maxdepth 1 -type f -name 'beamtrace-*.zip' | wc -l)" -eq 6 ]]
+          [[ "$(find dist -maxdepth 1 -type f -name 'beamtrace-*.zip.sha256' | wc -l)" -eq 6 ]]
+          [[ "$(find dist -maxdepth 1 -type f -name 'beamtrace_core-*.tar' | wc -l)" -eq 1 ]]
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            -F draft=false \
+            -F prerelease=true \
+            -f name="BeamTrace $GITHUB_REF_NAME" >/dev/null

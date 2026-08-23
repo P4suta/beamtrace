@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace/types
+import beamtrace_runtime/internal/version as runtime_version
 import beamtrace_runtime/local_auth
 import beamtrace_runtime/relay_channel
 import beamtrace_runtime/relay_payload
@@ -682,8 +683,20 @@ fn int_to_string(value: Int) -> String
 @external(erlang, "beamtrace_relay_http_ffi", "post_json")
 fn post_json(url: String, body: String) -> Result(#(Int, String), String)
 
+fn websocket_connect(url: String, hello: String) -> Result(Websocket, String) {
+  websocket_connect_with_user_agent(
+    url,
+    hello,
+    "beamtrace-relay/" <> runtime_version.current,
+  )
+}
+
 @external(erlang, "beamtrace_websocket_client_ffi", "connect")
-fn websocket_connect(url: String, hello: String) -> Result(Websocket, String)
+fn websocket_connect_with_user_agent(
+  url: String,
+  hello: String,
+  user_agent: String,
+) -> Result(Websocket, String)
 
 @external(erlang, "beamtrace_websocket_client_ffi", "send_text")
 fn websocket_send(socket: Websocket, frame: String) -> Result(Nil, String)

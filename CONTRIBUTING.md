@@ -3,6 +3,8 @@
 
 Thank you for helping build BeamTrace. Start with an issue for changes that alter a public contract, trace semantics, privacy behavior, or network protocol.
 
+Pull request titles must use the Conventional Commit shape `type(scope): subject`, for example `fix(runtime): reject expired relay grants`. The repository squash-merges that title so release-please can determine the next version and changelog entry. For a breaking change, keep that title shape and end the pull request description with a Conventional Commit `BREAKING CHANGE: ...` footer.
+
 ## TDD is the development process
 
 1. Add the smallest test that demonstrates the missing behavior or regression.

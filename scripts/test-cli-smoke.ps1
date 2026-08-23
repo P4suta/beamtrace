@@ -4,6 +4,8 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'project-version.ps1')
+$projectVersion = Get-BeamTraceVersion -RepositoryRoot $repoRoot
 & (Join-Path $PSScriptRoot 'ensure-rebar3.ps1')
 $env:PATH = "$PSScriptRoot$([IO.Path]::PathSeparator)$env:PATH"
 $env:REBAR_CACHE_DIR = Join-Path $repoRoot '.cache/rebar3'
@@ -12,7 +14,7 @@ $previousTeam = $env:BEAMTRACE_TEAM
 try {
     $launcher = Join-Path $PSScriptRoot 'beamtrace.ps1'
     $version = (& $launcher version | Out-String)
-    if ($LASTEXITCODE -ne 0 -or $version -notmatch 'beamtrace 0\.1\.0') {
+    if ($LASTEXITCODE -ne 0 -or $version -notmatch ([regex]::Escape("beamtrace $projectVersion"))) {
         throw 'version smoke test failed'
     }
 

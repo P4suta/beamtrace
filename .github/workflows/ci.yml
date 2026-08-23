@@ -16,6 +16,25 @@ permissions:
   contents: read
 
 jobs:
+  pull-request-title:
+    name: Conventional pull request title
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: 'Require type(scope): subject'
+        shell: bash
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then
+            exit 0
+          fi
+          if [[ ! "$PR_TITLE" =~ ^[a-z]+\([a-z0-9][a-z0-9-]*\):\ [^[:space:]].+$ ]]; then
+            echo "Pull request title must use type(scope): subject" >&2
+            exit 1
+          fi
+
   compatibility:
     name: ${{ matrix.os }} / OTP ${{ matrix.otp }}
     runs-on: ${{ matrix.os }}
@@ -142,6 +161,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Validate release-please config against its pinned schema
+        shell: pwsh
+        run: ./scripts/test-release.ps1 -ValidateUpstreamSchema
       - name: Verify repository policy as code
         shell: pwsh
         run: ./scripts/test-repository-governance.ps1
@@ -149,7 +171,7 @@ jobs:
   tdd-gate:
     name: TDD Gate
     if: ${{ always() }}
-    needs: [compatibility, distribution, language-fixtures, browser-e2e, oci, s3-compatible, repository-governance]
+    needs: [pull-request-title, compatibility, distribution, language-fixtures, browser-e2e, oci, s3-compatible, repository-governance]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace/codec
 import beamtrace/diff
+import beamtrace_runtime/internal/version as runtime_version
 import beamtrace_runtime/storage
 import gleam/dynamic/decode
 import gleam/json
@@ -141,7 +142,7 @@ fn capabilities() -> json.Json {
 fn server_info() -> json.Json {
   json.object([
     #("name", json.string("beamtrace")),
-    #("version", json.string("0.1.0")),
+    #("version", json.string(runtime_version.current)),
   ])
 }
 

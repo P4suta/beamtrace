@@ -12,6 +12,7 @@ import beamtrace_runtime/compare_workspace
 import beamtrace_runtime/csrf
 import beamtrace_runtime/enrollment_store
 import beamtrace_runtime/id_token
+import beamtrace_runtime/internal/version as runtime_version
 import beamtrace_runtime/live
 import beamtrace_runtime/local_auth
 import beamtrace_runtime/oidc
@@ -135,7 +136,7 @@ pub type Context {
 }
 
 pub fn test_context() -> Context {
-  Context("0.1.0", Local, None, None, None, None, None, None)
+  Context(runtime_version.current, Local, None, None, None, None, None, None)
 }
 
 pub fn handle(incoming: wisp.Request, context: Context) -> wisp.Response {

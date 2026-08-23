@@ -6,6 +6,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'project-version.ps1')
+$projectVersion = Get-BeamTraceVersion -RepositoryRoot $repoRoot
 $dockerfile = Join-Path $repoRoot 'packaging/Dockerfile'
 if (-not (Test-Path -LiteralPath $dockerfile -PathType Leaf)) {
     throw 'OCI Dockerfile is missing.'
@@ -40,7 +42,7 @@ try {
     & docker build --file $dockerfile --tag $tag $repoRoot
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $version = (& docker run --rm $tag version | Out-String)
-    if ($LASTEXITCODE -ne 0 -or $version -notmatch 'beamtrace 0\.1\.0') {
+    if ($LASTEXITCODE -ne 0 -or $version -notmatch ([regex]::Escape("beamtrace $projectVersion"))) {
         throw 'OCI version smoke test failed.'
     }
     $doctor = (& docker run --rm $tag doctor | Out-String)

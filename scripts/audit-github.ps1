@@ -54,7 +54,7 @@ Assert-Policy ($actions.enabled -and $actions.allowed_actions -eq 'selected') 'G
 Assert-Policy $actions.sha_pinning_required 'GitHub Actions SHA pinning is disabled.'
 $selectedActions = Get-GitHubApi -Endpoint "repos/$Repository/actions/permissions/selected-actions"
 Assert-Policy ($selectedActions.github_owned_allowed -and -not $selectedActions.verified_allowed) 'Selected Action publisher policy drifted.'
-foreach ($pattern in @('erlef/setup-beam@*', 'ossf/scorecard-action@*')) {
+foreach ($pattern in @('erlef/setup-beam@*', 'googleapis/release-please-action@*', 'ossf/scorecard-action@*')) {
     Assert-Policy (@($selectedActions.patterns_allowed) -contains $pattern) "Allowed Action pattern is missing: $pattern"
 }
 $workflowPermissions = Get-GitHubApi -Endpoint "repos/$Repository/actions/permissions/workflow"
@@ -81,7 +81,7 @@ foreach ($rulesetName in @('Protect main', 'Protect release tags')) {
         Assert-Policy (-not $pullRequestRule.parameters.require_last_push_approval) 'Protect main requires a second maintainer after the last push.'
         Assert-Policy $pullRequestRule.parameters.required_review_thread_resolution 'Protect main permits unresolved review threads.'
         $statusRule = $ruleset.rules | Where-Object { $_.type -eq 'required_status_checks' } | Select-Object -First 1
-        foreach ($requiredCheck in @('TDD Gate', 'Dependency review', 'CodeQL / JavaScript')) {
+        foreach ($requiredCheck in @('TDD Gate', 'Release Candidate Gate', 'Dependency review', 'CodeQL / JavaScript')) {
             Assert-Policy (@($statusRule.parameters.required_status_checks.context) -contains $requiredCheck) "Protect main does not require check: $requiredCheck"
         }
         Assert-Policy $statusRule.parameters.strict_required_status_checks_policy 'Protect main does not require current-base checks.'
@@ -98,8 +98,26 @@ $deploymentPolicies = Get-GitHubApi -Endpoint "repos/$Repository/environments/re
 $hasReleaseTagPolicy = @($deploymentPolicies.branch_policies) | Where-Object { $_.name -eq 'v*' -and $_.type -eq 'tag' }
 Assert-Policy ($null -ne $hasReleaseTagPolicy) 'Release environment is not restricted to v* tags.'
 
+$automationEnvironment = Get-GitHubApi -Endpoint "repos/$Repository/environments/release-automation"
+Assert-Policy $automationEnvironment.deployment_branch_policy.custom_branch_policies 'Release automation environment does not use a custom main policy.'
+$automationPolicies = Get-GitHubApi -Endpoint "repos/$Repository/environments/release-automation/deployment-branch-policies"
+$hasMainPolicy = @($automationPolicies.branch_policies) | Where-Object { $_.name -eq 'main' -and $_.type -eq 'branch' }
+Assert-Policy ($null -ne $hasMainPolicy) 'Release automation environment is not restricted to main.'
+
+$automationVariables = Get-GitHubApi -Endpoint "repos/$Repository/environments/release-automation/variables?per_page=100"
+Assert-Policy (@($automationVariables.variables.name) -contains 'RELEASE_PLEASE_APP_CLIENT_ID') 'Release Please App client ID environment variable is missing.'
+$automationSecrets = Get-GitHubApi -Endpoint "repos/$Repository/environments/release-automation/secrets?per_page=100"
+Assert-Policy (@($automationSecrets.secrets.name) -contains 'RELEASE_PLEASE_APP_PRIVATE_KEY') 'Release Please App private-key environment secret is missing.'
+$releaseSecrets = Get-GitHubApi -Endpoint "repos/$Repository/environments/release/secrets?per_page=100"
+Assert-Policy (@($releaseSecrets.secrets.name) -contains 'HEXPM_API_KEY') 'Hex write-only release environment secret is missing.'
+
+$releasePleaseWorkflow = Get-Content -Raw -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) '.github/workflows/release-please.yml')
+foreach ($marker in @('permission-contents: write', 'permission-pull-requests: write', 'permission-issues: write')) {
+    Assert-Policy $releasePleaseWorkflow.Contains($marker) "Release Please App token does not request its reviewed permission: $marker"
+}
+
 $labels = @(Get-GitHubApi -Endpoint "repos/$Repository/labels?per_page=100")
-foreach ($label in @('type: bug', 'type: feature', 'type: security', 'type: dependencies', 'area: core', 'area: runtime', 'area: agent', 'area: web', 'area: tui', 'area: ci', 'priority: critical', 'status: blocked')) {
+foreach ($label in @('type: bug', 'type: feature', 'type: security', 'type: dependencies', 'area: core', 'area: runtime', 'area: agent', 'area: web', 'area: tui', 'area: ci', 'priority: critical', 'status: blocked', 'autorelease: pending', 'autorelease: tagged')) {
     Assert-Policy (@($labels.name) -contains $label) "Repository label is missing: $label"
 }
 
