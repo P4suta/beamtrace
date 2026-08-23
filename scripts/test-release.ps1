@@ -267,6 +267,7 @@ foreach ($marker in @(
     './scripts/assert-release-version.ps1 -Tag',
     './scripts/package.ps1 -SkipTests',
     './scripts/test-hex-package.ps1',
+    'Get-Item -LiteralPath "packages/beamtrace_core/build/beamtrace_core-$version.tar"',
     './scripts/test-oci.ps1 -Build',
     './scripts/build-distribution-metadata.ps1',
     'needs: [package, hex, image, metadata]',
@@ -290,6 +291,9 @@ foreach ($marker in @(
 }
 if ($releaseWorkflow.Contains('releases/tags/')) {
     throw 'The release workflow must list releases because GitHub excludes drafts from the published-release tag endpoint.'
+}
+if ($releaseWorkflow.Contains('Get-Item -LiteralPath packages/beamtrace_core/build/beamtrace_core-*.tar')) {
+    throw 'PowerShell LiteralPath must not be used with a wildcard when locating the Hex tarball.'
 }
 $draftReleaseListCount = [regex]::Matches(
     $releaseWorkflow,
