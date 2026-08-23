@@ -250,6 +250,11 @@ if ($candidate.Contains('runner: windows-11-arm')) {
 $releaseWorkflow = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/workflows/release.yml')
 foreach ($marker in @(
     "tags: ['v*']",
+    'workflow_dispatch:',
+    'RELEASE_TAG:',
+    'RELEASE_SHA:',
+    'resolved_sha=',
+    'ref: ${{ env.RELEASE_SHA }}',
     'runner: ubuntu-24.04-arm',
     'runner: windows-latest',
     'runner: macos-15-intel',
@@ -263,22 +268,43 @@ foreach ($marker in @(
     './scripts/build-distribution-metadata.ps1',
     'needs: [package, hex, image, metadata]',
     './scripts/publish-hex.ps1',
-    'sha-$GITHUB_SHA',
+    'sha-$RELEASE_SHA',
     'org.opencontainers.image.revision',
     'manifest unknown',
     'Could not safely determine whether immutable image tag exists',
     'version_digest',
     './scripts/verify-published-release.ps1',
-    'gh release upload "$GITHUB_REF_NAME" dist/* --clobber',
+    'gh release upload "$RELEASE_TAG" dist/* --clobber',
     '-F draft=false',
     '-F prerelease=true',
-    '-f name="BeamTrace $GITHUB_REF_NAME"',
+    '-f name="BeamTrace $RELEASE_TAG"',
     'id-token: write',
     'attestations: write',
     'packages: write',
     'actions/attest@'
 )) {
     if (-not $releaseWorkflow.Contains($marker)) { throw "Release workflow is missing: $marker" }
+}
+if ($releaseWorkflow -notmatch '(?ms)^  draft-release:.*?^    permissions:\s*\r?\n(?:\s*#.*\r?\n)?      contents: write\s*$') {
+    throw 'The draft release guard needs push-equivalent Contents access to see GitHub draft releases.'
+}
+$releaseCheckoutCount = [regex]::Matches(
+    $releaseWorkflow,
+    [regex]::Escape('ref: ${{ env.RELEASE_SHA }}')
+).Count
+if ($releaseCheckoutCount -ne 6) {
+    throw "Every release source checkout must use the verified immutable commit; found $releaseCheckoutCount."
+}
+foreach ($legacyContext in @('$GITHUB_REF_NAME', '$GITHUB_SHA')) {
+    if ($releaseWorkflow.Contains($legacyContext)) {
+        throw "Release workflow bypasses the verified recovery context: $legacyContext"
+    }
+}
+if (
+    -not $releaseWorkflow.Contains("-name 'beamtrace-*.zip' | wc -l)`" -eq 5") -or
+    -not $releaseWorkflow.Contains("-name 'beamtrace-*.zip.sha256' | wc -l)`" -eq 5")
+) {
+    throw 'GitHub Release publication must require exactly five supported native archives and sidecars.'
 }
 if ($releaseWorkflow.Contains('gh release create') -or $releaseWorkflow.Contains(':latest')) {
     throw 'The tag workflow must use the existing draft and must not publish a mutable latest image.'
