@@ -11,6 +11,13 @@ if (-not (Test-Path -LiteralPath $dockerfile -PathType Leaf)) {
     throw 'OCI Dockerfile is missing.'
 }
 $source = Get-Content -Raw -LiteralPath $dockerfile
+$baseImages = [regex]::Matches($source, '(?m)^FROM\s+([^\s]+)')
+foreach ($baseImage in $baseImages) {
+    $reference = $baseImage.Groups[1].Value
+    if ($reference -notmatch '@sha256:[0-9a-f]{64}$') {
+        throw "OCI base image is not pinned to a SHA-256 digest: $reference"
+    }
+}
 foreach ($marker in @(
     'ghcr.io/gleam-lang/gleam:v1.18.1-erlang-alpine',
     'RUN apk add --no-cache build-base git',

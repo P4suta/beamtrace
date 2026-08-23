@@ -17,6 +17,7 @@ Release tags matching `v*` cannot be rewritten or deleted without an explicit ad
 - Third-party Actions are allow-listed and every Action reference is pinned to a full commit SHA.
 - Dependabot groups weekly npm and GitHub Actions updates.
 - Pull requests receive dependency review; JavaScript boundaries receive CodeQL analysis; OpenSSF Scorecard runs weekly.
+- Fast-check exercises arbitrary Unicode and control-character input at the Web API query boundary as part of the Chromium acceptance gate.
 - Dependency alerts, automated security updates, private vulnerability reporting, secret scanning, and push protection are enabled remotely.
 - Repository Actions cannot approve pull requests.
 

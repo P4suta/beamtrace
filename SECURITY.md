@@ -3,7 +3,9 @@
 
 BeamTrace handles production metadata and distribution credentials. Please do not open a public issue for a suspected vulnerability.
 
-Report vulnerabilities privately to the repository's GitHub Security Advisory channel. Include affected versions, reproduction steps, impact, and any suggested mitigation. Do not include real cookies, tokens, raw captures, or customer data.
+Report vulnerabilities privately through [a new GitHub Security Advisory](https://github.com/P4suta/beamtrace/security/advisories/new). Include affected versions, reproduction steps, impact, and any suggested mitigation. Do not include real cookies, tokens, raw captures, or customer data.
+
+The maintainer aims to acknowledge a report within 7 days, provide a status update at least every 14 days, and coordinate a fix and disclosure within 90 days. A severe active exploit or a reporter-requested delay may require a different timeline; any change will be communicated in the private advisory.
 
 Supported security updates currently target the latest `0.x` release on OTP 27–29. Alpha releases may contain breaking fixes.
 
