@@ -58,6 +58,9 @@ $ci = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/workflows/ci.y
 if (-not $ci.Contains('./scripts/test-oci.ps1 -Build')) {
     throw 'CI does not exercise the real OCI image boundary.'
 }
+if (-not $ci.Contains('./scripts/test-s3-dogfood.ps1')) {
+    throw 'CI does not exercise the real S3-compatible TLS boundary.'
+}
 
 Write-Host 'Release acceptance passed.'
 exit 0

@@ -68,6 +68,22 @@ pub type RelayIdentity {
   )
 }
 
+pub type RawCaptureGrant {
+  RawCaptureGrant(
+    token_hash: String,
+    relay_id: String,
+    actor: String,
+    created_at_ms: Int,
+    expires_at_ms: Int,
+    max_events: Int,
+    used_events: Int,
+    max_bytes: Int,
+    used_bytes: Int,
+    policy_hash: String,
+    status: String,
+  )
+}
+
 const schema = "
 PRAGMA foreign_keys = ON;
 PRAGMA busy_timeout = 5000;
@@ -131,6 +147,25 @@ CREATE TABLE IF NOT EXISTS relay_identities (
   public_key BLOB NOT NULL CHECK (length(public_key) = 32),
   enrolled_at_ms INTEGER NOT NULL CHECK (enrolled_at_ms >= 0)
 );
+CREATE TABLE IF NOT EXISTS raw_capture_grants (
+  token_hash TEXT PRIMARY KEY NOT NULL,
+  relay_id TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  created_at_ms INTEGER NOT NULL CHECK (created_at_ms >= 0),
+  expires_at_ms INTEGER NOT NULL CHECK (expires_at_ms > created_at_ms),
+  max_events INTEGER NOT NULL CHECK (max_events > 0),
+  used_events INTEGER NOT NULL DEFAULT 0 CHECK (
+    used_events >= 0 AND used_events <= max_events
+  ),
+  max_bytes INTEGER NOT NULL CHECK (max_bytes > 0),
+  used_bytes INTEGER NOT NULL DEFAULT 0 CHECK (
+    used_bytes >= 0 AND used_bytes <= max_bytes
+  ),
+  policy_hash TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('active', 'exhausted', 'revoked'))
+);
+CREATE INDEX IF NOT EXISTS raw_capture_grants_relay
+  ON raw_capture_grants(relay_id, expires_at_ms);
 "
 
 pub fn open(path: String) -> Result(Store, String) {
@@ -170,7 +205,7 @@ fn migrate(connection: sqlight.Connection) -> Result(Nil, String) {
         sqlight.exec(
           "ALTER TABLE relay_frames ADD COLUMN event_count INTEGER NOT NULL
            DEFAULT 1 CHECK (event_count >= 0);
-           PRAGMA user_version = 5;",
+           PRAGMA user_version = 6;",
           connection,
         )
       {
@@ -178,7 +213,7 @@ fn migrate(connection: sqlight.Connection) -> Result(Nil, String) {
         Error(error) -> Error(sql_error(error))
       }
     Ok([1]) ->
-      sqlight.exec("PRAGMA user_version = 5;", connection) |> map_sql_error
+      sqlight.exec("PRAGMA user_version = 6;", connection) |> map_sql_error
     Ok(_) -> Error("invalid_relay_schema")
   }
 }
@@ -669,6 +704,142 @@ pub fn relay_identities(store: Store) -> Result(List(RelayIdentity), String) {
   |> map_sql_error
 }
 
+pub fn relay_identity_exists(
+  store: Store,
+  relay_id: String,
+) -> Result(Bool, String) {
+  case relay_identity(store, relay_id) {
+    Ok(Some(_)) -> Ok(True)
+    Ok(None) -> Ok(False)
+    Error(error) -> Error(error)
+  }
+}
+
+pub fn put_raw_capture_grant(
+  store: Store,
+  grant: RawCaptureGrant,
+) -> Result(Nil, String) {
+  case valid_raw_capture_grant(grant) {
+    False -> Error("invalid_raw_capture_grant")
+    True -> {
+      let Store(connection) = store
+      execute(
+        connection,
+        "INSERT INTO raw_capture_grants (
+          token_hash, relay_id, actor, created_at_ms, expires_at_ms,
+          max_events, used_events, max_bytes, used_bytes, policy_hash, status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(token_hash) DO NOTHING;",
+        [
+          sqlight.text(grant.token_hash),
+          sqlight.text(grant.relay_id),
+          sqlight.text(grant.actor),
+          sqlight.int(grant.created_at_ms),
+          sqlight.int(grant.expires_at_ms),
+          sqlight.int(grant.max_events),
+          sqlight.int(grant.used_events),
+          sqlight.int(grant.max_bytes),
+          sqlight.int(grant.used_bytes),
+          sqlight.text(grant.policy_hash),
+          sqlight.text(grant.status),
+        ],
+      )
+    }
+  }
+}
+
+pub fn raw_capture_grant(
+  store: Store,
+  token_hash: String,
+) -> Result(Option(RawCaptureGrant), String) {
+  case valid_sha256(token_hash) {
+    False -> Error("invalid_raw_capture_grant_hash")
+    True -> {
+      let Store(connection) = store
+      case
+        sqlight.query(
+          "SELECT token_hash, relay_id, actor, created_at_ms, expires_at_ms,
+                  max_events, used_events, max_bytes, used_bytes,
+                  policy_hash, status
+           FROM raw_capture_grants WHERE token_hash = ?;",
+          on: connection,
+          with: [sqlight.text(token_hash)],
+          expecting: raw_capture_grant_decoder(),
+        )
+      {
+        Ok([]) -> Ok(None)
+        Ok([grant]) -> Ok(Some(grant))
+        Ok(_) -> Error("duplicate_raw_capture_grant")
+        Error(error) -> Error(sql_error(error))
+      }
+    }
+  }
+}
+
+/// Atomically reserve a raw grant's remaining event and byte budget. The
+/// generic denial deliberately does not reveal whether a token exists,
+/// expired, targets another relay, or exhausted its budget.
+pub fn reserve_raw_capture_grant(
+  store: Store,
+  token_hash: String,
+  relay_id: String,
+  policy_hash: String,
+  events events: Int,
+  bytes bytes: Int,
+  now_ms now_ms: Int,
+) -> Result(Nil, String) {
+  case
+    valid_sha256(token_hash),
+    valid_relay_id(relay_id),
+    valid_sha256(policy_hash),
+    events > 0,
+    bytes > 0,
+    now_ms >= 0
+  {
+    True, True, True, True, True, True -> {
+      let Store(connection) = store
+      case
+        sqlight.query(
+          "UPDATE raw_capture_grants
+           SET used_events = used_events + ?,
+               used_bytes = used_bytes + ?,
+               status = CASE
+                 WHEN used_events + ? >= max_events
+                   OR used_bytes + ? >= max_bytes
+                 THEN 'exhausted'
+                 ELSE status
+               END
+           WHERE token_hash = ? AND relay_id = ? AND policy_hash = ?
+             AND status = 'active' AND expires_at_ms > ?
+             AND used_events + ? <= max_events
+             AND used_bytes + ? <= max_bytes
+           RETURNING token_hash;",
+          on: connection,
+          with: [
+            sqlight.int(events),
+            sqlight.int(bytes),
+            sqlight.int(events),
+            sqlight.int(bytes),
+            sqlight.text(token_hash),
+            sqlight.text(relay_id),
+            sqlight.text(policy_hash),
+            sqlight.int(now_ms),
+            sqlight.int(events),
+            sqlight.int(bytes),
+          ],
+          expecting: hash_decoder(),
+        )
+      {
+        Ok([_]) -> Ok(Nil)
+        Ok([]) -> Error("raw_capture_grant_denied")
+        Ok(_) -> Error("raw_capture_grant_denied")
+        Error(error) -> Error(sql_error(error))
+      }
+    }
+    _, _, _, _, _, _ -> Error("raw_capture_grant_denied")
+  }
+}
+
 fn relay_identity(
   store: Store,
   relay_id: String,
@@ -844,6 +1015,38 @@ fn relay_identity_decoder() -> decode.Decoder(RelayIdentity) {
   decode.success(RelayIdentity(id, algorithm, public_key, enrolled_at_ms))
 }
 
+fn raw_capture_grant_decoder() -> decode.Decoder(RawCaptureGrant) {
+  use token_hash <- decode.field(0, decode.string)
+  use relay_id <- decode.field(1, decode.string)
+  use actor <- decode.field(2, decode.string)
+  use created_at_ms <- decode.field(3, decode.int)
+  use expires_at_ms <- decode.field(4, decode.int)
+  use max_events <- decode.field(5, decode.int)
+  use used_events <- decode.field(6, decode.int)
+  use max_bytes <- decode.field(7, decode.int)
+  use used_bytes <- decode.field(8, decode.int)
+  use policy_hash <- decode.field(9, decode.string)
+  use status <- decode.field(10, decode.string)
+  decode.success(RawCaptureGrant(
+    token_hash,
+    relay_id,
+    actor,
+    created_at_ms,
+    expires_at_ms,
+    max_events,
+    used_events,
+    max_bytes,
+    used_bytes,
+    policy_hash,
+    status,
+  ))
+}
+
+fn hash_decoder() -> decode.Decoder(String) {
+  use hash <- decode.field(0, decode.string)
+  decode.success(hash)
+}
+
 fn valid_session(metadata: SessionMetadata) -> Bool {
   valid_text(metadata.id, 256)
   && valid_text(metadata.project, 256)
@@ -895,6 +1098,22 @@ fn valid_relay_identity(identity: RelayIdentity) -> Bool {
   && identity.algorithm == "Ed25519"
   && bit_array.byte_size(identity.public_key) == 32
   && identity.enrolled_at_ms >= 0
+}
+
+fn valid_raw_capture_grant(grant: RawCaptureGrant) -> Bool {
+  valid_sha256(grant.token_hash)
+  && valid_relay_id(grant.relay_id)
+  && valid_text(grant.actor, 1024)
+  && grant.created_at_ms >= 0
+  && grant.expires_at_ms > grant.created_at_ms
+  && grant.max_events > 0
+  && grant.used_events >= 0
+  && grant.used_events <= grant.max_events
+  && grant.max_bytes > 0
+  && grant.used_bytes >= 0
+  && grant.used_bytes <= grant.max_bytes
+  && valid_sha256(grant.policy_hash)
+  && list.contains(["active", "exhausted", "revoked"], grant.status)
 }
 
 fn audit_head(entries: List(audit.AuditEntry)) -> String {

@@ -14,6 +14,7 @@ $steps = @(
     'test-runtime.ps1',
     'test-mcp.ps1',
     'test-agent.ps1',
+    'test-record-dogfood.ps1',
     'test-web.ps1',
     'test-tui.ps1',
     'test-tui-pty.ps1',

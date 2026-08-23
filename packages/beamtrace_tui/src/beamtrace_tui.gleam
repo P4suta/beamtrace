@@ -2,14 +2,14 @@
 import beamtrace/types
 import beamtrace_tui/adapter
 import beamtrace_tui/model
+import beamtrace_tui/session
 import beamtrace_tui/view
 import etui/app
-import etui/backend
 import etui/backend/default
 import gleam/option.{None, Some}
 
 pub fn main() {
-  run_archive([], [])
+  run_model(session.unavailable(), model.init([]))
 }
 
 pub fn run_archive(events: List(types.TraceEvent), nodes: List(String)) {
@@ -17,38 +17,37 @@ pub fn run_archive(events: List(types.TraceEvent), nodes: List(String)) {
     [first, ..] -> Some(first)
     [] -> None
   }
-  run_model(model.open_archive(adapter.from_trace(events), node))
+  run_model(
+    session.unavailable(),
+    model.open_archive(adapter.from_trace(events), node),
+  )
 }
 
 pub fn run_attached(events: List(types.TraceEvent), node: String) {
-  let state =
-    events
-    |> adapter.from_trace
-    |> model.init
-    |> model.update(model.AttachSubmitted(node))
-  run_model(state)
+  run_attached_with_driver(events, node, session.unavailable())
+}
+
+pub fn run_attached_with_driver(
+  events: List(types.TraceEvent),
+  node: String,
+  driver: session.Driver,
+) {
+  run_model(driver, model.attached(adapter.from_trace(events), node))
 }
 
 pub fn run_remote(server_url: String) {
-  run_model(model.remote([], server_url))
+  run_model(session.unavailable(), model.remote([], server_url))
 }
 
-fn run_model(initial: model.Model) {
+fn run_model(driver: session.Driver, initial: model.Model) {
   let _ =
     app.run_buffered(
       default.new(),
       initial,
       view.render,
-      on_input,
+      fn(event, state) { session.handle(driver, event, state) },
       fn(state) { state.quit },
       16,
     )
   Nil
-}
-
-fn on_input(event: backend.InputEvent, state: model.Model) -> model.Model {
-  case event {
-    backend.KeyPress(key) -> model.handle_key(state, key)
-    _ -> state
-  }
 }

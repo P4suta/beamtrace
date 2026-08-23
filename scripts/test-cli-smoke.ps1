@@ -17,7 +17,7 @@ try {
     }
 
     $help = (& $launcher help | Out-String)
-    if ($LASTEXITCODE -ne 0 -or $help -notmatch 'beamtrace capture') {
+    if ($LASTEXITCODE -ne 0 -or $help -notmatch 'beamtrace capture' -or $help -notmatch '--raw-grant-file PATH') {
         throw 'help smoke test failed'
     }
 

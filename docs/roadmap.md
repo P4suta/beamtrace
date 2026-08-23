@@ -15,18 +15,17 @@
 - OIDC discovery/callback verification, CSRF, RBAC, and team HTTP middleware
 - SQLite WAL metadata/index schema, filesystem blobs, event-aware quotas, startup retention, and audit-chain contracts
 - persistent signed outbound relay WebSocket, one-time Ed25519 enrollment, credit-based batches, and canonical metadata privacy validation
+- relay producer capture from attached target nodes, including bounded audited raw grants
+- shared live-session fan-out and full multi-trace visual Compare workspace
+- HTTPS S3-compatible SigV4 blobs with conditional writes, verified reads, retention, and real MinIO TLS acceptance
 - indexed search over unloaded segments and PID/clock-independent multi-run p50/p95/occurrence statistics
 - real Chromium acceptance over one million logical events, keyboard/axe checks, PTY harness, and package smoke tests
-- native archive packaging with SQLite NIF, SPDX SBOM/checksums, OCI image, Hex tarball, Homebrew/Scoop metadata, and GitHub release provenance
+- self-contained native archive packaging with bundled ERTS and SQLite NIF, SPDX SBOM/checksums, OCI image, Hex tarball, Homebrew/Scoop metadata, and GitHub release provenance
 
-## Remaining integration work
+## Post-alpha release operations
 
-- relay CLI producer hookup from an attached target into the validated event-batch API
-- S3-compatible blob adapter
-- permissioned and audited raw team capture; the current relay boundary rejects raw batches
-- shared live-session fan-out and a full multi-trace visual Compare workspace
-- bundled ERTS archives that do not require host Erlang/OTP
-- source-repository-specific Homebrew tap/Scoop bucket publication and optional Hex registry publication
-- native acceptance runs on all six release architectures; the workflow is defined, but hosted CI results are required before the first release
+- publish source-repository-specific Homebrew tap and Scoop bucket metadata when those repositories exist
+- opt in to Hex registry publication for `beamtrace_core` after reserving release credentials
+- run the protected tag workflow and review all six native archive attestations before publishing `v0.1.0`
 
-Features stay listed here until an acceptance test exercises the real boundary. A type or pure policy module alone does not mark an integration complete.
+Runtime features stay listed as implemented only after an acceptance test exercises the real boundary. A type or pure policy module alone does not mark an integration complete.

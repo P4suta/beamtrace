@@ -186,6 +186,64 @@ pub fn sqlite_store_persists_relay_public_keys_without_private_material_test() {
   team_store.close(reopened) |> should.equal(Ok(Nil))
 }
 
+pub fn raw_capture_grants_are_persistent_and_reserve_budget_atomically_test() {
+  let path = fresh_store_path()
+  let grant =
+    team_store.RawCaptureGrant(
+      token_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      relay_id: "relay-11223344556677889900aabb",
+      actor: "investigator-raw",
+      created_at_ms: 10_000,
+      expires_at_ms: 20_000,
+      max_events: 3,
+      used_events: 0,
+      max_bytes: 1000,
+      used_bytes: 0,
+      policy_hash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      status: "active",
+    )
+  let assert Ok(store) = team_store.open(path)
+  team_store.put_raw_capture_grant(store, grant) |> should.equal(Ok(Nil))
+  team_store.reserve_raw_capture_grant(
+    store,
+    grant.token_hash,
+    grant.relay_id,
+    grant.policy_hash,
+    events: 2,
+    bytes: 400,
+    now_ms: 15_000,
+  )
+  |> should.equal(Ok(Nil))
+  team_store.close(store) |> should.equal(Ok(Nil))
+
+  let assert Ok(reopened) = team_store.open(path)
+  let assert Ok(Some(saved)) =
+    team_store.raw_capture_grant(reopened, grant.token_hash)
+  saved.used_events |> should.equal(2)
+  saved.used_bytes |> should.equal(400)
+  team_store.reserve_raw_capture_grant(
+    reopened,
+    grant.token_hash,
+    grant.relay_id,
+    grant.policy_hash,
+    events: 2,
+    bytes: 1,
+    now_ms: 15_001,
+  )
+  |> should.equal(Error("raw_capture_grant_denied"))
+  team_store.reserve_raw_capture_grant(
+    reopened,
+    grant.token_hash,
+    grant.relay_id,
+    grant.policy_hash,
+    events: 1,
+    bytes: 1,
+    now_ms: 20_001,
+  )
+  |> should.equal(Error("raw_capture_grant_denied"))
+  team_store.close(reopened) |> should.equal(Ok(Nil))
+}
+
 @external(erlang, "beamtrace_team_store_migration_test_ffi", "legacy_relay_store")
 fn legacy_relay_store() -> String
 

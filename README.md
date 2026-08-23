@@ -8,7 +8,7 @@ BeamTrace is an open-source causal workbench for Gleam, Elixir, and Erlang syste
 
 The command is `beamtrace`, and its portable trace archive uses the `.beamtrace` extension.
 
-The project is alpha software. Exact single-node and distributed capture, metadata-safe trace storage, offline and multi-run compare, bounded live sampling, indexed search, the Web workspace, and the TUI client are implemented. Team mode includes OIDC discovery and callback verification, RBAC/CSRF enforcement, SQLite WAL metadata, durable annotations and hash-chained audit history, filesystem blob storage, one-time Ed25519 enrollment, and a signed outbound relay WebSocket with credit flow and durable-ingest acknowledgement.
+The project is alpha software. Exact single-node and distributed capture, metadata-safe trace storage, offline and multi-run compare, bounded live sampling, indexed search, the Web workspace, and the TUI client are implemented. Team mode includes OIDC discovery and callback verification, RBAC/CSRF enforcement, SQLite WAL metadata, durable annotations and hash-chained audit history, filesystem or S3-compatible blob storage, one-time Ed25519 enrollment, a signed outbound relay WebSocket with credit flow, and separately authorized bounded raw capture.
 
 ## Why BeamTrace
 
@@ -21,7 +21,7 @@ BeamTrace does not expose an RPC shell, process killing, state mutation, or an E
 
 ## Quick start
 
-Prerequisites: Gleam 1.18.x and Erlang/OTP 27, 28, or 29.
+Building from source requires Gleam 1.18.x and Erlang/OTP 27, 28, or 29. Native release archives include ERTS and do not require a host Erlang installation.
 
 ```powershell
 # Run the complete local TDD gate
@@ -58,12 +58,14 @@ The hub never receives a distribution cookie in team mode. A relay joins the tar
 
 The Admin-only `/api/v1/audit` endpoint exposes the verified audit chain with bounded pagination (at most 200 entries per request). Viewer and unauthenticated requests are rejected, and each page includes the current chain head for integrity checks.
 
-## Current alpha boundaries
+See [team mode](docs/team-mode.md) for OIDC, relay, raw-capture, and S3 configuration.
 
-- The standalone relay can enroll, authenticate, reconnect, heartbeat, and transfer validated producer batches. The relay CLI producer hookup to a target capture session is not yet wired, so target capture still starts through local `attach`/`capture` commands.
-- Raw team relay capture is intentionally rejected until its additional permission, audit, and bounded-redaction path is complete. Metadata batches are decoded, privacy-validated, and canonically re-encoded before persistence.
-- Team blobs use the filesystem backend. An S3-compatible backend remains future work.
-- Portable archives currently require Erlang/OTP 27–29 on the host. The OCI image contains Erlang and runs as a non-root user; bundled ERTS archives are still pending.
+## Operational boundaries
+
+- Metadata capture remains the default. Raw relay capture requires both Investigator and Raw Capture roles, a short-lived one-time grant, explicit redaction keys, and strict duration/event/byte/depth/binary budgets; every authorization outcome is audited.
+- The S3-compatible adapter uses HTTPS path-style requests and SigV4 credentials from process environment only. It intentionally does not accept credentials in BeamTrace configuration or implement a general cloud credential-provider chain.
+- Causal order crosses nodes through sequence serials. Clock offsets retain uncertainty and are never presented as a perfectly synchronized global clock.
+- Package-manager registry publication and the first signed release remain release operations, not runtime implementation gaps.
 
 ## CLI
 
@@ -75,7 +77,8 @@ beamtrace open <file.beamtrace> [--web|--tui]
 beamtrace compare <left.beamtrace> <right.beamtrace>
 beamtrace export <file.beamtrace> --format html|jsonl|mermaid|otlp
 beamtrace serve
-beamtrace relay <https-hub-url> --enroll <one-time-token>
+beamtrace relay <https-hub-url> --enroll <one-time-token> [--node NODE --trigger MFA]
+                [--cookie-file PATH] [--raw-grant-file PATH]
 beamtrace tui [--server <url>]
 beamtrace doctor
 beamtrace mcp
@@ -88,6 +91,7 @@ Exit codes are `0` success, `1` comparison/diagnostic policy failure, `2` usage/
 - OTP isolated trace sessions avoid changing another tracer's flags.
 - Exact capture refuses to replace an occupied system tracer.
 - Metadata mode exports term tags, shapes, sizes, and salted fingerprints—not scalar or binary values.
+- Raw grants are token-hashed at rest, relay-bound, atomically budgeted, and removed from canonical stored payloads.
 - Exact capture truncates on backpressure; Live drops old samples only with an explicit `Gap`.
 - Trace archives reject unsafe paths, duplicate entries, suspicious compression ratios, oversized entries, and checksum mismatches before import.
 - Local Web mode binds loopback and exchanges a one-time URL for an HttpOnly, SameSite cookie.
@@ -103,11 +107,11 @@ Every change follows Red → Green → Refactor. The merge gate is:
 ./scripts/test-all.ps1
 ```
 
-CI runs OTP 27–29 on Windows, Linux, and macOS, plus shortname, longname, and TLS distribution suites. See [development.md](docs/development.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [repository governance](docs/github-governance.md).
+CI runs OTP 27–29 on Windows, Linux, and macOS, plus shortname, longname, TLS distribution, real S3-compatible TLS, Chromium, PTY, package, and OCI suites. See [development.md](docs/development.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [repository governance](docs/github-governance.md).
 
 Questions belong in [GitHub Discussions](https://github.com/P4suta/beamtrace/discussions/categories/q-a), confirmed defects use the structured issue forms, and suspected vulnerabilities use a private security advisory. See [SUPPORT.md](SUPPORT.md), [SECURITY.md](SECURITY.md), and [GOVERNANCE.md](GOVERNANCE.md).
 
-Tagged releases build six native OS/architecture archives, a Hex tarball for `beamtrace_core`, Homebrew and Scoop metadata, and a GHCR OCI image. Archives contain checksums and SPDX SBOM data; GitHub OIDC artifact attestations record build provenance.
+Tagged releases build six self-contained native OS/architecture archives, a Hex tarball for `beamtrace_core`, Homebrew and Scoop metadata, and a GHCR OCI image. Archives contain ERTS, checksums, and SPDX SBOM data; GitHub OIDC artifact attestations record build provenance.
 
 ## License
 

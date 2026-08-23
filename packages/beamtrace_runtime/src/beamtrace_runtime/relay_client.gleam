@@ -6,6 +6,7 @@ import beamtrace_runtime/relay_payload
 import beamtrace_runtime/relay_wire
 import gleam/bit_array
 import gleam/dynamic/decode
+import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
@@ -34,6 +35,11 @@ pub type ChannelState {
   AwaitingCredit(sequence: Int)
   Active(sequence: Int, credits: Int, max_batch_events: Int)
   Stopped(reason: String)
+}
+
+type BatchEncoding {
+  MetadataEncoding
+  RawEncoding(grant: String, policy: types.RawPolicy)
 }
 
 type CreditControl {
@@ -115,6 +121,175 @@ pub fn run_channel(
       websocket_close(socket)
       outcome
     }
+  }
+}
+
+/// Transfer a completed bounded target capture over the authenticated
+/// outbound-only channel. One batch is kept in flight at a time and the next
+/// batch is not sent until the hub replenishes credit after durable ingest.
+pub fn run_channel_with_events(
+  receipt: EnrollmentReceipt,
+  identity: relay_channel.Identity,
+  mode: relay_channel.Mode,
+  events: List(types.TraceEvent),
+) -> Result(Nil, String) {
+  let hello =
+    relay_wire.prepare_hello(
+      identity,
+      receipt.relay_id,
+      local_auth.now_ms(),
+      websocket_nonce(),
+    )
+    |> relay_wire.encode_hello
+  case websocket_connect(receipt.channel_url, hello) {
+    Error(reason) -> Error(reason)
+    Ok(socket) -> {
+      let outcome = case await_initial_credit(socket) {
+        Error(reason) -> Error(reason)
+        Ok(state) ->
+          produce_events(
+            socket,
+            state,
+            identity,
+            mode,
+            events,
+            MetadataEncoding,
+          )
+      }
+      websocket_close(socket)
+      outcome
+    }
+  }
+}
+
+pub fn run_channel_with_raw_events(
+  receipt: EnrollmentReceipt,
+  identity: relay_channel.Identity,
+  mode: relay_channel.Mode,
+  grant: String,
+  policy: types.RawPolicy,
+  events: List(types.TraceEvent),
+) -> Result(Nil, String) {
+  let hello =
+    relay_wire.prepare_hello(
+      identity,
+      receipt.relay_id,
+      local_auth.now_ms(),
+      websocket_nonce(),
+    )
+    |> relay_wire.encode_hello
+  case websocket_connect(receipt.channel_url, hello) {
+    Error(reason) -> Error(reason)
+    Ok(socket) -> {
+      let outcome = case await_initial_credit(socket) {
+        Error(reason) -> Error(reason)
+        Ok(state) ->
+          produce_events(
+            socket,
+            state,
+            identity,
+            mode,
+            events,
+            RawEncoding(grant, policy),
+          )
+      }
+      websocket_close(socket)
+      outcome
+    }
+  }
+}
+
+fn await_initial_credit(socket: Websocket) -> Result(ChannelState, String) {
+  case websocket_receive(socket, 10_000) {
+    Error("timeout") -> Error("credit_timeout")
+    Error(reason) -> Error(reason)
+    Ok(frame) ->
+      case receive_control(initial_channel_state(), frame) {
+        Error(reason) -> Error(reason)
+        Ok(Stopped(reason)) -> Error("hub_stopped:" <> reason)
+        Ok(AwaitingCredit(_)) -> await_initial_credit(socket)
+        Ok(active) -> Ok(active)
+      }
+  }
+}
+
+fn produce_events(
+  socket: Websocket,
+  state: ChannelState,
+  identity: relay_channel.Identity,
+  mode: relay_channel.Mode,
+  events: List(types.TraceEvent),
+  encoding: BatchEncoding,
+) -> Result(Nil, String) {
+  case events, state {
+    [], _ -> Ok(Nil)
+    _, Stopped(reason) -> Error("hub_stopped:" <> reason)
+    _, AwaitingCredit(_) -> Error("awaiting_credit")
+    _, Active(_, credits, _) if credits <= 0 ->
+      case await_credit(socket, state, identity) {
+        Error(reason) -> Error(reason)
+        Ok(next) ->
+          produce_events(socket, next, identity, mode, events, encoding)
+      }
+    _, Active(_, _, _) -> {
+      case next_encoded_event_prefix(state, identity, mode, events, encoding) {
+        Error(reason) -> Error(reason)
+        Ok(#(frame, sent_state, remaining)) ->
+          case websocket_send(socket, frame) {
+            Error(reason) -> Error(reason)
+            Ok(Nil) ->
+              case await_credit(socket, sent_state, identity) {
+                Error(reason) -> Error(reason)
+                Ok(acknowledged) ->
+                  produce_events(
+                    socket,
+                    acknowledged,
+                    identity,
+                    mode,
+                    remaining,
+                    encoding,
+                  )
+              }
+          }
+      }
+    }
+  }
+}
+
+fn await_credit(
+  socket: Websocket,
+  state: ChannelState,
+  identity: relay_channel.Identity,
+) -> Result(ChannelState, String) {
+  let before = channel_credits(state)
+  case websocket_receive(socket, 10_000) {
+    Error("timeout") ->
+      case next_heartbeat(state, identity) {
+        Error(reason) -> Error(reason)
+        Ok(#(frame, heartbeat_state)) ->
+          case websocket_send(socket, frame) {
+            Error(reason) -> Error(reason)
+            Ok(Nil) -> await_credit(socket, heartbeat_state, identity)
+          }
+      }
+    Error(reason) -> Error(reason)
+    Ok(frame) ->
+      case receive_control(state, frame) {
+        Error(reason) -> Error(reason)
+        Ok(Stopped(reason)) -> Error("hub_stopped:" <> reason)
+        Ok(next) ->
+          case channel_credits(next) > before {
+            True -> Ok(next)
+            False -> await_credit(socket, next, identity)
+          }
+      }
+  }
+}
+
+fn channel_credits(state: ChannelState) -> Int {
+  case state {
+    Active(_, credits, _) -> credits
+    AwaitingCredit(_) | Stopped(_) -> 0
   }
 }
 
@@ -230,6 +405,103 @@ pub fn next_event_batch(
   mode: relay_channel.Mode,
   events: List(types.TraceEvent),
 ) -> Result(#(String, ChannelState), String) {
+  next_encoded_event_batch(state, identity, mode, events, MetadataEncoding)
+}
+
+pub fn next_raw_event_batch(
+  state: ChannelState,
+  identity: relay_channel.Identity,
+  mode: relay_channel.Mode,
+  grant: String,
+  policy: types.RawPolicy,
+  events: List(types.TraceEvent),
+) -> Result(#(String, ChannelState), String) {
+  next_encoded_event_batch(
+    state,
+    identity,
+    mode,
+    events,
+    RawEncoding(grant, policy),
+  )
+}
+
+/// Encode the largest bounded prefix that fits one signed transport frame.
+/// Remaining events are returned unchanged for the next credit cycle.
+pub fn next_raw_event_prefix(
+  state: ChannelState,
+  identity: relay_channel.Identity,
+  mode: relay_channel.Mode,
+  grant: String,
+  policy: types.RawPolicy,
+  events: List(types.TraceEvent),
+) -> Result(#(String, ChannelState, List(types.TraceEvent)), String) {
+  next_encoded_event_prefix(
+    state,
+    identity,
+    mode,
+    events,
+    RawEncoding(grant, policy),
+  )
+}
+
+fn next_encoded_event_prefix(
+  state: ChannelState,
+  identity: relay_channel.Identity,
+  mode: relay_channel.Mode,
+  events: List(types.TraceEvent),
+  encoding: BatchEncoding,
+) -> Result(#(String, ChannelState, List(types.TraceEvent)), String) {
+  case state {
+    Active(_, _, limit) ->
+      fit_encoded_event_prefix(
+        state,
+        identity,
+        mode,
+        events,
+        encoding,
+        int.min(list.length(events), limit),
+      )
+    AwaitingCredit(_) -> Error("awaiting_credit")
+    Stopped(_) -> Error("channel_stopped")
+  }
+}
+
+fn fit_encoded_event_prefix(
+  state: ChannelState,
+  identity: relay_channel.Identity,
+  mode: relay_channel.Mode,
+  events: List(types.TraceEvent),
+  encoding: BatchEncoding,
+  count: Int,
+) -> Result(#(String, ChannelState, List(types.TraceEvent)), String) {
+  let batch = list.take(events, count)
+  case next_encoded_event_batch(state, identity, mode, batch, encoding) {
+    Ok(#(frame, next)) -> Ok(#(frame, next, list.drop(events, count)))
+    Error("frame_too_large") if count > 1 -> {
+      let next_count = case int.divide(count, by: 2) {
+        Ok(value) -> int.max(value, 1)
+        Error(_) -> 1
+      }
+      fit_encoded_event_prefix(
+        state,
+        identity,
+        mode,
+        events,
+        encoding,
+        next_count,
+      )
+    }
+    Error(reason) -> Error(reason)
+  }
+}
+
+fn next_encoded_event_batch(
+  state: ChannelState,
+  identity: relay_channel.Identity,
+  mode: relay_channel.Mode,
+  events: List(types.TraceEvent),
+  encoding: BatchEncoding,
+) -> Result(#(String, ChannelState), String) {
   let event_count = list.length(events)
   case state {
     AwaitingCredit(_) -> Error("awaiting_credit")
@@ -244,14 +516,31 @@ pub fn next_event_batch(
             relay_channel.Exact -> "exact"
             relay_channel.Live -> "live"
           }
-          case relay_payload.encode(mode_name, events) {
+          let encoded = case encoding {
+            MetadataEncoding -> relay_payload.encode(mode_name, events)
+            RawEncoding(grant, policy) ->
+              relay_payload.encode_raw(mode_name, grant, policy, events)
+          }
+          case encoded {
             Error(error) -> Error(error)
             Ok(payload) -> {
-              let next_sequence = sequence + 1
-              let frame =
-                relay_wire.sign_envelope(identity, next_sequence, payload)
-                |> relay_wire.encode_envelope
-              Ok(#(frame, Active(next_sequence, credits - 1, limit)))
+              case string.byte_size(payload) > relay_wire.max_envelope_bytes {
+                True -> Error("frame_too_large")
+                False -> {
+                  let next_sequence = sequence + 1
+                  let frame =
+                    relay_wire.sign_envelope(identity, next_sequence, payload)
+                    |> relay_wire.encode_envelope
+                  case
+                    string.byte_size(frame)
+                    > relay_wire.max_encoded_envelope_bytes
+                  {
+                    True -> Error("frame_too_large")
+                    False ->
+                      Ok(#(frame, Active(next_sequence, credits - 1, limit)))
+                  }
+                }
+              }
             }
           }
         }

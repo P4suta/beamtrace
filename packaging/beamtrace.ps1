@@ -7,9 +7,20 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $installRoot = Split-Path -Parent $PSScriptRoot
+$runtimeRoot = Join-Path $installRoot 'runtime'
+$ertsDirectories = @(Get-ChildItem -LiteralPath $runtimeRoot -Directory -Filter 'erts-*')
+if ($ertsDirectories.Count -ne 1) {
+    throw "BeamTrace archive must contain exactly one ERTS runtime, found $($ertsDirectories.Count)."
+}
+$escript = Join-Path $ertsDirectories[0].FullName 'bin/escript.exe'
+if (-not (Test-Path -LiteralPath $escript -PathType Leaf)) {
+    throw "Bundled escript executable is missing: $escript"
+}
 $previousAgent = $env:BEAMTRACE_AGENT_BEAM
 $previousWeb = $env:BEAMTRACE_WEB_ROOT
 $previousErlLibs = $env:ERL_LIBS
+$previousErlRoot = $env:ERL_ROOTDIR
+$previousRoot = $env:ROOTDIR
 try {
     $env:BEAMTRACE_AGENT_BEAM = Join-Path $installRoot 'lib/beamtrace_agent.beam'
     $env:BEAMTRACE_WEB_ROOT = Join-Path $installRoot 'share/beamtrace/web'
@@ -20,13 +31,17 @@ try {
     else {
         "$nativeRoot$([IO.Path]::PathSeparator)$previousErlLibs"
     }
-    & escript (Join-Path $installRoot 'lib/beamtrace.escript') @BeamTraceArguments
+    $env:ERL_ROOTDIR = $runtimeRoot
+    $env:ROOTDIR = $runtimeRoot
+    & $escript (Join-Path $installRoot 'lib/beamtrace.escript') @BeamTraceArguments
     $exitCode = $LASTEXITCODE
 }
 finally {
     $env:BEAMTRACE_AGENT_BEAM = $previousAgent
     $env:BEAMTRACE_WEB_ROOT = $previousWeb
     $env:ERL_LIBS = $previousErlLibs
+    $env:ERL_ROOTDIR = $previousErlRoot
+    $env:ROOTDIR = $previousRoot
 }
 
 exit $exitCode

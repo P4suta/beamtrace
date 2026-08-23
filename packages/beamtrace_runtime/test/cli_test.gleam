@@ -1,3 +1,4 @@
+import beamtrace/types
 import beamtrace_runtime/cli
 import gleam/list
 import gleam/option.{None, Some}
@@ -13,6 +14,10 @@ pub fn capture_command_contract_test() {
     "message.tag == \"$gen_call\"",
     "--out",
     "checkout.beamtrace",
+    "--max-roots",
+    "3",
+    "--preset",
+    "gen-server",
     "--cookie-file",
     ".secrets/cookie",
   ])
@@ -23,14 +28,69 @@ pub fn capture_command_contract_test() {
       where_aql: Some("message.tag == \"$gen_call\""),
       out: "checkout.beamtrace",
       cookie_file: Some(".secrets/cookie"),
+      max_roots: 3,
+      preset: types.GenServer,
     )),
   )
+}
+
+pub fn capture_defaults_to_one_generic_root_test() {
+  cli.parse([
+    "capture",
+    "app@host",
+    "--trigger",
+    "shop:checkout/1",
+    "--out",
+    "x.beamtrace",
+  ])
+  |> should.equal(
+    Ok(cli.Capture(
+      node: "app@host",
+      trigger: cli.Mfa("shop", "checkout", 1),
+      where_aql: None,
+      out: "x.beamtrace",
+      cookie_file: None,
+      max_roots: 1,
+      preset: types.Generic,
+    )),
+  )
+}
+
+pub fn capture_rejects_invalid_root_budget_and_preset_test() {
+  let base = [
+    "capture",
+    "app@host",
+    "--trigger",
+    "shop:checkout/1",
+    "--out",
+    "x.beamtrace",
+  ]
+  let assert Error(root_error) =
+    cli.parse(list.append(base, ["--max-roots", "0"]))
+  root_error.exit_code |> should.equal(2)
+  root_error.message |> should.equal("--max-roots must be between 1 and 1000")
+
+  let assert Error(preset_error) =
+    cli.parse(list.append(base, ["--preset", "magic"]))
+  preset_error.exit_code |> should.equal(2)
+  preset_error.message |> should.equal("unknown capture preset 'magic'")
 }
 
 pub fn every_public_command_parses_test() {
   [
     cli.parse(["attach", "app@host", "--web"]),
-    cli.parse(["record", "--", "gleam", "run"]),
+    cli.parse([
+      "record",
+      "--node",
+      "app@host",
+      "--trigger",
+      "shop:checkout/1",
+      "--out",
+      "run.beamtrace",
+      "--",
+      "gleam",
+      "run",
+    ]),
     cli.parse(["open", "run.beamtrace", "--tui"]),
     cli.parse(["compare", "good.beamtrace", "bad.beamtrace"]),
     cli.parse(["export", "run.beamtrace", "--format", "mermaid"]),
@@ -47,6 +107,142 @@ pub fn every_public_command_parses_test() {
     }
   })
   |> should.be_true()
+}
+
+pub fn relay_target_producer_parses_capture_options_without_plaintext_cookie_test() {
+  cli.parse([
+    "relay",
+    "https://hub.example",
+    "--enroll",
+    "once",
+    "--node",
+    "app@host",
+    "--trigger",
+    "shop:checkout/1",
+    "--where",
+    "arg.0.tag == order",
+    "--cookie-file",
+    ".secrets/cookie",
+    "--max-roots",
+    "3",
+    "--preset",
+    "gen-server",
+  ])
+  |> should.equal(
+    Ok(cli.Relay(
+      "https://hub.example",
+      "once",
+      Some(cli.RelayTarget(
+        "app@host",
+        cli.Mfa("shop", "checkout", 1),
+        Some("arg.0.tag == order"),
+        Some(".secrets/cookie"),
+        3,
+        types.GenServer,
+        None,
+      )),
+    )),
+  )
+
+  let assert Error(error) =
+    cli.parse([
+      "relay",
+      "https://hub.example",
+      "--enroll",
+      "once",
+      "--node",
+      "app@host",
+    ])
+  error.message
+  |> should.equal("relay producer requires --trigger Module:function/arity")
+}
+
+pub fn relay_raw_capture_accepts_only_a_grant_file_not_a_plaintext_token_test() {
+  let assert Ok(cli.Relay(_, _, Some(target))) =
+    cli.parse([
+      "relay",
+      "https://hub.example",
+      "--enroll",
+      "once",
+      "--node",
+      "app@host",
+      "--trigger",
+      "shop:checkout/1",
+      "--raw-grant-file",
+      ".secrets/raw-grant.json",
+    ])
+  target.raw_grant_file |> should.equal(Some(".secrets/raw-grant.json"))
+
+  let assert Error(error) =
+    cli.parse([
+      "relay",
+      "https://hub.example",
+      "--enroll",
+      "once",
+      "--node",
+      "app@host",
+      "--trigger",
+      "shop:checkout/1",
+      "--raw-grant",
+      "plaintext-secret",
+    ])
+  error.message |> should.equal("unknown relay option '--raw-grant'")
+}
+
+pub fn record_parses_capture_options_before_the_child_separator_test() {
+  cli.parse([
+    "record",
+    "--node",
+    "app@host",
+    "--trigger",
+    "shop:checkout/1",
+    "--where",
+    "arg.0.tag == order",
+    "--out",
+    "run.beamtrace",
+    "--max-roots",
+    "2",
+    "--preset",
+    "gleam-actor",
+    "--cookie-file",
+    ".secrets/cookie",
+    "--",
+    "gleam",
+    "test",
+  ])
+  |> should.equal(
+    Ok(
+      cli.Record(
+        node: "app@host",
+        trigger: cli.Mfa("shop", "checkout", 1),
+        where_aql: Some("arg.0.tag == order"),
+        out: "run.beamtrace",
+        cookie_file: Some(".secrets/cookie"),
+        max_roots: 2,
+        preset: types.GleamActor,
+        command: ["gleam", "test"],
+      ),
+    ),
+  )
+}
+
+pub fn record_requires_a_target_trigger_output_and_child_command_test() {
+  let assert Error(error) = cli.parse(["record", "--", "gleam", "test"])
+  error.exit_code |> should.equal(2)
+  error.message |> should.equal("record requires --node <node>")
+
+  let assert Error(child_error) =
+    cli.parse([
+      "record",
+      "--node",
+      "app@host",
+      "--trigger",
+      "m:f/0",
+      "--out",
+      "x.beamtrace",
+      "--",
+    ])
+  child_error.message |> should.equal("record requires '-- <command>'")
 }
 
 pub fn plaintext_cookie_argument_is_a_safety_refusal_test() {

@@ -2,12 +2,31 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 set -eu
 
-install_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+script_dir=${0%/*}
+if [ "$script_dir" = "$0" ]; then
+  script_dir=.
+fi
+install_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+runtime_root="$install_root/runtime"
+bundled_escript=
+runtime_count=0
+for candidate in "$runtime_root"/erts-*/bin/escript; do
+  if [ -x "$candidate" ]; then
+    bundled_escript=$candidate
+    runtime_count=$((runtime_count + 1))
+  fi
+done
+if [ "$runtime_count" -ne 1 ]; then
+  echo "BeamTrace archive must contain exactly one executable ERTS runtime; found $runtime_count" >&2
+  exit 2
+fi
 export BEAMTRACE_AGENT_BEAM="$install_root/lib/beamtrace_agent.beam"
 export BEAMTRACE_WEB_ROOT="$install_root/share/beamtrace/web"
+export ERL_ROOTDIR="$runtime_root"
+export ROOTDIR="$runtime_root"
 if [ -n "${ERL_LIBS:-}" ]; then
   export ERL_LIBS="$install_root/lib/native:$ERL_LIBS"
 else
   export ERL_LIBS="$install_root/lib/native"
 fi
-exec escript "$install_root/lib/beamtrace.escript" "$@"
+exec "$bundled_escript" "$install_root/lib/beamtrace.escript" "$@"

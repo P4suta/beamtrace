@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace_runtime/rbac
+import beamtrace_runtime/s3_blob
 import gleam/dict.{type Dict}
 import gleam/int
 import gleam/list
@@ -26,13 +27,20 @@ pub type Config {
     relay_max_events: Int,
     relay_max_bytes: Int,
     enrollment_ttl_ms: Int,
+    blob_backend: BlobBackendConfig,
   )
+}
+
+pub type BlobBackendConfig {
+  FilesystemBlobs
+  S3Blobs(endpoint: String, bucket: String, region: String, prefix: String)
 }
 
 pub type ConfigError {
   Missing(key: String)
   DistributionCookieForbidden
   ClientSecretForbidden
+  BlobSecretForbidden
   InvalidUrl(key: String)
   RedirectOriginMismatch
   InvalidRoleMapping(value: String)
@@ -131,6 +139,7 @@ pub fn resolve(source: Dict(String, String)) -> Result(Config, ConfigError) {
     "600000",
     86_400_000,
   ))
+  use blob_backend <- try_result(resolve_blob_backend(source))
   use Nil <- try_result(bounded("oidc_client_id", client_id, 512))
   use Nil <- try_result(bounded("oidc_jwks_json", jwks_json, 1_048_576))
   use Nil <- try_result(bounded("project", project, 256))
@@ -156,17 +165,47 @@ pub fn resolve(source: Dict(String, String)) -> Result(Config, ConfigError) {
     relay_max_events: relay_max_events,
     relay_max_bytes: relay_max_bytes,
     enrollment_ttl_ms: enrollment_ttl_ms,
+    blob_backend: blob_backend,
   ))
 }
 
 fn reject_forbidden(source: Dict(String, String)) -> Result(Nil, ConfigError) {
   case
     dict.has_key(source, "cookie") || dict.has_key(source, "cookie_file"),
-    dict.has_key(source, "oidc_client_secret")
+    dict.has_key(source, "oidc_client_secret"),
+    dict.has_key(source, "s3_access_key_id")
+    || dict.has_key(source, "s3_secret_access_key")
+    || dict.has_key(source, "s3_session_token")
   {
-    True, _ -> Error(DistributionCookieForbidden)
-    _, True -> Error(ClientSecretForbidden)
-    False, False -> Ok(Nil)
+    True, _, _ -> Error(DistributionCookieForbidden)
+    _, True, _ -> Error(ClientSecretForbidden)
+    _, _, True -> Error(BlobSecretForbidden)
+    False, False, False -> Ok(Nil)
+  }
+}
+
+fn resolve_blob_backend(
+  source: Dict(String, String),
+) -> Result(BlobBackendConfig, ConfigError) {
+  case optional(source, "blob_backend", "filesystem") {
+    "filesystem" -> Ok(FilesystemBlobs)
+    "s3" -> {
+      use endpoint <- try_result(required(source, "s3_endpoint"))
+      use bucket <- try_result(required(source, "s3_bucket"))
+      let region = optional(source, "s3_region", "us-east-1")
+      let prefix = optional(source, "s3_prefix", "beamtrace")
+      use Nil <- try_result(validate_url(
+        "s3_endpoint",
+        endpoint,
+        origin_only: True,
+      ))
+      let config = s3_blob.Config(endpoint, bucket, region, prefix)
+      case s3_blob.valid_config(config) {
+        True -> Ok(S3Blobs(endpoint, bucket, region, prefix))
+        False -> Error(InvalidValue("s3"))
+      }
+    }
+    _ -> Error(InvalidValue("blob_backend"))
   }
 }
 

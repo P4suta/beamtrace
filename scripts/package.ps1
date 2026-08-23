@@ -74,6 +74,65 @@ finally {
     Pop-Location
 }
 
+$otpRoot = (& erl -noshell -eval 'io:format("~ts", [code:root_dir()]), halt().' | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $otpRoot -PathType Container)) {
+    throw 'Could not resolve the Erlang/OTP runtime root.'
+}
+$otpRelease = (& erl -noshell -eval 'io:format("~ts", [erlang:system_info(otp_release)]), halt().' | Out-String).Trim()
+$ertsVersion = (& erl -noshell -eval 'io:format("~ts", [erlang:system_info(version)]), halt().' | Out-String).Trim()
+if ($LASTEXITCODE -ne 0 -or $otpRelease -notmatch '^(27|28|29)$' -or [string]::IsNullOrWhiteSpace($ertsVersion)) {
+    throw "Packaging requires Erlang/OTP 27-29, found OTP '$otpRelease' and ERTS '$ertsVersion'."
+}
+$otpVersionSource = Join-Path $otpRoot "releases/$otpRelease/OTP_VERSION"
+$otpVersion = if (Test-Path -LiteralPath $otpVersionSource -PathType Leaf) {
+    (Get-Content -Raw -LiteralPath $otpVersionSource).Trim()
+}
+else {
+    $otpRelease
+}
+$runtimeRoot = Join-Path $resolvedStage 'runtime'
+$ertsSource = Join-Path $otpRoot "erts-$ertsVersion"
+$ertsDestination = Join-Path $runtimeRoot "erts-$ertsVersion"
+$ertsBinSource = Join-Path $ertsSource 'bin'
+$ertsBinDestination = Join-Path $ertsDestination 'bin'
+if (-not (Test-Path -LiteralPath $ertsBinSource -PathType Container)) {
+    throw "ERTS executable directory is missing: $ertsBinSource"
+}
+New-Item -ItemType Directory -Path $ertsBinDestination -Force | Out-Null
+foreach ($entry in Get-ChildItem -LiteralPath $ertsBinSource -Force) {
+    if ($entry.Extension -eq '.pdb' -or $entry.Name -match '\.debug\.') { continue }
+    Copy-Item -LiteralPath $entry.FullName -Destination $ertsBinDestination -Recurse -Force
+}
+
+$otpApplications = @('erts', 'kernel', 'stdlib', 'crypto', 'asn1', 'public_key', 'ssl', 'inets')
+foreach ($application in $otpApplications) {
+    $matches = @(Get-ChildItem -LiteralPath (Join-Path $otpRoot 'lib') -Directory -Filter "$application-*")
+    if ($matches.Count -ne 1) {
+        throw "Expected exactly one OTP application directory for $application, found $($matches.Count)."
+    }
+    $applicationDestination = Join-Path $runtimeRoot "lib/$($matches[0].Name)"
+    New-Item -ItemType Directory -Path $applicationDestination -Force | Out-Null
+    foreach ($runtimeDirectoryName in @('ebin', 'priv')) {
+        $source = Join-Path $matches[0].FullName $runtimeDirectoryName
+        if (Test-Path -LiteralPath $source -PathType Container) {
+            Copy-Item -LiteralPath $source -Destination $applicationDestination -Recurse -Force
+        }
+    }
+}
+
+$releaseSource = Join-Path $otpRoot "releases/$otpRelease"
+if (Test-Path -LiteralPath $releaseSource -PathType Container) {
+    $releaseDestination = Join-Path $runtimeRoot "releases/$otpRelease"
+    New-Item -ItemType Directory -Path (Split-Path -Parent $releaseDestination) -Force | Out-Null
+    Copy-Item -LiteralPath $releaseSource -Destination $releaseDestination -Recurse -Force
+}
+$runtimeBin = Join-Path $runtimeRoot 'bin'
+New-Item -ItemType Directory -Path $runtimeBin -Force | Out-Null
+foreach ($bootFile in Get-ChildItem -LiteralPath (Join-Path $otpRoot 'bin') -File -Filter '*.boot') {
+    Copy-Item -LiteralPath $bootFile.FullName -Destination $runtimeBin -Force
+}
+$otpVersion | Set-Content -LiteralPath (Join-Path $runtimeRoot 'OTP_VERSION') -Encoding ascii
+
 Copy-Item -LiteralPath (Join-Path $runtimeDirectory 'beamtrace_runtime') -Destination (Join-Path $resolvedStage 'lib/beamtrace.escript')
 Copy-Item -LiteralPath $agentBeam -Destination (Join-Path $resolvedStage 'lib/beamtrace_agent.beam')
 $esqliteRoot = Join-Path $runtimeDirectory 'build/prod/erlang/esqlite'
@@ -121,6 +180,15 @@ foreach ($name in @('beamtrace_core', 'beamtrace_runtime', 'beamtrace_web', 'bea
         licenseConcluded = 'Apache-2.0 OR MIT'
         licenseDeclared = 'Apache-2.0 OR MIT'
     }
+}
+$inventory['erlang_otp'] = [pscustomobject]@{
+    SPDXID = 'SPDXRef-Package-erlang-otp'
+    name = 'erlang_otp'
+    versionInfo = $otpVersion
+    downloadLocation = 'https://github.com/erlang/otp'
+    filesAnalyzed = $false
+    licenseConcluded = 'Apache-2.0'
+    licenseDeclared = 'Apache-2.0'
 }
 $created = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
 $sbom = [ordered]@{

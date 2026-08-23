@@ -1,7 +1,9 @@
+import beamtrace/types
 import gleam/dict.{type Dict}
 import gleam/float
 import gleam/int
 import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/order.{Gt, Lt}
 import gleam/string
 
@@ -35,6 +37,28 @@ pub type AqlError {
 
 pub type AgentPlan {
   AgentPlan(match_spec_fields: List(String), residual_fields: List(String))
+}
+
+pub type AgentComparator {
+  AgentEqual
+  AgentNotEqual
+}
+
+/// A finite predicate that the dependency-free target agent can safely turn
+/// into an OTP trace match-spec. It intentionally cannot inspect scalar
+/// values, binaries, process state, or any field that would weaken privacy.
+pub type AgentPredicate {
+  AgentAlways
+  AgentNever
+  AgentArgTag(index: Int, comparator: AgentComparator, tag: String)
+  AgentArgType(index: Int, comparator: AgentComparator, kind: String)
+  AgentAnd(left: AgentPredicate, right: AgentPredicate)
+  AgentOr(left: AgentPredicate, right: AgentPredicate)
+  AgentNot(predicate: AgentPredicate)
+}
+
+pub type TriggerPlan {
+  TriggerPlan(predicate: AgentPredicate, residual: Option(Query))
 }
 
 type Token {
@@ -284,6 +308,166 @@ pub fn compile_agent(query: Query) -> AgentPlan {
   let fields = fields(query, []) |> list.reverse |> unique([])
   let #(safe, residual) = split_fields(fields, [], [])
   AgentPlan(safe, residual)
+}
+
+/// Split an AQL query into a target-safe root predicate and a relay-side
+/// residual. Mixed safe/unsafe OR and NOT expressions stay wholly residual;
+/// pushing only one branch would incorrectly discard valid roots.
+pub fn compile_trigger(query: Query, trigger: types.Mfa) -> TriggerPlan {
+  let #(predicate, residual) = split_trigger(query, trigger)
+  TriggerPlan(predicate, residual)
+}
+
+fn split_trigger(
+  query: Query,
+  trigger: types.Mfa,
+) -> #(AgentPredicate, Option(Query)) {
+  case query {
+    Compare(field, comparator, value) ->
+      compile_comparison(query, field, comparator, value, trigger)
+    And(left, right) -> {
+      let #(left_predicate, left_residual) = split_trigger(left, trigger)
+      let #(right_predicate, right_residual) = split_trigger(right, trigger)
+      #(
+        simplify_and(left_predicate, right_predicate),
+        residual_and(left_residual, right_residual),
+      )
+    }
+    Or(left, right) -> {
+      let #(left_predicate, left_residual) = split_trigger(left, trigger)
+      let #(right_predicate, right_residual) = split_trigger(right, trigger)
+      case left_residual, right_residual {
+        None, None -> #(simplify_or(left_predicate, right_predicate), None)
+        _, _ -> #(AgentAlways, Some(query))
+      }
+    }
+    Not(inner) -> {
+      let #(predicate, residual) = split_trigger(inner, trigger)
+      case residual {
+        None -> #(simplify_not(predicate), None)
+        Some(_) -> #(AgentAlways, Some(query))
+      }
+    }
+  }
+}
+
+fn compile_comparison(
+  query: Query,
+  field: String,
+  comparator: Comparator,
+  value: Value,
+  trigger: types.Mfa,
+) -> #(AgentPredicate, Option(Query)) {
+  case fixed_trigger_value(field, trigger) {
+    Some(actual) ->
+      case compare_values(actual, comparator, value) {
+        True -> #(AgentAlways, None)
+        False -> #(AgentNever, None)
+      }
+    None ->
+      case parse_argument_field(field), agent_comparator(comparator), value {
+        Ok(#(index, "tag")), Some(agent_comparator), StringValue(tag)
+          if index < trigger.arity
+        -> #(AgentArgTag(index, agent_comparator, tag), None)
+        Ok(#(index, "type")), Some(agent_comparator), StringValue(kind)
+          if index < trigger.arity
+        ->
+          case valid_argument_type(kind) {
+            True -> #(AgentArgType(index, agent_comparator, kind), None)
+            False -> #(AgentAlways, Some(query))
+          }
+        Ok(#(index, _)), _, _ if index >= trigger.arity -> #(AgentNever, None)
+        _, _, _ -> #(AgentAlways, Some(query))
+      }
+  }
+}
+
+fn fixed_trigger_value(field: String, trigger: types.Mfa) -> Option(Value) {
+  case field {
+    "mfa" ->
+      Some(StringValue(
+        trigger.module_
+        <> ":"
+        <> trigger.function_
+        <> "/"
+        <> int.to_string(trigger.arity),
+      ))
+    "module" -> Some(StringValue(trigger.module_))
+    "function" -> Some(StringValue(trigger.function_))
+    "arity" | "arg.count" -> Some(IntValue(trigger.arity))
+    _ -> None
+  }
+}
+
+fn parse_argument_field(field: String) -> Result(#(Int, String), Nil) {
+  case string.split(field, on: ".") {
+    ["arg", index_source, property] ->
+      case int.parse(index_source) {
+        Ok(index) if index >= 0 -> Ok(#(index, property))
+        _ -> Error(Nil)
+      }
+    _ -> Error(Nil)
+  }
+}
+
+fn agent_comparator(comparator: Comparator) -> Option(AgentComparator) {
+  case comparator {
+    Equal -> Some(AgentEqual)
+    NotEqual -> Some(AgentNotEqual)
+    _ -> None
+  }
+}
+
+fn valid_argument_type(kind: String) -> Bool {
+  list.contains(
+    [
+      "atom",
+      "tuple",
+      "list",
+      "map",
+      "binary",
+      "integer",
+      "float",
+      "pid",
+      "reference",
+      "port",
+      "function",
+    ],
+    string.lowercase(kind),
+  )
+}
+
+fn residual_and(left: Option(Query), right: Option(Query)) -> Option(Query) {
+  case left, right {
+    None, None -> None
+    Some(query), None | None, Some(query) -> Some(query)
+    Some(left), Some(right) -> Some(And(left, right))
+  }
+}
+
+fn simplify_and(left: AgentPredicate, right: AgentPredicate) -> AgentPredicate {
+  case left, right {
+    AgentNever, _ | _, AgentNever -> AgentNever
+    AgentAlways, predicate | predicate, AgentAlways -> predicate
+    _, _ -> AgentAnd(left, right)
+  }
+}
+
+fn simplify_or(left: AgentPredicate, right: AgentPredicate) -> AgentPredicate {
+  case left, right {
+    AgentAlways, _ | _, AgentAlways -> AgentAlways
+    AgentNever, predicate | predicate, AgentNever -> predicate
+    _, _ -> AgentOr(left, right)
+  }
+}
+
+fn simplify_not(predicate: AgentPredicate) -> AgentPredicate {
+  case predicate {
+    AgentAlways -> AgentNever
+    AgentNever -> AgentAlways
+    AgentNot(inner) -> inner
+    _ -> AgentNot(predicate)
+  }
 }
 
 fn fields(query: Query, accumulator: List(String)) -> List(String) {

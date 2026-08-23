@@ -9,6 +9,11 @@ pub type Plan {
   HubWithoutCookie
   OutboundRelayOnly(hub_url: String)
   ChildProcess(command: List(String))
+  RecordTargetAndChild(
+    node: String,
+    cookie_file: Option(String),
+    command: List(String),
+  )
   TuiClient(server: Option(String))
   Diagnostic
   ReadOnlyMcp
@@ -18,14 +23,15 @@ pub type Plan {
 pub fn plan(command: cli.Command) -> Plan {
   case command {
     cli.Attach(node, _, cookie_file) -> TargetDistribution(node, cookie_file)
-    cli.Capture(node, _, _, _, cookie_file) ->
+    cli.Capture(node, _, _, _, cookie_file, _, _) ->
       TargetDistribution(node, cookie_file)
-    cli.Record(command) -> ChildProcess(command)
+    cli.Record(node, _, _, _, cookie_file, _, _, command) ->
+      RecordTargetAndChild(node, cookie_file, command)
     cli.Open(path, _) -> OfflineFiles([path])
     cli.Compare(left, right) -> OfflineFiles([left, right])
     cli.Export(path, _) -> OfflineFiles([path])
     cli.Serve -> HubWithoutCookie
-    cli.Relay(hub_url, _) -> OutboundRelayOnly(hub_url)
+    cli.Relay(hub_url, _, _) -> OutboundRelayOnly(hub_url)
     cli.Tui(server) -> TuiClient(server)
     cli.Doctor -> Diagnostic
     cli.Mcp -> ReadOnlyMcp

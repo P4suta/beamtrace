@@ -13,7 +13,7 @@
     parse_wss_url/1
 ]).
 
--define(MAX_FRAME_BYTES, 1048576).
+-define(MAX_FRAME_BYTES, 1114112).
 -define(MAX_HEADER_BYTES, 16384).
 -define(WEBSOCKET_GUID, <<"258EAFA5-E914-47DA-95CA-C5AB0DC85B11">>).
 

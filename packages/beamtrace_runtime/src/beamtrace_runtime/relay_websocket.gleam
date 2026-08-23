@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
+import beamtrace_runtime/blob_store
 import beamtrace_runtime/enrollment_store
 import beamtrace_runtime/local_auth
 import beamtrace_runtime/relay_inbox
@@ -24,7 +25,7 @@ pub fn upgrade(
   enrollment: enrollment_store.Store,
   inbox: relay_inbox.Store,
   metadata: team_store.Store,
-  blob_root: String,
+  backend: blob_store.Backend,
   quota: relay_ingest.Quota,
   relay_id: String,
 ) -> Response(mist.ResponseData) {
@@ -47,7 +48,7 @@ pub fn upgrade(
       handle_message(
         inbox,
         metadata,
-        blob_root,
+        backend,
         quota,
         state,
         message,
@@ -60,7 +61,7 @@ pub fn upgrade(
 fn handle_message(
   inbox: relay_inbox.Store,
   metadata: team_store.Store,
-  blob_root: String,
+  backend: blob_store.Backend,
   quota: relay_ingest.Quota,
   state: WebsocketState,
   message: mist.WebsocketMessage(Tick),
@@ -74,7 +75,7 @@ fn handle_message(
       apply_effects(
         inbox,
         metadata,
-        blob_root,
+        backend,
         quota,
         transition.effects,
         transition.state,
@@ -100,7 +101,7 @@ fn handle_message(
 fn apply_effects(
   inbox: relay_inbox.Store,
   metadata: team_store.Store,
-  blob_root: String,
+  backend: blob_store.Backend,
   quota: relay_ingest.Quota,
   effects: List(relay_socket.Effect),
   protocol: relay_socket.State,
@@ -117,7 +118,7 @@ fn apply_effects(
               apply_effects(
                 inbox,
                 metadata,
-                blob_root,
+                backend,
                 quota,
                 rest,
                 protocol,
@@ -129,9 +130,9 @@ fn apply_effects(
         relay_socket.Payload(relay_id, sequence, mode, payload) -> {
           let received_at_ms = local_auth.now_ms()
           case
-            relay_ingest.accept_with_quota(
+            relay_ingest.accept_with_backend_quota(
               metadata,
-              blob_root,
+              backend,
               inbox,
               relay_id,
               sequence,
@@ -150,7 +151,7 @@ fn apply_effects(
                   apply_effects(
                     inbox,
                     metadata,
-                    blob_root,
+                    backend,
                     quota,
                     rest,
                     protocol,
@@ -185,11 +186,21 @@ pub fn ingest_control_frame(
     Ok(relay_inbox.Accepted) ->
       "{\"type\":\"credit\",\"protocol_version\":1,\"credits\":1,\"max_batch_events\":128}"
     Ok(relay_inbox.Truncated(_)) -> truncated_frame()
-    Error("relay_event_quota") | Error("relay_byte_quota") ->
-      stop_frame("hub_quota")
+    Error("relay_event_quota")
+    | Error("relay_byte_quota")
+    | Error("batch_event_limit") -> stop_frame("hub_quota")
     Error("metadata_value_forbidden")
     | Error("invalid_metadata_fingerprint")
-    | Error("raw_capture_not_authorized") -> stop_frame("privacy_policy")
+    | Error("raw_capture_not_authorized")
+    | Error("invalid_raw_capture_grant")
+    | Error("raw_capture_grant_denied")
+    | Error("invalid_raw_policy")
+    | Error("invalid_raw_value")
+    | Error("raw_value_required")
+    | Error("raw_redaction_required")
+    | Error("raw_depth_exceeded")
+    | Error("raw_item_limit") -> stop_frame("privacy_policy")
+    Error("invalid_payload") -> stop_frame("relay_protocol")
     Error(_) -> storage_error_frame()
   }
 }

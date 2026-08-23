@@ -29,6 +29,11 @@ environment_pairs() ->
         {<<"relay_max_events">>, "BEAMTRACE_RELAY_MAX_EVENTS"},
         {<<"relay_max_bytes">>, "BEAMTRACE_RELAY_MAX_BYTES"},
         {<<"enrollment_ttl_ms">>, "BEAMTRACE_ENROLLMENT_TTL_MS"},
+        {<<"blob_backend">>, "BEAMTRACE_BLOB_BACKEND"},
+        {<<"s3_endpoint">>, "BEAMTRACE_S3_ENDPOINT"},
+        {<<"s3_bucket">>, "BEAMTRACE_S3_BUCKET"},
+        {<<"s3_region">>, "BEAMTRACE_S3_REGION"},
+        {<<"s3_prefix">>, "BEAMTRACE_S3_PREFIX"},
         {<<"cookie">>, "BEAMTRACE_COOKIE"},
         {<<"cookie_file">>, "BEAMTRACE_COOKIE_FILE"}
     ]).

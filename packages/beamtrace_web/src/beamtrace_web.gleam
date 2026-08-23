@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace_web/canvas
+import beamtrace_web/capture_control
+import beamtrace_web/compare_control
+import beamtrace_web/live_control
 import beamtrace_web/page_loader
 import beamtrace_web/view
 import beamtrace_web/workspace
@@ -21,9 +24,89 @@ fn update(
   model: workspace.Model,
   message: workspace.Msg,
 ) -> #(workspace.Model, Effect(workspace.Msg)) {
-  let next = workspace.update(model, message)
+  case message {
+    workspace.UserSelectedMode(workspace.Live) ->
+      finish_update(workspace.update(model, message), [live_control.load()])
+    workspace.UserChangedTrigger(query) ->
+      finish_update(workspace.update(model, message), [
+        capture_control.search_mfas(query),
+      ])
+    workspace.UserRequestedArm -> {
+      let next = workspace.update(model, message)
+      case next.capture_phase {
+        workspace.Arming ->
+          finish_update(next, [
+            capture_control.arm(
+              next.trigger_input,
+              next.capture_where,
+              next.capture_preset,
+              next.capture_max_roots,
+            ),
+          ])
+        _ -> finish_update(next, [])
+      }
+    }
+    workspace.CaptureArmAccepted ->
+      finish_update(workspace.update(model, message), [
+        capture_control.poll_after(150),
+      ])
+    workspace.PollCaptureStatus ->
+      finish_update(workspace.update(model, message), [capture_control.status()])
+    workspace.CaptureStatusLoaded(phase) -> {
+      let next = workspace.update(model, message)
+      case phase {
+        workspace.Armed | workspace.Arming | workspace.Cancelling ->
+          finish_update(next, [capture_control.poll_after(150)])
+        _ -> finish_update(next, [])
+      }
+    }
+    workspace.UserRequestedCancel ->
+      finish_update(workspace.update(model, message), [capture_control.cancel()])
+    workspace.UserRequestedSave ->
+      finish_update(workspace.update(model, message), [
+        capture_control.save(model.save_path),
+      ])
+    workspace.UserRequestedCompare -> {
+      let next = workspace.update(model, message)
+      case next.compare_loading {
+        True ->
+          finish_update(next, [
+            compare_control.run(workspace.compare_paths(next)),
+          ])
+        False -> finish_update(next, [])
+      }
+    }
+    workspace.PollLive -> {
+      let next = workspace.update(model, message)
+      case next.mode {
+        workspace.Live -> finish_update(next, [live_control.load()])
+        _ -> finish_update(next, [])
+      }
+    }
+    workspace.LiveLoaded(_) -> {
+      let next = workspace.update(model, message)
+      case next.mode {
+        workspace.Live -> finish_update(next, [live_control.poll_after(1000)])
+        _ -> finish_update(next, [])
+      }
+    }
+    workspace.LiveLoadFailed(_) -> {
+      let next = workspace.update(model, message)
+      case next.mode {
+        workspace.Live -> finish_update(next, [live_control.poll_after(2000)])
+        _ -> finish_update(next, [])
+      }
+    }
+    _ -> finish_update(workspace.update(model, message), [])
+  }
+}
+
+fn finish_update(
+  next: workspace.Model,
+  extra_effects: List(Effect(workspace.Msg)),
+) -> #(workspace.Model, Effect(workspace.Msg)) {
   case workspace.needs_page(next) {
-    False -> #(next, draw_effect(next))
+    False -> #(next, effect.batch([draw_effect(next), ..extra_effects]))
     True -> {
       let loading = workspace.begin_loading(next)
       #(
@@ -35,6 +118,7 @@ fn update(
             page_limit(loading),
             workspace.remote_query(loading),
           ),
+          ..extra_effects
         ]),
       )
     }
@@ -45,6 +129,8 @@ fn startup_effect(model: workspace.Model) -> Effect(workspace.Msg) {
   effect.batch([
     draw_effect(model),
     page_loader.load(0, 200, workspace.remote_query(model)),
+    capture_control.status(),
+    capture_control.install_cleanup(),
     effect.from(fn(dispatch) {
       canvas.install_shortcuts(fn(key) {
         dispatch(workspace.UserPressedKey(key))

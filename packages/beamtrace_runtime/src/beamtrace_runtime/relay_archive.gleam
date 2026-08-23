@@ -24,9 +24,29 @@ pub fn persist(
   payload: String,
   received_at_ms: Int,
 ) -> Result(team_store.RelayFrameIndex, String) {
-  persist_events(
+  persist_with(
     store,
-    blob_root,
+    blob_store.filesystem(blob_root),
+    relay_id,
+    sequence,
+    mode,
+    payload,
+    received_at_ms,
+  )
+}
+
+pub fn persist_with(
+  store: team_store.Store,
+  backend: blob_store.Backend,
+  relay_id: String,
+  sequence: Int,
+  mode: Mode,
+  payload: String,
+  received_at_ms: Int,
+) -> Result(team_store.RelayFrameIndex, String) {
+  persist_events_with(
+    store,
+    backend,
     relay_id,
     sequence,
     mode,
@@ -46,6 +66,28 @@ pub fn persist_events(
   received_at_ms: Int,
   event_count event_count: Int,
 ) -> Result(team_store.RelayFrameIndex, String) {
+  persist_events_with(
+    store,
+    blob_store.filesystem(blob_root),
+    relay_id,
+    sequence,
+    mode,
+    payload,
+    received_at_ms,
+    event_count: event_count,
+  )
+}
+
+pub fn persist_events_with(
+  store: team_store.Store,
+  backend: blob_store.Backend,
+  relay_id: String,
+  sequence: Int,
+  mode: Mode,
+  payload: String,
+  received_at_ms: Int,
+  event_count event_count: Int,
+) -> Result(team_store.RelayFrameIndex, String) {
   case valid_input(relay_id, sequence, event_count, received_at_ms) {
     False -> Error("invalid_relay_frame")
     True -> {
@@ -55,7 +97,7 @@ pub fn persist_events(
         <> "/frames/"
         <> int.to_string(sequence)
         <> ".json"
-      case blob_store.put(blob_root, key, payload) {
+      case blob_store.put_with(backend, key, payload) {
         Error(error) -> Error(error)
         Ok(blob) -> {
           let frame =
@@ -83,12 +125,33 @@ pub fn read_payload(
   blob_root: String,
   frame: team_store.RelayFrameIndex,
 ) -> Result(String, String) {
-  blob_store.read_verified(blob_root, frame.blob_key, frame.sha256, frame.bytes)
+  read_payload_with(blob_store.filesystem(blob_root), frame)
+}
+
+pub fn read_payload_with(
+  backend: blob_store.Backend,
+  frame: team_store.RelayFrameIndex,
+) -> Result(String, String) {
+  blob_store.read_verified_with(
+    backend,
+    frame.blob_key,
+    frame.sha256,
+    frame.bytes,
+  )
 }
 
 pub fn prune_before(
   store: team_store.Store,
   blob_root: String,
+  cutoff_ms cutoff_ms: Int,
+  limit limit: Int,
+) -> Result(PruneResult, String) {
+  prune_before_with(store, blob_store.filesystem(blob_root), cutoff_ms:, limit:)
+}
+
+pub fn prune_before_with(
+  store: team_store.Store,
+  backend: blob_store.Backend,
   cutoff_ms cutoff_ms: Int,
   limit limit: Int,
 ) -> Result(PruneResult, String) {
@@ -99,7 +162,7 @@ pub fn prune_before(
         Error(error) -> Error(error)
         Ok(frames) -> {
           let selected = list.take(frames, limit)
-          case prune_frames(store, blob_root, selected, 0, 0) {
+          case prune_frames(store, backend, selected, 0, 0) {
             Error(error) -> Error(error)
             Ok(result) ->
               Ok(PruneResult(..result, more: list.length(frames) > limit))
@@ -111,7 +174,7 @@ pub fn prune_before(
 
 fn prune_frames(
   store: team_store.Store,
-  blob_root: String,
+  backend: blob_store.Backend,
   frames: List(team_store.RelayFrameIndex),
   deleted_frames: Int,
   deleted_bytes: Int,
@@ -119,7 +182,7 @@ fn prune_frames(
   case frames {
     [] -> Ok(PruneResult(deleted_frames, deleted_bytes, False))
     [frame, ..rest] ->
-      case blob_store.delete(blob_root, frame.blob_key) {
+      case blob_store.delete_with(backend, frame.blob_key) {
         Error(error) -> Error(error)
         Ok(Nil) ->
           case
@@ -129,7 +192,7 @@ fn prune_frames(
             Ok(Nil) ->
               prune_frames(
                 store,
-                blob_root,
+                backend,
                 rest,
                 deleted_frames + 1,
                 deleted_bytes + frame.bytes,

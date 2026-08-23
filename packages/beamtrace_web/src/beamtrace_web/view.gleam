@@ -3,10 +3,15 @@ import beamtrace_web/workspace
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import lustre/attribute
 import lustre/element.{type Element}
 import lustre/element/html
 import lustre/event
+
+type ComparedItem {
+  ComparedItem(path: String, item: workspace.CompareItem)
+}
 
 pub fn workspace(model: workspace.Model) -> Element(workspace.Msg) {
   html.main(
@@ -16,8 +21,9 @@ pub fn workspace(model: workspace.Model) -> Element(workspace.Msg) {
     ],
     [
       workspace_header(model),
+      capture_controls(model),
       html.div([attribute.class("workspace-grid")], [
-        session_navigator(),
+        session_navigator(model),
         causal_workspace(model),
         inspector(model),
       ]),
@@ -25,6 +31,208 @@ pub fn workspace(model: workspace.Model) -> Element(workspace.Msg) {
       palette(model),
     ],
   )
+}
+
+fn capture_controls(model: workspace.Model) -> Element(workspace.Msg) {
+  case model.mode {
+    workspace.Capture ->
+      html.section(
+        [
+          attribute.class("capture-controls"),
+          attribute.aria_label("Capture controls"),
+        ],
+        [
+          html.label([], [
+            html.span([], [html.text("MFA trigger")]),
+            html.input([
+              attribute.type_("text"),
+              attribute.aria_label("MFA trigger"),
+              attribute.placeholder("module:function/arity"),
+              attribute.attribute("list", "mfa-candidates"),
+              attribute.value(model.trigger_input),
+              event.on_input(workspace.UserChangedTrigger),
+            ]),
+            html.datalist(
+              [attribute.id("mfa-candidates")],
+              list.map(model.mfa_suggestions, fn(candidate) {
+                html.option([attribute.value(candidate)], candidate)
+              }),
+            ),
+          ]),
+          html.label([], [
+            html.span([], [html.text("AQL condition")]),
+            html.input([
+              attribute.type_("text"),
+              attribute.aria_label("AQL condition"),
+              attribute.placeholder("arg.0.tag == order"),
+              attribute.value(model.capture_where),
+              event.on_input(workspace.UserChangedCaptureWhere),
+            ]),
+          ]),
+          html.label([], [
+            html.span([], [html.text("Framework preset")]),
+            html.select(
+              [
+                attribute.aria_label("Framework preset"),
+                attribute.value(model.capture_preset),
+                event.on_input(workspace.UserChangedCapturePreset),
+              ],
+              [
+                preset_option("generic", "Generic"),
+                preset_option("gleam-actor", "Gleam actor"),
+                preset_option("wisp-mist", "Wisp / Mist"),
+                preset_option("gen-server", "GenServer"),
+                preset_option("phoenix", "Phoenix"),
+                preset_option("erlang-supervisor", "Erlang supervisor"),
+              ],
+            ),
+          ]),
+          html.label([], [
+            html.span([], [html.text("Max roots")]),
+            html.input([
+              attribute.type_("number"),
+              attribute.aria_label("Max roots"),
+              attribute.attribute("min", "1"),
+              attribute.attribute("max", "1000"),
+              attribute.value(model.capture_max_roots),
+              event.on_input(workspace.UserChangedMaxRoots),
+            ]),
+          ]),
+          html.button(
+            [
+              attribute.disabled(capture_arm_disabled(model.capture_phase)),
+              event.on_click(workspace.UserRequestedArm),
+            ],
+            [html.text("Arm capture")],
+          ),
+          html.button(
+            [
+              attribute.disabled(!capture_busy(model.capture_phase)),
+              event.on_click(workspace.UserRequestedCancel),
+            ],
+            [html.text("Cancel capture")],
+          ),
+          html.label([], [
+            html.span([], [html.text("Save path")]),
+            html.input([
+              attribute.type_("text"),
+              attribute.aria_label("Save path"),
+              attribute.value(model.save_path),
+              event.on_input(workspace.UserChangedSavePath),
+            ]),
+          ]),
+          html.button(
+            [
+              attribute.disabled(!capture_ready(model.capture_phase)),
+              event.on_click(workspace.UserRequestedSave),
+            ],
+            [html.text("Save capture")],
+          ),
+          html.output(
+            [
+              attribute.class("capture-status"),
+              attribute.aria_live("polite"),
+            ],
+            [
+              html.text(capture_phase_label(model.capture_phase)),
+              html.span([], [html.text(model.capture_notice)]),
+            ],
+          ),
+        ],
+      )
+    workspace.Compare -> compare_controls(model)
+    _ -> html.div([], [])
+  }
+}
+
+fn compare_controls(model: workspace.Model) -> Element(workspace.Msg) {
+  html.section(
+    [
+      attribute.class("capture-controls compare-controls"),
+      attribute.aria_label("Compare controls"),
+    ],
+    [
+      html.label([], [
+        html.span([], [html.text("Trace paths · baseline first")]),
+        html.textarea(
+          [
+            attribute.aria_label("Trace paths"),
+            attribute.placeholder(
+              "baseline.beamtrace\ncandidate.beamtrace\noptional-third.beamtrace",
+            ),
+            attribute.value(model.compare_paths_input),
+            event.on_input(workspace.UserChangedComparePaths),
+          ],
+          model.compare_paths_input,
+        ),
+      ]),
+      html.button(
+        [
+          attribute.disabled(model.compare_loading),
+          event.on_click(workspace.UserRequestedCompare),
+        ],
+        [html.text("Run comparison")],
+      ),
+      html.output(
+        [attribute.class("capture-status"), attribute.aria_live("polite")],
+        [
+          html.text(case model.compare_loading {
+            True -> "Comparing traces"
+            False ->
+              case model.compare_report {
+                Some(report) ->
+                  "Compared " <> int.to_string(report.run_count) <> " runs"
+                None -> "Ready"
+              }
+          }),
+          html.span([], [
+            html.text(case model.compare_error {
+              Some(reason) -> reason
+              None -> "PID and clock origins are excluded from alignment"
+            }),
+          ]),
+        ],
+      ),
+    ],
+  )
+}
+
+fn preset_option(value: String, label: String) -> Element(workspace.Msg) {
+  html.option([attribute.value(value)], label)
+}
+
+fn capture_busy(phase: workspace.CapturePhase) -> Bool {
+  case phase {
+    workspace.Arming | workspace.Armed | workspace.Cancelling -> True
+    _ -> False
+  }
+}
+
+fn capture_arm_disabled(phase: workspace.CapturePhase) -> Bool {
+  case phase {
+    workspace.Unavailable -> True
+    _ -> capture_busy(phase)
+  }
+}
+
+fn capture_ready(phase: workspace.CapturePhase) -> Bool {
+  case phase {
+    workspace.Ready(_, _) -> True
+    _ -> False
+  }
+}
+
+fn capture_phase_label(phase: workspace.CapturePhase) -> String {
+  case phase {
+    workspace.Unavailable -> "Offline session"
+    workspace.Idle -> "Idle"
+    workspace.Arming -> "Arming"
+    workspace.Armed -> "Armed"
+    workspace.Cancelling -> "Cancelling"
+    workspace.Ready(count, completeness) ->
+      "Ready · " <> int.to_string(count) <> " events · " <> completeness
+    workspace.Failed(reason) -> "Failed · " <> reason
+  }
 }
 
 fn workspace_header(model: workspace.Model) -> Element(workspace.Msg) {
@@ -90,66 +298,211 @@ fn mode_button(
   )
 }
 
-fn session_navigator() -> Element(workspace.Msg) {
+fn session_navigator(model: workspace.Model) -> Element(workspace.Msg) {
   html.nav(
     [
       attribute.class("navigator panel"),
       attribute.aria_label("Session navigator"),
+      attribute.attribute("tabindex", "0"),
     ],
     [
       panel_heading("Nodes & sessions", "01"),
       html.section([], [
-        html.h2([], [html.text("Connected nodes")]),
-        html.button([attribute.class("node-card selected")], [
+        html.h2([], [html.text("Current target")]),
+        html.div([attribute.class("node-card selected")], [
           html.span([attribute.class("status-dot healthy")], []),
           html.span([], [
-            html.strong([], [html.text("checkout@local")]),
-            html.span([], [html.text("OTP 29 · connected")]),
-          ]),
-        ]),
-        html.button([attribute.class("node-card")], [
-          html.span([attribute.class("status-dot warning")], []),
-          html.span([], [
-            html.strong([], [html.text("payments@local")]),
-            html.span([], [html.text("clock ±3.2 ms")]),
+            html.strong([], [html.text("Attached BEAM session")]),
+            html.span([], [html.text(capture_phase_label(model.capture_phase))]),
           ]),
         ]),
       ]),
       html.section([], [
-        html.h2([], [html.text("Capture sessions")]),
-        html.ol([attribute.class("session-list")], [
-          session_item("#1042", "checkout.handle/1", "Complete", True),
-          session_item("#1041", "checkout.handle/1", "Truncated", False),
-          session_item("#1040", "worker.run/2", "Complete", False),
+        html.h2([], [html.text("Capture session")]),
+        html.p([], [
+          html.text(case string.trim(model.trigger_input) {
+            "" -> "No trigger armed"
+            trigger -> trigger
+          }),
         ]),
       ]),
     ],
   )
 }
 
-fn session_item(
-  id: String,
-  trigger: String,
-  status: String,
-  active: Bool,
-) -> Element(workspace.Msg) {
-  html.li([], [
-    html.button(
-      [
-        attribute.class(case active {
-          True -> "session active"
-          False -> "session"
-        }),
-      ],
-      [
-        html.span([], [html.strong([], [html.text(id)]), html.text(trigger)]),
-        html.span([attribute.class("session-status")], [html.text(status)]),
-      ],
-    ),
+fn causal_workspace(model: workspace.Model) -> Element(workspace.Msg) {
+  case model.mode {
+    workspace.Live -> live_workspace(model)
+    workspace.Compare -> compare_workspace(model)
+    workspace.Capture -> event_workspace(model)
+  }
+}
+
+fn compare_workspace(model: workspace.Model) -> Element(workspace.Msg) {
+  let items = case model.compare_report {
+    None -> []
+    Some(report) ->
+      report.reports
+      |> list.flat_map(fn(run) {
+        list.map(run.items, fn(item) { ComparedItem(run.path, item) })
+      })
+  }
+  html.section(
+    [
+      attribute.class("causal panel compare-panel"),
+      attribute.aria_label("Trace comparison"),
+    ],
+    [
+      html.div([attribute.class("panel-toolbar")], [
+        html.div([], [
+          html.p([attribute.class("eyebrow")], [html.text("compare")]),
+          html.h2([], [html.text("PID-independent causal alignment")]),
+        ]),
+        html.span(
+          [attribute.class("window-count"), attribute.aria_live("polite")],
+          [html.text(compare_summary(model))],
+        ),
+      ]),
+      case model.compare_report {
+        None ->
+          html.div([attribute.class("empty-state compare-empty")], [
+            html.p([], [
+              html.text(
+                "Enter two or more local .beamtrace paths. The first run is the baseline.",
+              ),
+            ]),
+          ])
+        Some(report) ->
+          html.div([attribute.class("compare-results")], [
+            alignment_table(items),
+            statistics_table(report.statistics),
+          ])
+      },
+    ],
+  )
+}
+
+fn compare_summary(model: workspace.Model) -> String {
+  case model.compare_loading, model.compare_error, model.compare_report {
+    True, _, _ -> "Loading bounded trace set…"
+    False, Some(reason), _ -> "Compare unavailable · " <> reason
+    False, None, None -> "No comparison loaded"
+    False, None, Some(report) -> {
+      let added =
+        list.fold(report.reports, 0, fn(total, run) { total + run.added })
+      let removed =
+        list.fold(report.reports, 0, fn(total, run) { total + run.removed })
+      let changed =
+        list.fold(report.reports, 0, fn(total, run) { total + run.changed })
+      int.to_string(report.run_count)
+      <> " runs · +"
+      <> int.to_string(added)
+      <> " −"
+      <> int.to_string(removed)
+      <> " ~"
+      <> int.to_string(changed)
+    }
+  }
+}
+
+fn alignment_table(rows: List(ComparedItem)) -> Element(workspace.Msg) {
+  html.div([attribute.class("event-table-wrap compare-alignment")], [
+    html.table([attribute.aria_label("Accessible trace alignment table")], [
+      html.thead([], [
+        html.tr([], [
+          html.th([], [html.text("Candidate")]),
+          html.th([], [html.text("Status")]),
+          html.th([], [html.text("Baseline event")]),
+          html.th([], [html.text("Candidate event")]),
+          html.th([], [html.text("Latency Δ")]),
+          html.th([], [html.text("Reason")]),
+        ]),
+      ]),
+      html.tbody([], list.map(rows, alignment_row)),
+    ]),
   ])
 }
 
-fn causal_workspace(model: workspace.Model) -> Element(workspace.Msg) {
+fn alignment_row(row: ComparedItem) -> Element(workspace.Msg) {
+  html.tr([attribute.class(compare_status_class(row.item.status))], [
+    html.td([], [html.text(row.path)]),
+    html.td([], [
+      html.span([attribute.class("kind-pill")], [html.text(row.item.status)]),
+    ]),
+    html.td([], [html.text(or_dash(row.item.left_id))]),
+    html.td([], [html.text(or_dash(row.item.right_id))]),
+    html.td([], [html.text(latency_delta(row.item))]),
+    html.td([], [html.text(or_dash(row.item.reason))]),
+  ])
+}
+
+fn compare_status_class(status: String) -> String {
+  case status {
+    "added" | "removed" | "changed" -> "anomalous"
+    _ -> ""
+  }
+}
+
+fn latency_delta(item: workspace.CompareItem) -> String {
+  case item.status {
+    "matched" ->
+      case item.latency_delta_ns >= 0 {
+        True -> "+" <> int.to_string(item.latency_delta_ns) <> " ns"
+        False -> int.to_string(item.latency_delta_ns) <> " ns"
+      }
+    _ -> "—"
+  }
+}
+
+fn or_dash(value: String) -> String {
+  case value {
+    "" -> "—"
+    _ -> value
+  }
+}
+
+fn statistics_table(
+  rows: List(workspace.BranchStatistic),
+) -> Element(workspace.Msg) {
+  html.div([attribute.class("event-table-wrap compare-statistics")], [
+    html.table([attribute.aria_label("Multi-run branch statistics")], [
+      html.thead([], [
+        html.tr([], [
+          html.th([], [html.text("Logical branch signature")]),
+          html.th([], [html.text("Latency")]),
+          html.th([], [html.text("Occurrence")]),
+        ]),
+      ]),
+      html.tbody(
+        [],
+        list.map(rows, fn(row) {
+          html.tr([], [
+            html.td([], [html.text(row.signature)]),
+            html.td([], [
+              html.text(
+                "p50 "
+                <> int.to_string(row.p50_ns)
+                <> " ns · p95 "
+                <> int.to_string(row.p95_ns)
+                <> " ns",
+              ),
+            ]),
+            html.td([], [
+              html.text(
+                int.to_string(row.occurrences)
+                <> "/"
+                <> int.to_string(row.total_runs)
+                <> " runs",
+              ),
+            ]),
+          ])
+        }),
+      ),
+    ]),
+  ])
+}
+
+fn event_workspace(model: workspace.Model) -> Element(workspace.Msg) {
   let visible = workspace.visible_events(model)
   let shown_count = list.length(visible)
   let total_count = model.total_events
@@ -204,15 +557,126 @@ fn causal_workspace(model: workspace.Model) -> Element(workspace.Msg) {
           attribute.attribute("height", "620"),
           attribute.aria_hidden(True),
         ]),
-        html.div([attribute.class("lane-labels"), attribute.aria_hidden(True)], [
-          html.span([], [html.text("checkout")]),
-          html.span([], [html.text("cart_server")]),
-          html.span([], [html.text("payment_worker")]),
-        ]),
       ]),
       event_table(visible),
     ],
   )
+}
+
+fn live_workspace(model: workspace.Model) -> Element(workspace.Msg) {
+  let rows = workspace.filtered_live_rows(model)
+  html.section(
+    [attribute.class("causal panel"), attribute.aria_label("Live processes")],
+    [
+      html.div([attribute.class("panel-toolbar")], [
+        html.div([], [
+          html.p([attribute.class("eyebrow")], [html.text("live")]),
+          html.h2([], [html.text("Bounded process sampling")]),
+        ]),
+        html.div([attribute.class("toolbar-actions")], [
+          html.span([attribute.class("window-count")], [
+            html.text(
+              "Topology · supervision "
+              <> int.to_string(list.length(model.live_supervision))
+              <> " · spawn "
+              <> int.to_string(list.length(model.live_spawn))
+              <> " · links "
+              <> int.to_string(list.length(model.live_links)),
+            ),
+          ]),
+          html.span(
+            [attribute.class("window-count"), attribute.aria_live("polite")],
+            [html.text(live_status(model, list.length(rows)))],
+          ),
+        ]),
+      ]),
+      html.div([attribute.class("canvas-frame")], [
+        html.canvas([
+          attribute.id("causal-canvas"),
+          attribute.attribute("width", "1600"),
+          attribute.attribute("height", "620"),
+          attribute.aria_hidden(True),
+        ]),
+      ]),
+      live_table(model, rows),
+    ],
+  )
+}
+
+fn live_status(model: workspace.Model, visible_count: Int) -> String {
+  case model.live_loading, model.live_error {
+    True, _ -> "Refreshing bounded sample…"
+    False, Some(reason) -> "Live unavailable · " <> reason
+    False, None ->
+      int.to_string(visible_count)
+      <> " processes · Generation "
+      <> int.to_string(model.live_generation)
+  }
+}
+
+fn live_table(
+  model: workspace.Model,
+  rows: List(workspace.LiveRow),
+) -> Element(workspace.Msg) {
+  html.div([attribute.class("event-table-wrap")], [
+    html.table([attribute.aria_label("Accessible live process table")], [
+      html.thead([], [
+        html.tr([], [
+          html.th([], [html.text("Process")]),
+          html.th([], [html.text("PID")]),
+          html.th([], [html.text("Mailbox")]),
+          html.th([], [html.text("Memory")]),
+          html.th([], [html.text("Reductions")]),
+          html.th([], [html.text("Status")]),
+          html.th([], [html.text("Anomalies")]),
+          html.th([], [html.text("Evidence")]),
+        ]),
+      ]),
+      html.tbody([], list.map(rows, fn(row) { live_row(model, row) })),
+    ]),
+  ])
+}
+
+fn live_row(
+  model: workspace.Model,
+  row: workspace.LiveRow,
+) -> Element(workspace.Msg) {
+  let findings = workspace.live_findings_for(model, row.pid)
+  html.tr(
+    [
+      attribute.class(case findings {
+        [] -> ""
+        _ -> "anomalous"
+      }),
+      event.on_click(workspace.UserSelectedLiveProcess(row.pid)),
+    ],
+    [
+      html.td([], [
+        html.button([attribute.class("event-link")], [html.text(row.label)]),
+      ]),
+      html.td([], [html.text(row.pid)]),
+      html.td([], [html.text(int.to_string(row.mailbox_len))]),
+      html.td([], [html.text(int.to_string(row.memory_bytes) <> " B")]),
+      html.td([], [html.text(int.to_string(row.reductions))]),
+      html.td([], [html.text(row.status)]),
+      html.td([], [html.text(finding_names(findings))]),
+      html.td([], [html.text(live_evidence_label(findings))]),
+    ],
+  )
+}
+
+fn finding_names(findings: List(workspace.LiveFinding)) -> String {
+  case findings {
+    [] -> "None"
+    _ -> findings |> list.map(fn(finding) { finding.kind }) |> string.join(", ")
+  }
+}
+
+fn live_evidence_label(findings: List(workspace.LiveFinding)) -> String {
+  case findings {
+    [] -> "Exact sample"
+    [finding, ..] -> evidence_label(finding.evidence)
+  }
 }
 
 fn event_table(rows: List(workspace.EventRow)) -> Element(workspace.Msg) {
@@ -256,10 +720,57 @@ fn event_row(row: workspace.EventRow) -> Element(workspace.Msg) {
 }
 
 fn inspector(model: workspace.Model) -> Element(workspace.Msg) {
+  case model.mode {
+    workspace.Live -> live_inspector(model)
+    workspace.Compare -> compare_inspector(model)
+    workspace.Capture -> event_inspector(model)
+  }
+}
+
+fn compare_inspector(model: workspace.Model) -> Element(workspace.Msg) {
+  html.aside(
+    [
+      attribute.class("inspector panel"),
+      attribute.aria_label("Compare inspector"),
+      attribute.attribute("tabindex", "0"),
+    ],
+    [
+      panel_heading("Compare inspector", "03"),
+      case model.compare_report {
+        None ->
+          html.div([attribute.class("empty-state")], [
+            html.p([], [
+              html.text("Run a comparison to inspect branch statistics."),
+            ]),
+          ])
+        Some(report) ->
+          html.div([attribute.class("inspector-content")], [
+            definition("Baseline", report.baseline),
+            definition("Runs", int.to_string(report.run_count)),
+            definition(
+              "Aligned candidates",
+              int.to_string(list.length(report.reports)),
+            ),
+            definition(
+              "Branch signatures",
+              int.to_string(list.length(report.statistics)),
+            ),
+            definition(
+              "Normalization",
+              "logical actor · term shape · root-relative time",
+            ),
+          ])
+      },
+    ],
+  )
+}
+
+fn event_inspector(model: workspace.Model) -> Element(workspace.Msg) {
   html.aside(
     [
       attribute.class("inspector panel"),
       attribute.aria_label("Event inspector"),
+      attribute.attribute("tabindex", "0"),
     ],
     [
       panel_heading("Event inspector", "03"),
@@ -306,13 +817,7 @@ fn inspector_event(
     definition("Evidence", evidence_label(row.evidence)),
     definition("Duration", int.to_string(row.duration_ns) <> " ns"),
     definition("Boundary", "None observed"),
-    html.a(
-      [
-        attribute.class("source-link"),
-        attribute.attribute("href", "vscode://file/src/checkout.gleam:42"),
-      ],
-      [html.text("Open source · checkout.gleam:42")],
-    ),
+    definition("Source", "Unavailable in this event metadata"),
     html.label([attribute.class("annotation")], [
       html.span([], [html.text("Annotation")]),
       html.textarea(
@@ -327,6 +832,78 @@ fn inspector_event(
   ])
 }
 
+fn live_inspector(model: workspace.Model) -> Element(workspace.Msg) {
+  html.aside(
+    [
+      attribute.class("inspector panel"),
+      attribute.aria_label("Process inspector"),
+      attribute.attribute("tabindex", "0"),
+    ],
+    [
+      panel_heading("Process inspector", "03"),
+      case workspace.selected_live_process(model) {
+        Error(_) ->
+          html.div([attribute.class("empty-state")], [
+            html.p([], [
+              html.text(
+                "Select a process to inspect sampled metadata and evidence.",
+              ),
+            ]),
+          ])
+        Ok(row) -> live_inspector_process(model, row)
+      },
+    ],
+  )
+}
+
+fn live_inspector_process(
+  model: workspace.Model,
+  row: workspace.LiveRow,
+) -> Element(workspace.Msg) {
+  let findings = workspace.live_findings_for(model, row.pid)
+  html.div([attribute.class("inspector-content")], [
+    html.div([attribute.class("inspector-title")], [
+      html.div([], [
+        html.p([attribute.class("eyebrow")], [html.text(row.status)]),
+        html.h2([], [html.text(row.label)]),
+      ]),
+    ]),
+    definition("PID", row.pid <> " @ " <> row.node),
+    definition("Initial call", row.initial_call),
+    definition("Current function", row.current_function),
+    definition("Mailbox", int.to_string(row.mailbox_len)),
+    definition("Memory", int.to_string(row.memory_bytes) <> " bytes"),
+    definition("Heap", int.to_string(row.total_heap_words) <> " words"),
+    definition("Ancestors", list_text(row.ancestors)),
+    definition("Links", list_text(row.links)),
+    html.section([attribute.class("finding-list")], [
+      html.h3([], [html.text("Anomaly evidence")]),
+      case findings {
+        [] ->
+          html.p([], [html.text("No anomaly crossed its hysteresis threshold.")])
+        _ ->
+          html.ul(
+            [],
+            list.map(findings, fn(finding) {
+              html.li([], [
+                html.strong([], [html.text(finding.kind)]),
+                html.span([], [html.text(finding.summary)]),
+                html.span([], [html.text(evidence_label(finding.evidence))]),
+              ])
+            }),
+          )
+      },
+    ]),
+  ])
+}
+
+fn list_text(items: List(String)) -> String {
+  case items {
+    [] -> "None observed"
+    _ -> string.join(items, ", ")
+  }
+}
+
 fn definition(label: String, value: String) -> Element(workspace.Msg) {
   html.div([attribute.class("definition")], [
     html.span([], [html.text(label)]),
@@ -335,6 +912,41 @@ fn definition(label: String, value: String) -> Element(workspace.Msg) {
 }
 
 fn minimap(model: workspace.Model) -> Element(workspace.Msg) {
+  case model.mode {
+    workspace.Live ->
+      html.footer(
+        [
+          attribute.class("minimap"),
+          attribute.aria_label("Live sampling status"),
+        ],
+        [
+          html.span([], [
+            html.text(
+              "Generation "
+              <> int.to_string(model.live_generation)
+              <> " · sampled at "
+              <> int.to_string(model.live_sampled_at_ms)
+              <> " ms",
+            ),
+          ]),
+          html.span([], [
+            html.text(
+              int.to_string(list.length(model.live_findings))
+              <> " active inferred anomalies",
+            ),
+          ]),
+        ],
+      )
+    workspace.Compare ->
+      html.footer(
+        [attribute.class("minimap"), attribute.aria_label("Compare summary")],
+        [html.span([], [html.text(compare_summary(model))])],
+      )
+    workspace.Capture -> event_minimap(model)
+  }
+}
+
+fn event_minimap(model: workspace.Model) -> Element(workspace.Msg) {
   let previous = int.max(model.viewport_start - model.viewport_size, 0)
   let last_start = int.max(model.total_events - model.viewport_size, 0)
   let next = int.min(model.viewport_start + model.viewport_size, last_start)

@@ -4,10 +4,14 @@ import beamtrace_runtime/annotations
 import beamtrace_runtime/api
 import beamtrace_runtime/audit
 import beamtrace_runtime/audit_store
+import beamtrace_runtime/capture
+import beamtrace_runtime/capture_session
 import beamtrace_runtime/enrollment_store
+import beamtrace_runtime/live
 import beamtrace_runtime/local_auth
 import beamtrace_runtime/oidc
 import beamtrace_runtime/oidc_flow
+import beamtrace_runtime/raw_grant
 import beamtrace_runtime/rbac
 import beamtrace_runtime/relay_archive
 import beamtrace_runtime/relay_channel
@@ -16,9 +20,11 @@ import beamtrace_runtime/relay_inbox
 import beamtrace_runtime/storage
 import beamtrace_runtime/team_auth
 import beamtrace_runtime/team_store
+import gleam/dynamic/decode
 import gleam/http
 import gleam/http/request
 import gleam/http/response
+import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
@@ -26,6 +32,10 @@ import gleeunit/should
 import wisp/simulate
 
 pub type TestSigner
+
+type RawGrantResponse {
+  RawGrantResponse(grant: String, expires_at_ms: Int)
+}
 
 @external(erlang, "beamtrace_id_token_test_ffi", "new_signer")
 fn new_test_signer() -> TestSigner
@@ -95,6 +105,7 @@ pub fn workspace_assets_are_served_only_from_fixed_routes_test() {
       None,
       None,
       None,
+      None,
     )
   let index =
     simulate.request(http.Get, "/")
@@ -113,7 +124,7 @@ pub fn workspace_assets_are_served_only_from_fixed_routes_test() {
 pub fn bootstrap_route_redirects_once_with_strict_httponly_cookie_test() {
   let #(store, token) = local_auth.new_at(1000, 60_000)
   let context =
-    api.Context("0.1.0", api.Local, None, Some(store), None, None, None)
+    api.Context("0.1.0", api.Local, None, Some(store), None, None, None, None)
   let response =
     simulate.request(http.Get, "/bootstrap/" <> token)
     |> api.handle_at(context, 1001)
@@ -165,7 +176,16 @@ pub fn event_pages_require_authentication_and_enforce_a_bounded_limit_test() {
   let #(store, token) = local_auth.new_at(1000, 60_000)
   let assert Ok(session) = local_auth.exchange(store, token, 1001)
   let context =
-    api.Context("0.1.0", api.Local, None, Some(store), Some(path), None, None)
+    api.Context(
+      "0.1.0",
+      api.Local,
+      None,
+      Some(store),
+      Some(path),
+      None,
+      None,
+      None,
+    )
   let url = "/api/v1/sessions/current/events?start=0&limit=1"
 
   simulate.request(http.Get, url)
@@ -205,6 +225,371 @@ pub fn event_pages_require_authentication_and_enforce_a_bounded_limit_test() {
   local_auth.close(store)
 }
 
+pub fn local_capture_api_arms_pages_and_saves_a_real_session_test() {
+  let captured =
+    capture.CaptureResult(
+      events: [session_event("captured-root")],
+      completeness: types.Complete,
+    )
+  let capture_store =
+    capture_session.new_with_backends_for_nodes(
+      ["app@host"],
+      fn(spec) {
+        case spec.max_roots == 3, spec.preset == types.GenServer {
+          True, True -> Ok(captured)
+          _, _ -> Error("capture_spec_not_forwarded")
+        }
+      },
+      fn(node, _query, _limit) {
+        Ok([capture.MfaCandidate(node, "shop", "checkout", 1)])
+      },
+    )
+  let #(auth, token) = local_auth.new_at(1000, 60_000)
+  let assert Ok(session) = local_auth.exchange(auth, token, 1001)
+  let context =
+    api.Context(
+      tool_version: "0.1.0",
+      mode: api.Local,
+      static_root: None,
+      local_auth: Some(auth),
+      archive_path: None,
+      relay_enrollment: None,
+      team_security: None,
+      local_capture: Some(capture_store),
+    )
+  let body =
+    "{\"trigger\":\"shop:checkout/1\",\"where\":null,"
+    <> "\"capture_window_ms\":1000,\"max_events\":1000,"
+    <> "\"max_bytes\":1000000,\"max_agent_mailbox\":100,"
+    <> "\"max_roots\":3,\"preset\":\"gen-server\"}"
+
+  simulate.request(http.Get, "/api/v1/targets/current/mfas?q=check&limit=20")
+  |> api.handle_at(context, 1002)
+  |> fn(response) { response.status }
+  |> should.equal(401)
+
+  let candidates =
+    simulate.request(http.Get, "/api/v1/targets/current/mfas?q=check&limit=20")
+    |> request.set_header("cookie", "beamtrace_session=" <> session.id)
+    |> api.handle_at(context, 1002)
+  candidates.status |> should.equal(200)
+  simulate.read_body(candidates)
+  |> string.contains("\"mfa\":\"shop:checkout/1\"")
+  |> should.be_true()
+
+  simulate.request(http.Post, "/api/v1/sessions/current/arm")
+  |> simulate.string_body(body)
+  |> request.set_header("content-type", "application/json")
+  |> api.handle_at(context, 1002)
+  |> fn(response) { response.status }
+  |> should.equal(401)
+
+  let invalid_preset =
+    "{\"trigger\":\"shop:checkout/1\",\"where\":null,"
+    <> "\"capture_window_ms\":1000,\"max_events\":1000,"
+    <> "\"max_bytes\":1000000,\"max_agent_mailbox\":100,"
+    <> "\"max_roots\":3,\"preset\":\"magic\"}"
+  simulate.request(http.Post, "/api/v1/sessions/current/arm")
+  |> simulate.string_body(invalid_preset)
+  |> request.set_header("content-type", "application/json")
+  |> request.set_header("cookie", "beamtrace_session=" <> session.id)
+  |> api.handle_at(context, 1002)
+  |> fn(response) { response.status }
+  |> should.equal(400)
+
+  let invalid_roots =
+    "{\"trigger\":\"shop:checkout/1\",\"where\":null,"
+    <> "\"capture_window_ms\":1000,\"max_events\":1000,"
+    <> "\"max_bytes\":1000000,\"max_agent_mailbox\":100,"
+    <> "\"max_roots\":0,\"preset\":\"generic\"}"
+  simulate.request(http.Post, "/api/v1/sessions/current/arm")
+  |> simulate.string_body(invalid_roots)
+  |> request.set_header("content-type", "application/json")
+  |> request.set_header("cookie", "beamtrace_session=" <> session.id)
+  |> api.handle_at(context, 1002)
+  |> fn(response) { response.status }
+  |> should.equal(400)
+
+  let armed =
+    simulate.request(http.Post, "/api/v1/sessions/current/arm")
+    |> simulate.string_body(body)
+    |> request.set_header("content-type", "application/json")
+    |> request.set_header("cookie", "beamtrace_session=" <> session.id)
+    |> api.handle_at(context, 1002)
+  armed.status |> should.equal(202)
+  simulate.read_body(armed)
+  |> string.contains("\"status\":\"armed\"")
+  |> should.be_true()
+  capture_session.await(capture_store, 1000) |> should.equal(Ok(captured))
+
+  let status =
+    simulate.request(http.Get, "/api/v1/sessions/current")
+    |> request.set_header("cookie", "beamtrace_session=" <> session.id)
+    |> api.handle_at(context, 1003)
+  status.status |> should.equal(200)
+  simulate.read_body(status)
+  |> string.contains("\"status\":\"ready\"")
+  |> should.be_true()
+
+  let events =
+    simulate.request(
+      http.Get,
+      "/api/v1/sessions/current/events?start=0&limit=10",
+    )
+    |> request.set_header("cookie", "beamtrace_session=" <> session.id)
+    |> api.handle_at(context, 1003)
+  events.status |> should.equal(200)
+  simulate.read_body(events)
+  |> string.contains("\"id\":\"captured-root\"")
+  |> should.be_true()
+
+  let path = "build/beamtrace-api-session-save.beamtrace"
+  let saved =
+    simulate.request(http.Post, "/api/v1/sessions/current/save")
+    |> simulate.string_body("{\"path\":\"" <> path <> "\"}")
+    |> request.set_header("content-type", "application/json")
+    |> request.set_header("cookie", "beamtrace_session=" <> session.id)
+    |> api.handle_at(context, 1004)
+  saved.status |> should.equal(201)
+  storage.load(path) |> should.be_ok
+
+  capture_session.close(capture_store)
+  local_auth.close(auth)
+}
+
+pub fn occupied_tracer_status_offers_live_without_claiming_exact_capture_test() {
+  let capture_store =
+    capture_session.new_with_backend(fn(_spec) {
+      Error("system_tracer_occupied")
+    })
+  let #(auth, token) = local_auth.new_at(1000, 60_000)
+  let assert Ok(session) = local_auth.exchange(auth, token, 1001)
+  let context =
+    api.Context(
+      "0.1.0",
+      api.Local,
+      None,
+      Some(auth),
+      None,
+      None,
+      None,
+      Some(capture_store),
+    )
+  let body =
+    "{\"trigger\":\"shop:checkout/1\",\"where\":null,"
+    <> "\"capture_window_ms\":1000,\"max_events\":1000,"
+    <> "\"max_bytes\":1000000,\"max_agent_mailbox\":100,"
+    <> "\"max_roots\":1,\"preset\":\"generic\"}"
+
+  simulate.request(http.Post, "/api/v1/sessions/current/arm")
+  |> simulate.string_body(body)
+  |> request.set_header("content-type", "application/json")
+  |> request.set_header("cookie", "beamtrace_session=" <> session.id)
+  |> api.handle_at(context, 1002)
+  |> fn(response) { response.status }
+  |> should.equal(202)
+  capture_session.await(capture_store, 1000)
+  |> should.equal(
+    Error(capture_session.CaptureFailed("system_tracer_occupied")),
+  )
+
+  let response =
+    simulate.request(http.Get, "/api/v1/sessions/current")
+    |> request.set_header("cookie", "beamtrace_session=" <> session.id)
+    |> api.handle_at(context, 1003)
+  response.status |> should.equal(200)
+  let status = simulate.read_body(response)
+  status |> string.contains("\"exact_capture\":false") |> should.be_true()
+  status
+  |> string.contains("\"fallback\":\"live_sampling\"")
+  |> should.be_true()
+  capture_session.close(capture_store)
+  local_auth.close(auth)
+}
+
+pub fn live_api_is_authenticated_shared_bounded_and_explains_inferences_test() {
+  let capture_store =
+    capture_session.new_with_live_backend_for_nodes(
+      ["app@host"],
+      fn(_spec) { Error("capture_unused") },
+      fn(_node, offset, _limit) {
+        let sample = case offset {
+          0 -> live_sample(1, 1000, 10)
+          _ -> live_sample(50, 10_000, 1000)
+        }
+        Ok(#([sample], offset + 1))
+      },
+    )
+  let #(auth, token) = local_auth.new_at(1000, 60_000)
+  let assert Ok(session) = local_auth.exchange(auth, token, 1001)
+  let context =
+    api.Context(
+      "0.1.0",
+      api.Local,
+      None,
+      Some(auth),
+      None,
+      None,
+      None,
+      Some(capture_store),
+    )
+
+  simulate.request(http.Get, "/api/v1/live?limit=20")
+  |> api.handle_at(context, 1002)
+  |> fn(response) { response.status }
+  |> should.equal(401)
+
+  simulate.request(http.Get, "/api/v1/live?limit=1001")
+  |> request.set_header("cookie", "beamtrace_session=" <> session.id)
+  |> api.handle_at(context, 1002)
+  |> fn(response) { response.status }
+  |> should.equal(400)
+
+  let first =
+    simulate.request(http.Get, "/api/v1/live?limit=20")
+    |> request.set_header("cookie", "beamtrace_session=" <> session.id)
+    |> api.handle_at(context, 1002)
+  first.status |> should.equal(200)
+  let first_body = simulate.read_body(first)
+  first_body |> string.contains("\"generation\":1") |> should.be_true()
+  first_body
+  |> string.contains("\"label\":\"orders worker\"")
+  |> should.be_true()
+  first_body |> string.contains("\"mailbox_len\":1") |> should.be_true()
+  first_body
+  |> string.contains("\"links\":[\"<0.7.0>\"]")
+  |> should.be_true()
+  first_body |> string.contains("\"findings\":[]") |> should.be_true()
+
+  let shared =
+    simulate.request(http.Get, "/api/v1/live?limit=20")
+    |> request.set_header("cookie", "beamtrace_session=" <> session.id)
+    |> api.handle_at(context, 1200)
+    |> simulate.read_body
+  shared |> string.contains("\"generation\":1") |> should.be_true()
+
+  let rotated =
+    simulate.request(http.Get, "/api/v1/live?limit=20")
+    |> request.set_header("cookie", "beamtrace_session=" <> session.id)
+    |> api.handle_at(context, 1603)
+    |> simulate.read_body
+  rotated |> string.contains("\"generation\":2") |> should.be_true()
+  rotated
+  |> string.contains("\"kind\":\"mailbox_growth\"")
+  |> should.be_true()
+  rotated
+  |> string.contains("\"status\":\"inferred\"")
+  |> should.be_true()
+  rotated |> string.contains("\"supervision\"") |> should.be_true()
+  rotated
+  |> string.contains("\"reason\":\"proc_lib ancestor metadata\"")
+  |> should.be_true()
+
+  capture_session.close(capture_store)
+  local_auth.close(auth)
+}
+
+pub fn compare_api_loads_multiple_local_traces_and_returns_visual_alignment_data_test() {
+  let left = "build/api-compare-left.beamtrace"
+  let right = "build/api-compare-right.beamtrace"
+  let manifest =
+    codec.Manifest(
+      1,
+      "0.1.0",
+      "api-compare",
+      ["app@host"],
+      types.Complete,
+      types.Metadata,
+      [],
+    )
+  storage.save(left, manifest, [session_event("left-root")])
+  |> should.equal(Ok(Nil))
+  storage.save(right, manifest, [
+    session_event("right-root"),
+    types.TraceEvent(
+      ..session_event("right-extra"),
+      kind: types.Stop("extra branch"),
+      local_timestamp_ns: 20,
+    ),
+  ])
+  |> should.equal(Ok(Nil))
+
+  let #(auth, token) = local_auth.new_at(1000, 60_000)
+  let assert Ok(session) = local_auth.exchange(auth, token, 1001)
+  let context =
+    api.Context("0.1.0", api.Local, None, Some(auth), None, None, None, None)
+  let body = "{\"paths\":[\"" <> left <> "\",\"" <> right <> "\"]}"
+
+  simulate.request(http.Post, "/api/v1/compare")
+  |> simulate.string_body(body)
+  |> request.set_header("content-type", "application/json")
+  |> api.handle_at(context, 1002)
+  |> fn(response) { response.status }
+  |> should.equal(401)
+
+  simulate.request(http.Post, "/api/v1/compare")
+  |> simulate.string_body("{\"paths\":[\"only.beamtrace\"]}")
+  |> request.set_header("content-type", "application/json")
+  |> request.set_header("cookie", "beamtrace_session=" <> session.id)
+  |> api.handle_at(context, 1002)
+  |> fn(response) { response.status }
+  |> should.equal(400)
+
+  let compared =
+    simulate.request(http.Post, "/api/v1/compare")
+    |> simulate.string_body(body)
+    |> request.set_header("content-type", "application/json")
+    |> request.set_header("cookie", "beamtrace_session=" <> session.id)
+    |> api.handle_at(context, 1002)
+  compared.status |> should.equal(200)
+  let result = simulate.read_body(compared)
+  result |> string.contains("\"run_count\":2") |> should.be_true()
+  result |> string.contains("\"added\":1") |> should.be_true()
+  result |> string.contains("\"status\":\"added\"") |> should.be_true()
+  result |> string.contains("\"p50_ns\"") |> should.be_true()
+  result |> string.contains("\"occurrence_rate\"") |> should.be_true()
+
+  local_auth.close(auth)
+}
+
+fn live_sample(
+  mailbox_len: Int,
+  memory_bytes: Int,
+  reductions: Int,
+) -> live.ProcessSample {
+  live.ProcessSample(
+    node: "app@host",
+    pid: "<0.42.0>",
+    label: "orders worker",
+    registered_name: "orders",
+    process_label: "orders worker",
+    initial_call: "orders_worker:init/1",
+    mailbox_len: mailbox_len,
+    memory_bytes: memory_bytes,
+    reductions: reductions,
+    heap_words: 100,
+    total_heap_words: 200,
+    link_count: 1,
+    status: "waiting",
+    current_function: "gen_server:loop/7",
+    links: ["<0.7.0>"],
+    ancestors: ["orders_sup"],
+  )
+}
+
+fn session_event(id: String) -> types.TraceEvent {
+  let physical = types.ProcessRef("app@host", "<0.1.0>")
+  types.TraceEvent(
+    id: id,
+    root_id: id,
+    node: "app@host",
+    process: types.ProcessIdentity(physical, None, []),
+    local_timestamp_ns: 1,
+    kind: types.Root(types.Mfa("shop", "checkout", 1), []),
+    evidence: types.Exact,
+  )
+}
+
 pub fn relay_enrollment_endpoint_consumes_code_once_without_echoing_it_test() {
   let #(store, code) = enrollment_store.new_at(1000, 100)
   let identity = relay_channel.new_identity()
@@ -218,6 +603,7 @@ pub fn relay_enrollment_endpoint_consumes_code_once_without_echoing_it_test() {
       None,
       None,
       Some(api.RelayEnrollment(store, "wss://hub.example")),
+      None,
       None,
     )
   let request =
@@ -294,6 +680,7 @@ pub fn team_relay_frames_are_authenticated_paged_and_keep_gap_evidence_test() {
         Some(inbox),
         None,
       )),
+      None,
     )
   let url = "/api/v1/relays/" <> relay_id <> "/frames?start=0&limit=2"
 
@@ -370,6 +757,7 @@ pub fn team_relay_frames_fall_back_to_durable_archive_after_restart_test() {
         Some(empty_inbox),
         Some(api.RelayArchive(reopened, blobs)),
       )),
+      None,
     )
 
   let response =
@@ -415,6 +803,7 @@ pub fn team_annotations_enforce_session_rbac_origin_and_csrf_test() {
         None,
         None,
       )),
+      None,
     )
   let body = "{\"event_id\":\"event-1\",\"text\":\"check restart\"}"
 
@@ -479,6 +868,111 @@ pub fn team_annotations_enforce_session_rbac_origin_and_csrf_test() {
   team_auth.close(sessions)
 }
 
+pub fn team_raw_capture_authorization_is_rbac_csrf_bounded_and_audited_test() {
+  let sessions = team_auth.new()
+  let annotation_store = annotations.new()
+  let assert Ok(metadata) = team_store.open(":memory:")
+  let enrolled_identity = relay_channel.new_identity()
+  team_store.put_relay_identity(
+    metadata,
+    team_store.RelayIdentity(
+      "relay-11223344556677889900aabb",
+      "Ed25519",
+      enrolled_identity.public_key,
+      9000,
+    ),
+  )
+  |> should.equal(Ok(Nil))
+  let assert Ok(audit_log) = audit_store.persistent(metadata)
+  let investigator = team_session(sessions, "raw-no-role", [rbac.Investigator])
+  let raw_investigator =
+    team_session(sessions, "raw-allowed", [
+      rbac.Investigator,
+      rbac.RawCaptureRole,
+    ])
+  let context =
+    api.Context(
+      "0.1.0",
+      api.Team,
+      None,
+      None,
+      None,
+      None,
+      Some(api.TeamSecurity(
+        sessions,
+        annotation_store,
+        audit_log,
+        "https://hub.example",
+        None,
+        None,
+        Some(api.RelayArchive(metadata, "build/raw-api-blobs")),
+      )),
+      None,
+    )
+  let body =
+    "{\"relay_id\":\"relay-11223344556677889900aabb\","
+    <> "\"duration_ms\":5000,\"max_events\":10,\"max_bytes\":4096,"
+    <> "\"redact_keys\":[\"password\",\"token\"],"
+    <> "\"max_depth\":4,\"max_binary_bytes\":64}"
+
+  raw_grant_request(investigator, body, investigator.csrf_token)
+  |> api.handle_at(context, 10_000)
+  |> fn(response) { response.status }
+  |> should.equal(403)
+  raw_grant_request(raw_investigator, body, "wrong-csrf")
+  |> api.handle_at(context, 10_000)
+  |> fn(response) { response.status }
+  |> should.equal(403)
+  let unknown_relay_body =
+    string.replace(
+      body,
+      "relay-11223344556677889900aabb",
+      "relay-ffffffffffffffffffffffff",
+    )
+  raw_grant_request(
+    raw_investigator,
+    unknown_relay_body,
+    raw_investigator.csrf_token,
+  )
+  |> api.handle_at(context, 10_000)
+  |> fn(response) { response.status }
+  |> should.equal(400)
+
+  let created =
+    raw_grant_request(raw_investigator, body, raw_investigator.csrf_token)
+    |> api.handle_at(context, 10_000)
+  created.status |> should.equal(201)
+  response.get_header(created, "cache-control") |> should.equal(Ok("no-store"))
+  let assert Ok(decoded) =
+    simulate.read_body(created)
+    |> json.parse(raw_grant_response_decoder())
+  decoded.expires_at_ms |> should.equal(15_000)
+  let hash = raw_grant.token_hash(decoded.grant)
+  let assert Ok(Some(saved)) = team_store.raw_capture_grant(metadata, hash)
+  saved.actor |> should.equal("raw-allowed")
+  saved.relay_id |> should.equal("relay-11223344556677889900aabb")
+
+  let recorded = audit_store.snapshot(audit_log)
+  audit.verify(recorded) |> should.equal(Ok(Nil))
+  let assert [denied_role, denied_csrf, denied_relay, allowed] =
+    recorded.entries
+  [
+    denied_role.outcome,
+    denied_csrf.outcome,
+    denied_relay.outcome,
+    allowed.outcome,
+  ]
+  |> should.equal(["denied_rbac", "denied_csrf", "denied_input", "allowed"])
+  recorded.entries
+  |> list.all(fn(entry) { entry.action == "raw_capture.authorize" })
+  |> should.be_true()
+
+  audit_store.close(audit_log)
+  annotations.close(annotation_store)
+  team_auth.close(sessions)
+  team_store.close(metadata) |> should.equal(Ok(Nil))
+}
+
 pub fn team_audit_api_is_admin_only_and_bounded_test() {
   let sessions = team_auth.new()
   let annotation_store = annotations.new()
@@ -510,6 +1004,7 @@ pub fn team_audit_api_is_admin_only_and_bounded_test() {
         None,
         None,
       )),
+      None,
     )
   let url = "/api/v1/audit?start=0&limit=1"
 
@@ -597,6 +1092,7 @@ pub fn oidc_http_flow_uses_pkce_and_exchanges_callback_once_test() {
         None,
         None,
       )),
+      None,
     )
 
   let started =
@@ -723,6 +1219,7 @@ pub fn oidc_nonce_mismatch_is_rejected_and_state_cannot_be_replayed_test() {
         None,
         None,
       )),
+      None,
     )
   let started =
     simulate.request(http.Get, "/auth/oidc/start")
@@ -794,6 +1291,31 @@ fn annotation_request(
       <> "; beamtrace_csrf="
       <> session.csrf_token,
   )
+}
+
+fn raw_grant_request(
+  session: team_auth.Session,
+  body: String,
+  csrf_token: String,
+) {
+  simulate.request(http.Post, "/api/v1/raw-captures/authorize")
+  |> simulate.string_body(body)
+  |> request.set_header("content-type", "application/json")
+  |> request.set_header("origin", "https://hub.example")
+  |> request.set_header("x-beamtrace-csrf", csrf_token)
+  |> request.set_header(
+    "cookie",
+    "beamtrace_session="
+      <> session.id
+      <> "; beamtrace_csrf="
+      <> session.csrf_token,
+  )
+}
+
+fn raw_grant_response_decoder() -> decode.Decoder(RawGrantResponse) {
+  use grant <- decode.field("grant", decode.string)
+  use expires_at_ms <- decode.field("expires_at_ms", decode.int)
+  decode.success(RawGrantResponse(grant, expires_at_ms))
 }
 
 fn team_session(

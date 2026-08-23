@@ -4,12 +4,19 @@
 -export([
     read_cookie_file/1,
     read_cookie_default/0,
+    read_record_cookie/0,
     write_text/2,
     random_secret/0,
     capture_id/0,
     web_root/0,
     doctor/0,
     run_command/1,
+    start_gated_command/3,
+    release_gated_command/1,
+    release_gated_command_finish/1,
+    await_gated_command/2,
+    stop_gated_command/1,
+    gated_command_running/1,
     halt/1
 ]).
 
@@ -22,6 +29,12 @@ read_cookie_file(Path) when is_binary(Path) ->
 read_cookie_default() ->
     case os:getenv("BEAMTRACE_COOKIE") of
         false -> prompt_cookie();
+        Value -> normalize_secret(unicode:characters_to_binary(Value))
+    end.
+
+read_record_cookie() ->
+    case os:getenv("BEAMTRACE_COOKIE") of
+        false -> {ok, binary:part(hex(crypto:strong_rand_bytes(32)), 0, 48)};
         Value -> normalize_secret(unicode:characters_to_binary(Value))
     end.
 
@@ -120,6 +133,234 @@ run_command([Program | Arguments]) ->
     end;
 run_command([]) ->
     {error, <<"record command is empty">>}.
+
+start_gated_command([Program | Arguments], Node, Cookie)
+        when is_binary(Node), is_binary(Cookie) ->
+    DirectErl = direct_erl_program(Program),
+    case {command_executable(Program), record_flags(Node, Cookie, not DirectErl)} of
+        {{ok, Executable}, {ok, Flags}} ->
+            Gate = gate_path(),
+            FinishGate = gate_path(),
+            _ = file:delete(Gate),
+            _ = file:delete(FinishGate),
+            GatedArguments = case DirectErl of
+                true -> insert_gate_arguments(Arguments);
+                false -> Arguments
+            end,
+            Existing = case os:getenv("ERL_AFLAGS") of
+                false -> "";
+                Value -> Value
+            end,
+            CombinedFlags = string:trim(Flags ++ " " ++ Existing),
+            try
+                Port = open_port(
+                    {spawn_executable, Executable},
+                    [
+                        binary,
+                        exit_status,
+                        stderr_to_stdout,
+                        use_stdio,
+                        {args, [binary_to_list(Arg) || Arg <- GatedArguments]},
+                        {env, [
+                            {"ERL_AFLAGS", CombinedFlags},
+                            {"BEAMTRACE_RECORD_GATE", Gate},
+                            {"BEAMTRACE_RECORD_FINISH_GATE", FinishGate}
+                        ]}
+                    ]
+                ),
+                {ok, {gated_command, Port,
+                    unicode:characters_to_binary(Gate),
+                    unicode:characters_to_binary(FinishGate),
+                    DirectErl}}
+            catch
+                Class:Reason ->
+                    {error, reason_binary({child_start_failed, Class, Reason})}
+            end;
+        {{error, Reason}, _} -> {error, Reason};
+        {_, {error, Reason}} -> {error, Reason}
+    end;
+start_gated_command([], _Node, _Cookie) ->
+    {error, <<"record command is empty">>};
+start_gated_command(_Command, _Node, _Cookie) ->
+    {error, <<"invalid gated command">>}.
+
+release_gated_command({gated_command, Port, Gate, _FinishGate, _HasFinishGate})
+        when is_port(Port), is_binary(Gate) ->
+    case file:write_file(Gate, <<"release">>, [binary, exclusive]) of
+        ok -> {ok, nil};
+        {error, eexist} -> {ok, nil};
+        {error, Reason} -> {error, reason_binary({gate_release_failed, Reason})}
+    end;
+release_gated_command(_Handle) -> {error, <<"invalid gated command">>}.
+
+release_gated_command_finish(
+    {gated_command, Port, _Gate, FinishGate, true}
+) when is_port(Port), is_binary(FinishGate) ->
+    case file:write_file(FinishGate, <<"release">>, [binary, exclusive]) of
+        ok -> {ok, nil};
+        {error, eexist} -> {ok, nil};
+        {error, Reason} -> {error, reason_binary({finish_gate_release_failed, Reason})}
+    end;
+release_gated_command_finish(
+    {gated_command, Port, _Gate, _FinishGate, false}
+) when is_port(Port) -> {ok, nil};
+release_gated_command_finish(_Handle) -> {error, <<"invalid gated command">>}.
+
+await_gated_command({gated_command, Port, Gate, FinishGate, _HasFinishGate}, TimeoutMs)
+        when is_port(Port), is_binary(Gate), is_binary(FinishGate),
+             is_integer(TimeoutMs), TimeoutMs > 0, TimeoutMs =< 86400000 ->
+    Result = collect_port_until(
+        Port,
+        [],
+        erlang:monotonic_time(millisecond) + TimeoutMs
+    ),
+    _ = file:delete(Gate),
+    _ = file:delete(FinishGate),
+    Result;
+await_gated_command(_Handle, _TimeoutMs) ->
+    {error, <<"invalid child timeout">>}.
+
+stop_gated_command({gated_command, Port, Gate, FinishGate, _HasFinishGate})
+        when is_port(Port), is_binary(Gate), is_binary(FinishGate) ->
+    try port_close(Port)
+    catch _:_ -> ok
+    end,
+    _ = file:delete(Gate),
+    _ = file:delete(FinishGate),
+    nil;
+stop_gated_command(_Handle) -> nil.
+
+gated_command_running({gated_command, Port, _Gate, _FinishGate, _HasFinishGate})
+        when is_port(Port) ->
+    case erlang:port_info(Port) of
+        undefined -> false;
+        _ -> true
+    end;
+gated_command_running(_Handle) -> false.
+
+command_executable(Program) when is_binary(Program) ->
+    case os:find_executable(binary_to_list(Program)) of
+        false -> {error, reason_binary({executable_not_found, Program})};
+        Executable -> {ok, Executable}
+    end.
+
+record_flags(Node, Cookie, IncludeGate) ->
+    case {record_node_parts(Node), safe_flag_token(Cookie)} of
+        {{ok, {Name, Host}}, true} ->
+            NameFlag = case binary:match(Host, <<".">>) of
+                nomatch -> "-sname " ++ binary_to_list(Name);
+                _ -> "-name " ++ binary_to_list(Node)
+            end,
+            GateEval = case IncludeGate of
+                true -> " -eval \"" ++ binary_to_list(start_gate_expression()) ++ "\"";
+                false -> ""
+            end,
+            {ok,
+                NameFlag ++ " -setcookie " ++ binary_to_list(Cookie)
+                ++ GateEval};
+        {{error, Reason}, _} -> {error, Reason};
+        {_, false} -> {error, <<"record cookie contains unsafe flag characters">>}
+    end.
+
+record_node_parts(Node) when is_binary(Node), byte_size(Node) > 2, byte_size(Node) =< 255 ->
+    case binary:split(Node, <<"@">>, [global]) of
+        [Name, Host] when byte_size(Name) > 0, byte_size(Host) > 0 ->
+            case safe_flag_token(Name) andalso safe_host_token(Host) of
+                true -> {ok, {Name, Host}};
+                false -> {error, <<"record node contains unsafe flag characters">>}
+            end;
+        _ -> {error, <<"record node must be name@host">>}
+    end;
+record_node_parts(_Node) -> {error, <<"record node must be name@host">>}.
+
+safe_flag_token(Value) when is_binary(Value), byte_size(Value) > 0, byte_size(Value) =< 255 ->
+    lists:all(fun(Char) ->
+        (Char >= $a andalso Char =< $z)
+        orelse (Char >= $A andalso Char =< $Z)
+        orelse (Char >= $0 andalso Char =< $9)
+        orelse Char =:= $_
+        orelse Char =:= $-
+    end, binary_to_list(Value));
+safe_flag_token(_Value) -> false.
+
+safe_host_token(Value) when is_binary(Value), byte_size(Value) > 0 ->
+    lists:all(fun(Char) ->
+        (Char >= $a andalso Char =< $z)
+        orelse (Char >= $A andalso Char =< $Z)
+        orelse (Char >= $0 andalso Char =< $9)
+        orelse Char =:= $_
+        orelse Char =:= $-
+        orelse Char =:= $.
+    end, binary_to_list(Value));
+safe_host_token(_Value) -> false.
+
+direct_erl_program(Program) when is_binary(Program) ->
+    Base = string:lowercase(filename:basename(binary_to_list(Program))),
+    Base =:= "erl" orelse Base =:= "erl.exe".
+
+insert_gate_arguments(Arguments) ->
+    insert_finish_gate(insert_start_gate(Arguments, [])).
+
+insert_start_gate([], Prefix) ->
+    lists:reverse(Prefix) ++ [<<"-eval">>, start_gate_expression()];
+insert_start_gate([Argument | _] = Rest, Prefix)
+        when Argument =:= <<"-eval">>;
+             Argument =:= <<"-s">>;
+             Argument =:= <<"-run">> ->
+    lists:reverse(Prefix) ++ [<<"-eval">>, start_gate_expression() | Rest];
+insert_start_gate([Argument | Rest], Prefix) ->
+    insert_start_gate(Rest, [Argument | Prefix]).
+
+insert_finish_gate(Arguments) -> insert_finish_gate(Arguments, []).
+
+insert_finish_gate([<<"-s">>, <<"init">>, <<"stop">> | Rest], Prefix) ->
+    lists:reverse(Prefix)
+    ++ [<<"-eval">>, finish_gate_expression(), <<"-s">>, <<"init">>, <<"stop">> | Rest];
+insert_finish_gate([Argument | Rest], Prefix) ->
+    insert_finish_gate(Rest, [Argument | Prefix]);
+insert_finish_gate([], Prefix) ->
+    lists:reverse(Prefix) ++ [<<"-eval">>, finish_gate_expression()].
+
+start_gate_expression() ->
+    <<"Wait = fun Loop() -> "
+      "case file:read_file(os:getenv([$B,$E,$A,$M,$T,$R,$A,$C,$E,$_,"
+      "$R,$E,$C,$O,$R,$D,$_, $G,$A,$T,$E])) of "
+      "{ok, _} -> ok; _ -> timer:sleep(10), Loop() end end, Wait().">>.
+
+finish_gate_expression() ->
+    <<"Wait = fun Loop() -> "
+      "case file:read_file(os:getenv([$B,$E,$A,$M,$T,$R,$A,$C,$E,$_,"
+      "$R,$E,$C,$O,$R,$D,$_, $F,$I,$N,$I,$S,$H,$_, $G,$A,$T,$E])) of "
+      "{ok, _} -> ok; _ -> timer:sleep(10), Loop() end end, Wait(), "
+      "case os:getenv(\"BEAMTRACE_RECORD_ASSERT_CLEANUP\") of \"1\" -> "
+      "case {seq_trace:get_system_tracer(), code:is_loaded(beamtrace_agent)} of "
+      "{false, false} -> ok; _ -> erlang:halt(91) end; _ -> ok end.">>.
+
+gate_path() ->
+    Base = case os:getenv("TEMP") of
+        false ->
+            case os:getenv("TMP") of
+                false -> ".";
+                Tmp -> Tmp
+            end;
+        Temp -> Temp
+    end,
+    filename:join(Base, "beamtrace-record-" ++ binary_to_list(
+        binary:part(hex(crypto:strong_rand_bytes(16)), 0, 24)
+    ) ++ ".gate").
+
+collect_port_until(Port, Acc, Deadline) ->
+    Remaining = erlang:max(0, Deadline - erlang:monotonic_time(millisecond)),
+    receive
+        {Port, {data, Data}} -> collect_port_until(Port, [Data | Acc], Deadline);
+        {Port, {exit_status, Status}} ->
+            {ok, {Status, iolist_to_binary(lists:reverse(Acc))}}
+    after Remaining ->
+        try port_close(Port)
+        catch _:_ -> ok
+        end,
+        {error, <<"record command timed out">>}
+    end.
 
 collect_port(Port, Acc) ->
     receive

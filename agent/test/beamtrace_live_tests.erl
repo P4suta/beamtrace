@@ -19,8 +19,10 @@ bounded_remote_sampling() ->
         ?assert(is_integer(NextOffset)),
         ?assert(lists:all(fun(Sample) ->
             is_tuple(Sample)
-                andalso tuple_size(Sample) =:= 13
+                andalso tuple_size(Sample) =:= 16
                 andalso element(1, Sample) =:= raw_process_sample
+                andalso is_list(element(15, Sample))
+                andalso is_list(element(16, Sample))
         end, Samples)),
         ?assertEqual(nomatch, binary:match(term_to_binary(Samples), <<"messages">>)),
         Release = erpc:call(Node, erlang, system_info, [otp_release]),

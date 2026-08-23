@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace_runtime/blob_store
+import beamtrace_runtime/raw_grant
 import beamtrace_runtime/relay_inbox
 import beamtrace_runtime/relay_ingest
+import beamtrace_runtime/relay_payload
 import beamtrace_runtime/team_store
 import gleam/int
 import gleam/list
@@ -121,6 +123,62 @@ pub fn durable_quota_rejects_before_blob_or_inbox_publication_test() {
   |> should.equal(Error("blob_not_found"))
   relay_inbox.snapshot(inbox, relay_id)
   |> should.equal([relay_inbox.Payload(1, first, 4000)])
+
+  relay_inbox.close(inbox)
+  team_store.close(metadata) |> should.equal(Ok(Nil))
+}
+
+pub fn raw_ingest_requires_matching_grant_and_never_persists_the_token_test() {
+  let assert Ok(metadata) = team_store.open(":memory:")
+  let inbox = relay_inbox.new(max_frames: 4, max_bytes: 1_000_000)
+  let blobs = "build/beamtrace-raw-ingest-blobs"
+  let relay_id = "relay-abcdefabcdefabcdefabcdef"
+  let policy = types.RawPolicy(["password", "token"], 3, 64)
+  let assert Ok(issued) =
+    raw_grant.issue(
+      metadata,
+      relay_id: relay_id,
+      actor: "investigator-raw",
+      now_ms: 5000,
+      duration_ms: 1000,
+      max_events: 1,
+      max_bytes: 100_000,
+      policy: policy,
+    )
+  let assert Ok(payload) =
+    relay_payload.encode_raw("exact", issued.token, issued.policy, [event(1)])
+  let assert Ok(decoded) = relay_payload.decode_for_ingest(payload)
+
+  relay_ingest.accept(
+    metadata,
+    blobs,
+    inbox,
+    relay_id,
+    1,
+    relay_inbox.Exact,
+    payload,
+    5500,
+  )
+  |> should.equal(Ok(relay_inbox.Accepted))
+  let assert [relay_inbox.Payload(1, persisted, 5500)] =
+    relay_inbox.snapshot(inbox, relay_id)
+  persisted |> should.equal(decoded.canonical)
+  persisted |> string.contains(issued.token) |> should.be_false()
+
+  relay_ingest.accept(
+    metadata,
+    blobs,
+    inbox,
+    relay_id,
+    2,
+    relay_inbox.Exact,
+    payload,
+    5501,
+  )
+  |> should.equal(Error("raw_capture_grant_denied"))
+  relay_inbox.snapshot(inbox, relay_id)
+  |> list.length
+  |> should.equal(1)
 
   relay_inbox.close(inbox)
   team_store.close(metadata) |> should.equal(Ok(Nil))

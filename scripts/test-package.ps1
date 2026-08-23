@@ -70,6 +70,7 @@ try {
         'lib/native/esqlite/ebin/esqlite.app',
         'share/beamtrace/web/index.html',
         'share/beamtrace/web/beamtrace_web.js',
+        'runtime/OTP_VERSION',
         'LICENSES/MIT.txt',
         'LICENSES/Apache-2.0.txt',
         'SBOM.spdx.json',
@@ -87,8 +88,26 @@ try {
         throw 'Package must contain exactly one platform SQLite NIF.'
     }
 
+    $otpVersion = (Get-Content -Raw -LiteralPath (Join-Path $root.FullName 'runtime/OTP_VERSION')).Trim()
+    if ($otpVersion -notmatch '^(27|28|29)(\.|$)') {
+        throw "Package contains an unsupported OTP runtime: $otpVersion"
+    }
+    $ertsDirectories = @(Get-ChildItem -LiteralPath (Join-Path $root.FullName 'runtime') -Directory -Filter 'erts-*')
+    if ($ertsDirectories.Count -ne 1) {
+        throw "Package must contain exactly one ERTS runtime, found $($ertsDirectories.Count)."
+    }
+    $bundledEscriptName = if ($IsWindows) { 'escript.exe' } else { 'escript' }
+    $bundledEscript = Join-Path $ertsDirectories[0].FullName "bin/$bundledEscriptName"
+    if (-not (Test-Path -LiteralPath $bundledEscript -PathType Leaf)) {
+        throw 'Package is missing its bundled escript executable.'
+    }
+
     $sbom = Get-Content -Raw -LiteralPath (Join-Path $root.FullName 'SBOM.spdx.json') | ConvertFrom-Json
-    if ($sbom.spdxVersion -ne 'SPDX-2.3' -or $sbom.packages.name -notcontains 'beamtrace_runtime') {
+    if (
+        $sbom.spdxVersion -ne 'SPDX-2.3' -or
+        $sbom.packages.name -notcontains 'beamtrace_runtime' -or
+        $sbom.packages.name -notcontains 'erlang_otp'
+    ) {
         throw 'Package SBOM is not a valid BeamTrace SPDX inventory.'
     }
 
@@ -109,22 +128,30 @@ try {
 
     $previousAgent = $env:BEAMTRACE_AGENT_BEAM
     $previousWeb = $env:BEAMTRACE_WEB_ROOT
+    $previousPath = $env:PATH
     try {
-        $env:BEAMTRACE_AGENT_BEAM = Join-Path $root.FullName 'lib/beamtrace_agent.beam'
-        $env:BEAMTRACE_WEB_ROOT = Join-Path $root.FullName 'share/beamtrace/web'
-        $version = (& escript (Join-Path $root.FullName 'lib/beamtrace.escript') version | Out-String)
+        $emptyPath = Join-Path $resolvedTestRoot 'empty-path'
+        New-Item -ItemType Directory -Path $emptyPath -Force | Out-Null
+        $env:PATH = $emptyPath
+        $launcher = if ($IsWindows) {
+            Join-Path $root.FullName 'bin/beamtrace.ps1'
+        }
+        else {
+            Join-Path $root.FullName 'bin/beamtrace'
+        }
+        $version = (& $launcher version | Out-String)
         if ($LASTEXITCODE -ne 0 -or $version -notmatch 'beamtrace 0\.1\.0') {
-            throw 'Packaged escript version smoke test failed.'
+            throw 'Self-contained package version smoke test failed without a host Erlang runtime.'
         }
-        $doctor = (& escript (Join-Path $root.FullName 'lib/beamtrace.escript') doctor | Out-String)
+        $doctor = (& $launcher doctor | Out-String)
         if ($LASTEXITCODE -ne 0 -or $doctor -notmatch 'agent BEAM: valid' -or $doctor -notmatch 'web assets: valid') {
-            throw 'Packaged escript doctor smoke test failed.'
+            throw 'Self-contained package doctor smoke test failed without a host Erlang runtime.'
         }
-        if (-not $IsWindows) {
-            $launcherVersion = (& (Join-Path $root.FullName 'bin/beamtrace') version | Out-String)
-            if ($LASTEXITCODE -ne 0 -or $launcherVersion -notmatch 'beamtrace 0\.1\.0') {
-                throw 'Packaged POSIX launcher smoke test failed.'
-            }
+        $env:PATH = $previousPath
+
+        & (Join-Path $PSScriptRoot 'test-record-dogfood.ps1') -Launcher $launcher
+        if ($LASTEXITCODE -ne 0) {
+            throw "Self-contained package record dogfood failed with exit code $LASTEXITCODE."
         }
 
         $teamData = Join-Path $resolvedTestRoot 'team-data'
@@ -189,6 +216,7 @@ try {
     finally {
         $env:BEAMTRACE_AGENT_BEAM = $previousAgent
         $env:BEAMTRACE_WEB_ROOT = $previousWeb
+        $env:PATH = $previousPath
     }
 }
 finally {
