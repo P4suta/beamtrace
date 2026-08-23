@@ -243,6 +243,14 @@ if (@($tagRuleset.conditions.ref_name.include) -notcontains 'refs/tags/v*') {
     throw 'The tag ruleset does not target release tags.'
 }
 
+$releaseContract = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'scripts/test-release.ps1')
+if (-not $releaseContract.Contains("'actions/attest@'")) {
+    throw 'Release acceptance must validate the attest action identity without freezing its updateable SHA.'
+}
+if ($releaseContract -match "actions/attest@[0-9a-f]{40}") {
+    throw 'Release acceptance duplicates an Action SHA that is already enforced by the full-SHA policy.'
+}
+
 $workflowFiles = Get-ChildItem -LiteralPath (Join-Path $repoRoot '.github/workflows') -Filter '*.yml' -File
 foreach ($workflowFile in $workflowFiles) {
     $source = Get-Content -Raw -LiteralPath $workflowFile.FullName

@@ -39,7 +39,7 @@ foreach ($marker in @(
     'id-token: write',
     'attestations: write',
     'packages: write',
-    'actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d',
+    'actions/attest@',
     'docker push',
     'gh release create'
 )) {
