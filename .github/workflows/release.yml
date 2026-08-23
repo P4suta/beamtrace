@@ -350,7 +350,7 @@ jobs:
           docker load --input "dist/beamtrace-oci-$version-linux-amd64.tar"
           local_id="$(docker image inspect --format '{{.Id}}' "$local_ref")"
 
-          validate_existing() {
+          manifest_exists() {
             local ref="$1"
             local inspect_result normalized
             if ! inspect_result="$(docker manifest inspect "$ref" 2>&1)"; then
@@ -362,32 +362,76 @@ jobs:
               echo "$inspect_result" >&2
               exit 1
             fi
-            docker pull "$ref"
-            local remote_id revision
-            remote_id="$(docker image inspect --format '{{.Id}}' "$ref")"
-            revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$ref")"
-            if [[ "$revision" != "$RELEASE_SHA" || "$remote_id" != "$local_id" ]]; then
-              echo "Refusing to reuse mismatched immutable image tag: $ref" >&2
-              exit 1
-            fi
             return 0
           }
 
-          if ! validate_existing "$version_ref"; then
+          validate_existing() {
+            local ref="$1"
+            docker pull "$ref"
+            local revision image_version architecture operating_system
+            revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$ref")"
+            image_version="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$ref")"
+            architecture="$(docker image inspect --format '{{.Architecture}}' "$ref")"
+            operating_system="$(docker image inspect --format '{{.Os}}' "$ref")"
+            if [[ "$revision" != "$RELEASE_SHA" || "$image_version" != "$version" || \
+                  "$architecture" != "amd64" || "$operating_system" != "linux" ]]; then
+              echo "Refusing to reuse mismatched immutable image tag: $ref" >&2
+              exit 1
+            fi
+          }
+
+          version_exists=false
+          sha_exists=false
+          if manifest_exists "$version_ref"; then
+            version_exists=true
+            validate_existing "$version_ref"
+          fi
+          if manifest_exists "$sha_ref"; then
+            sha_exists=true
+            validate_existing "$sha_ref"
+          fi
+
+          if [[ "$version_exists" == true && "$sha_exists" == true ]]; then
+            echo 'Both immutable GHCR tags already exist; verifying their shared identity.'
+          elif [[ "$version_exists" == true ]]; then
+            docker tag "$version_ref" "$sha_ref"
+            docker push "$sha_ref"
+          elif [[ "$sha_exists" == true ]]; then
+            docker tag "$sha_ref" "$version_ref"
+            docker push "$version_ref"
+          else
             docker tag "$local_ref" "$version_ref"
             docker push "$version_ref"
-          fi
-          if ! validate_existing "$sha_ref"; then
             docker tag "$local_ref" "$sha_ref"
             docker push "$sha_ref"
           fi
 
           docker pull "$version_ref"
           docker pull "$sha_ref"
+          remote_version_id="$(docker image inspect --format '{{.Id}}' "$version_ref")"
+          remote_sha_id="$(docker image inspect --format '{{.Id}}' "$sha_ref")"
           version_digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "$version_ref" | cut -d@ -f2)"
           sha_digest="$(docker image inspect --format '{{index .RepoDigests 0}}' "$sha_ref" | cut -d@ -f2)"
-          if [[ ! "$version_digest" =~ ^sha256:[0-9a-f]{64}$ || "$version_digest" != "$sha_digest" ]]; then
-            echo 'GHCR version and commit tags do not resolve to one digest.' >&2
+          version_revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$version_ref")"
+          sha_revision="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$sha_ref")"
+          version_label="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$version_ref")"
+          sha_label="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' "$sha_ref")"
+          remote_architecture="$(docker image inspect --format '{{.Architecture}}' "$version_ref")"
+          remote_operating_system="$(docker image inspect --format '{{.Os}}' "$version_ref")"
+          if [[ ! "$version_digest" =~ ^sha256:[0-9a-f]{64}$ || \
+                "$version_digest" != "$sha_digest" || \
+                "$remote_version_id" != "$remote_sha_id" || \
+                "$version_revision" != "$RELEASE_SHA" || \
+                "$sha_revision" != "$RELEASE_SHA" || \
+                "$version_label" != "$version" || \
+                "$sha_label" != "$version" || \
+                "$remote_architecture" != "amd64" || \
+                "$remote_operating_system" != "linux" ]]; then
+            echo 'GHCR immutable tags do not share the expected digest, config, labels, and platform.' >&2
+            exit 1
+          fi
+          if [[ "$version_exists" == false && "$sha_exists" == false && "$remote_version_id" != "$local_id" ]]; then
+            echo 'New GHCR tags do not contain the release image that was built in this run.' >&2
             exit 1
           fi
           echo "name=$image_name" >> "$GITHUB_OUTPUT"

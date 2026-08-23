@@ -281,6 +281,17 @@ foreach ($marker in @(
     'org.opencontainers.image.revision',
     'manifest unknown',
     'Could not safely determine whether immutable image tag exists',
+    'org.opencontainers.image.version',
+    'version_exists=false',
+    'sha_exists=false',
+    'docker tag "$version_ref" "$sha_ref"',
+    'docker tag "$sha_ref" "$version_ref"',
+    'remote_version_id',
+    'remote_sha_id',
+    'remote_architecture',
+    'remote_operating_system',
+    'version_revision',
+    'sha_revision',
     'version_digest',
     './scripts/verify-published-release.ps1',
     'gh release upload "$RELEASE_TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"',
@@ -343,6 +354,9 @@ if ($releaseWorkflow.Contains('gh release create') -or $releaseWorkflow.Contains
 }
 if ($releaseWorkflow.Contains('runner: windows-11-arm')) {
     throw 'Release workflow must not label an x64 Erlang runtime as native Windows ARM64.'
+}
+if ($releaseWorkflow.Contains('"$remote_id" != "$local_id"')) {
+    throw 'Existing GHCR tags must be validated against their immutable labels and shared registry digest, not timestamped rebuild IDs.'
 }
 $hexPublisher = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'scripts/publish-hex.ps1')
 foreach ($marker in @(
