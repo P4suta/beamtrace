@@ -109,7 +109,9 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Could not reproduce the Hex tarball before publish.' }
         $rebuilt = Join-Path $coreRoot "build/beamtrace_core-$Version.tar"
         Assert-SameHexPackage -Expected $localTarball -Actual $rebuilt
-        & gleam publish --yes
+        # Gleam deliberately requires this explicit acknowledgement for 0.x
+        # releases even when --yes accepts the ordinary publish prompt.
+        'I am not using semantic versioning' | & gleam publish --yes
         if ($LASTEXITCODE -ne 0) { throw "Hex publish failed for beamtrace_core $Version." }
     }
     finally {

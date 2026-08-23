@@ -330,7 +330,14 @@ if ($releaseWorkflow.Contains('runner: windows-11-arm')) {
     throw 'Release workflow must not label an x64 Erlang runtime as native Windows ARM64.'
 }
 $hexPublisher = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'scripts/publish-hex.ps1')
-foreach ($marker in @('metadata.config', 'contents.tar.gz', 'Get-FileHash', 'gleam publish --yes', 'already exists', 'repo.hex.pm/tarballs')) {
+foreach ($marker in @(
+    'metadata.config',
+    'contents.tar.gz',
+    'Get-FileHash',
+    "'I am not using semantic versioning' | & gleam publish --yes",
+    'already exists',
+    'repo.hex.pm/tarballs'
+)) {
     if (-not $hexPublisher.Contains($marker)) { throw "Hex idempotency contract is missing: $marker" }
 }
 if ($hexPublisher.Contains('--replace')) {

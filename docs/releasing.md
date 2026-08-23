@@ -40,7 +40,7 @@ All later pull request titles must use `type(scope): subject`. Squash merging pr
 2. A pull request carrying `autorelease: pending` builds all five supported native archives, the Hex tarball, the OCI image, and Homebrew/Scoop metadata without publishing anything. Windows ARM64 is excluded until CI can provision and verify a native Erlang/OTP runtime; the Windows x64 runtime must not be published under an ARM64 artifact name.
 3. Merging that pull request lets release-please create a protected `vX.Y.Z` tag and a draft GitHub prerelease.
 4. The tag workflow refuses to proceed unless exactly one matching GitHub Release is both draft and prerelease. It lists releases explicitly because GitHub's release-by-tag endpoint only returns published releases, then builds and attests every artifact before any registry write.
-5. The workflow publishes or verifies the immutable Hex package, then publishes or verifies GHCR tags `X.Y.Z` and `sha-<commit>` at one digest.
+5. The workflow publishes or verifies the immutable Hex package, then publishes or verifies GHCR tags `X.Y.Z` and `sha-<commit>` at one digest. Gleam requires the exact `I am not using semantic versioning` acknowledgement for every `0.x` publish even with `--yes`; the automation supplies it only after the release pull request approval and immutable tarball comparison.
 6. A clean exact-version Hex consumer build, HexDocs request, and registry-pulled OCI `version`, `doctor`, and non-root checks must pass.
 7. Only then are the release assets uploaded with replacement enabled and the existing draft published as `BeamTrace vX.Y.Z`.
 
