@@ -40,7 +40,7 @@
 
 The narrow test should be used for Red/Green iteration. `test-all` is the portable local gate and includes Chromium unless `-SkipBrowserE2E` is supplied. Run `test-s3-dogfood.ps1` as the Docker-backed storage boundary. PTY acceptance runs on Linux; Windows validates its harness contract. Native Hex export runs on Linux because Gleam 1.18.1 rejects valid Windows paths during `hex-tarball`; `test-hex-package.ps1 -ContainerBoundary` exercises the Linux boundary from Windows when Docker is available.
 
-CI repeats the non-browser gate across OTP 27–29 and three operating systems, exercises short/long/TLS distribution separately, runs real S3-compatible TLS, Chromium, and PTY acceptance, and builds the actual OCI image. Tag workflows require all package versions to match the tag, build six self-contained native archives, and attest release subjects with GitHub OIDC.
+CI repeats the non-browser gate across OTP 27–29 and three operating systems, exercises short/long/TLS distribution separately, runs real S3-compatible TLS, Chromium, and PTY acceptance, and builds the actual OCI image. Tag workflows require all package versions to match the tag, build five self-contained native archives, and attest release subjects with GitHub OIDC. Windows ARM64 packaging remains disabled until CI has a reproducible native Erlang/OTP runtime.
 
 ## Definition of done
 

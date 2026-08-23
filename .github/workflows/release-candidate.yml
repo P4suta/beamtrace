@@ -3,7 +3,7 @@ name: Release Candidate
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    types: [opened, synchronize, reopened]
 
 concurrency:
   group: release-candidate-${{ github.event.pull_request.number }}
@@ -28,12 +28,10 @@ jobs:
           - runner: ubuntu-24.04-arm
             platform: linux
             architecture: arm64
+          # setup-beam cannot provision a native Windows ARM64 Erlang/OTP runtime.
           - runner: windows-latest
             platform: windows
             architecture: x64
-          - runner: windows-11-arm
-            platform: windows
-            architecture: arm64
           - runner: macos-15-intel
             platform: macos
             architecture: x64
