@@ -8,6 +8,30 @@ protocol_version_test() ->
     ?assert(is_binary(Hash)),
     ?assert(byte_size(Hash) >= 8).
 
+framework_presets_add_semantics_without_changing_generic_classification_test() ->
+    From = {self(), make_ref()},
+    ?assertEqual(call, beamtrace_agent:semantic({'$gen_call', From, ping}, generic)),
+    ?assertEqual(
+        gen_server_call,
+        beamtrace_agent:semantic({'$gen_call', From, ping}, gen_server)
+    ),
+    ?assertEqual(
+        gleam_actor_call,
+        beamtrace_agent:semantic({call, From, ping}, gleam_actor)
+    ),
+    ?assertEqual(http_request, beamtrace_agent:semantic({request, get, <<"/">>}, wisp_mist)),
+    ?assertEqual(
+        phoenix_socket_message,
+        beamtrace_agent:semantic(
+            #{'__struct__' => 'Elixir.Phoenix.Socket.Message'},
+            phoenix
+        )
+    ),
+    ?assertEqual(
+        supervisor_exit,
+        beamtrace_agent:semantic({'EXIT', self(), crashed}, erlang_supervisor)
+    ).
+
 unlinked_agent_survives_short_lived_rpc_starter_test() ->
     Parent = self(),
     Starter = spawn(fun() ->
@@ -97,6 +121,28 @@ credit_batches_are_bounded_test() ->
 
 exact_meta_trigger_and_cleanup_test_() ->
     {timeout, 10, fun exact_meta_trigger_and_cleanup/0}.
+
+argument_shape_filter_is_enforced_by_the_meta_match_spec_test_() ->
+    {timeout, 10, fun argument_shape_filter_is_enforced_by_the_meta_match_spec/0}.
+
+argument_shape_filter_is_enforced_by_the_meta_match_spec() ->
+    {ok, Agent} = beamtrace_agent:start_link(self(), #{
+        capture_id => <<"filtered-root">>,
+        mode => exact,
+        max_roots => 2,
+        root_filter => {arg_tag, 0, equal, <<"allowed">>},
+        batch_size => 20
+    }),
+    ok = beamtrace_agent:grant(Agent, 10),
+    {ok, armed} =
+        beamtrace_agent:arm(Agent, {beamtrace_agent_fixture, filtered_trigger, 1}),
+    {denied, 1} = beamtrace_agent_fixture:filtered_trigger({denied, 1}),
+    {allowed, 2} = beamtrace_agent_fixture:filtered_trigger({allowed, 2}),
+    Events = collect_events(10, []),
+    Roots = [Event || #{kind := root} = Event <- Events],
+    ?assertEqual(1, length(Roots)),
+    ok = beamtrace_agent:stop(Agent),
+    ?assertEqual(false, seq_trace:get_system_tracer()).
 
 exact_meta_trigger_and_cleanup() ->
     Parent = self(),

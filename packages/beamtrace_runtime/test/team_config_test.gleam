@@ -26,6 +26,34 @@ pub fn complete_team_environment_resolves_public_oidc_and_roles_test() {
   config.retention_days |> should.equal(7)
   config.relay_max_events |> should.equal(1_000_000)
   config.relay_max_bytes |> should.equal(1_073_741_824)
+  config.blob_backend |> should.equal(team_config.FilesystemBlobs)
+}
+
+pub fn s3_blob_config_is_nonsecret_https_only_and_explicit_test() {
+  let source =
+    valid_source()
+    |> dict.insert("blob_backend", "s3")
+    |> dict.insert("s3_endpoint", "https://objects.example:9443")
+    |> dict.insert("s3_bucket", "beamtrace-prod")
+    |> dict.insert("s3_region", "ap-northeast-1")
+    |> dict.insert("s3_prefix", "captures/team-a")
+  let assert Ok(config) = team_config.resolve(source)
+  config.blob_backend
+  |> should.equal(team_config.S3Blobs(
+    "https://objects.example:9443",
+    "beamtrace-prod",
+    "ap-northeast-1",
+    "captures/team-a",
+  ))
+
+  source
+  |> dict.insert("s3_endpoint", "http://objects.example")
+  |> team_config.resolve
+  |> should.equal(Error(team_config.InvalidUrl("s3_endpoint")))
+  source
+  |> dict.insert("s3_secret_access_key", "must-not-enter-config")
+  |> team_config.resolve
+  |> should.equal(Error(team_config.BlobSecretForbidden))
 }
 
 pub fn team_config_requires_every_identity_boundary_test() {

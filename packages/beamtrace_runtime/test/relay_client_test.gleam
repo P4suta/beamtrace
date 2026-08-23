@@ -193,3 +193,87 @@ pub fn event_batches_require_credit_bounds_and_metadata_safety_test() {
   )
   |> should.equal(Error("metadata_value_forbidden"))
 }
+
+pub fn credited_client_signs_raw_batches_only_with_the_granted_policy_test() {
+  let identity = relay_channel.new_identity()
+  let state = relay_client.Active(sequence: 8, credits: 1, max_batch_events: 1)
+  let grant = string.repeat("A", 43)
+  let policy = types.RawPolicy(["password"], 2, 64)
+  let raw_event =
+    event(
+      "raw",
+      types.Scalar("integer", Some("42"), Some(string.repeat("e", 64))),
+    )
+  let assert Ok(#(frame, next)) =
+    relay_client.next_raw_event_batch(
+      state,
+      identity,
+      relay_channel.Exact,
+      grant,
+      policy,
+      [raw_event],
+    )
+  next |> should.equal(relay_client.Active(9, 0, 1))
+  let assert Ok(envelope) = relay_wire.decode_envelope(frame)
+  let assert Ok(payload) =
+    relay_wire.verify_envelope(identity.public_key, envelope, 8)
+  let assert Ok(decoded) = relay_payload.decode_for_ingest(payload)
+  let assert relay_payload.RawBatch(received, received_policy) = decoded.privacy
+  received |> should.equal(grant)
+  received_policy |> should.equal(policy)
+}
+
+pub fn relay_rejects_one_oversized_encoded_event_and_splits_multi_event_prefixes_test() {
+  let identity = relay_channel.new_identity()
+  let grant = string.repeat("A", 43)
+  let policy = types.RawPolicy(["password"], 2, 400_000)
+  let oversized =
+    event(
+      "oversized",
+      types.BinaryMetadata(
+        300_000,
+        Some(string.repeat("\"", 300_000)),
+        Some(string.repeat("f", 64)),
+      ),
+    )
+  relay_client.next_raw_event_batch(
+    relay_client.Active(0, 1, 128),
+    identity,
+    relay_channel.Exact,
+    grant,
+    policy,
+    [oversized],
+  )
+  |> should.equal(Error("frame_too_large"))
+
+  let medium = fn(id) {
+    event(
+      id,
+      types.BinaryMetadata(
+        120_000,
+        Some(string.repeat("\"", 120_000)),
+        Some(string.repeat("e", 64)),
+      ),
+    )
+  }
+  let events = [medium("one"), medium("two"), medium("three")]
+  let assert Ok(#(frame, next, remaining)) =
+    relay_client.next_raw_event_prefix(
+      relay_client.Active(0, 3, 128),
+      identity,
+      relay_channel.Exact,
+      grant,
+      policy,
+      events,
+    )
+  let assert Ok(envelope) = relay_wire.decode_envelope(frame)
+  let assert Ok(payload) =
+    relay_wire.verify_envelope(identity.public_key, envelope, 0)
+  let assert Ok(decoded) = relay_payload.decode_for_ingest(payload)
+  let sent_some = decoded.event_count > 0
+  let left_some = decoded.event_count < 3
+  sent_some |> should.be_true()
+  left_some |> should.be_true()
+  list.length(remaining) + decoded.event_count |> should.equal(3)
+  let assert relay_client.Active(1, 2, 128) = next
+}

@@ -32,15 +32,15 @@ two_node_partial_order_capture() ->
                 10000
             ),
         EventNodes = lists:usort([EventNode ||
-            {raw_event_with_metadata, _Id, _Root, EventNode, _Pid, _At, _Kind,
-                _PeerNode, _PeerPid, _Serial, _Semantic, _Metadata} <- Events]),
+            {raw_event_with_term, _Id, _Root, EventNode, _Pid, _At, _Kind,
+                _PeerNode, _PeerPid, _Serial, _Semantic, _Metadata, _Term} <- Events]),
         ?assertEqual(
             lists:sort([atom_to_binary(NodeA, utf8), atom_to_binary(NodeB, utf8)]),
             lists:sort(EventNodes)
         ),
         Kinds = [Kind ||
-            {raw_event_with_metadata, _Id, _Root, _EventNode, _Pid, _At, Kind,
-                _PeerNode, _PeerPid, _Serial, _Semantic, _Metadata} <- Events],
+            {raw_event_with_term, _Id, _Root, _EventNode, _Pid, _At, Kind,
+                _PeerNode, _PeerPid, _Serial, _Semantic, _Metadata, _Term} <- Events],
         ?assert(lists:member(<<"root">>, Kinds)),
         ?assert(lists:member(<<"send">>, Kinds)),
         ?assert(lists:member(<<"receive">>, Kinds)),

@@ -2,13 +2,19 @@
 -module(beamtrace_agent_fixture).
 -export([
     trigger/1,
+    trigger_burst/1,
+    filtered_trigger/1,
     trigger_lifecycle/0,
     invoke/1,
     schedule_trigger/1,
+    schedule_burst/1,
+    schedule_filtered/0,
     schedule_lifecycle/0,
     start_echo/0,
     stop_echo/1
 ]).
+
+filtered_trigger(Value) -> Value.
 
 trigger(Target) ->
     Target ! {work, self()},
@@ -16,6 +22,23 @@ trigger(Target) ->
         ack -> ok
     after 1000 ->
         timeout
+    end.
+
+trigger_burst(Count) when is_integer(Count), Count >= 0 ->
+    send_burst(Count),
+    receive_burst(Count).
+
+send_burst(0) -> ok;
+send_burst(Count) ->
+    self() ! {burst, Count},
+    send_burst(Count - 1).
+
+receive_burst(0) -> ok;
+receive_burst(Count) ->
+    receive
+        {burst, Count} -> receive_burst(Count - 1)
+    after 1000 ->
+        exit({burst_timeout, Count})
     end.
 
 invoke(Target) ->
@@ -26,6 +49,23 @@ schedule_trigger(Target) ->
     _ = spawn(fun() ->
         wait_until_armed(500),
         trigger(Target)
+    end),
+    ok.
+
+schedule_burst(Count) ->
+    _ = spawn(fun() ->
+        wait_until_armed(500),
+        trigger_burst(Count)
+    end),
+    ok.
+
+schedule_filtered() ->
+    _ = spawn(fun() ->
+        wait_until_armed(500),
+        _ = filtered_trigger({denied, 1}),
+        _ = filtered_trigger({allowed, 2}),
+        _ = filtered_trigger({allowed, 3}),
+        ok
     end),
     ok.
 

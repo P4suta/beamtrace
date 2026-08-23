@@ -2,6 +2,8 @@
 import beamtrace_runtime/annotations
 import beamtrace_runtime/api
 import beamtrace_runtime/audit_store
+import beamtrace_runtime/blob_store
+import beamtrace_runtime/capture_session
 import beamtrace_runtime/enrollment_store
 import beamtrace_runtime/local_auth
 import beamtrace_runtime/oidc_flow
@@ -36,7 +38,17 @@ pub type TeamRuntime {
     metadata_store: team_store.Store,
     database_path: String,
     blob_root: String,
+    blob_backend: blob_store.Backend,
     relay_quota: relay_ingest.Quota,
+  )
+}
+
+pub type LocalRuntime {
+  LocalRuntime(
+    context: api.Context,
+    bootstrap_token: String,
+    auth_store: local_auth.Store,
+    capture_store: Option(capture_session.Store),
   )
 }
 
@@ -48,27 +60,84 @@ pub fn start(
   static_root static_root: Option(String),
   archive_path archive_path: Option(String),
 ) -> Result(Nil, String) {
+  start_local(
+    bind,
+    port,
+    mode,
+    secret_key_base,
+    static_root,
+    archive_path,
+    None,
+  )
+}
+
+pub fn start_attached(
+  bind bind: String,
+  port port: Int,
+  mode mode: api.ServerMode,
+  secret_key_base secret_key_base: String,
+  static_root static_root: Option(String),
+  capture_store capture_store: capture_session.Store,
+) -> Result(Nil, String) {
+  start_local(
+    bind,
+    port,
+    mode,
+    secret_key_base,
+    static_root,
+    None,
+    Some(capture_store),
+  )
+}
+
+pub fn new_local(
+  static_root: Option(String),
+  archive_path: Option(String),
+  capture_store: Option(capture_session.Store),
+) -> LocalRuntime {
   let #(auth_store, bootstrap_token) = local_auth.new(60_000)
+  let context =
+    api.Context(
+      tool_version: "0.1.0",
+      mode: api.Local,
+      static_root: static_root,
+      local_auth: Some(auth_store),
+      archive_path: archive_path,
+      relay_enrollment: None,
+      team_security: None,
+      local_capture: capture_store,
+    )
+  LocalRuntime(context, bootstrap_token, auth_store, capture_store)
+}
+
+pub fn close_local(runtime: LocalRuntime) -> Nil {
+  case runtime.capture_store {
+    Some(store) -> capture_session.close(store)
+    None -> Nil
+  }
+  local_auth.close(runtime.auth_store)
+}
+
+fn start_local(
+  bind: String,
+  port: Int,
+  _mode: api.ServerMode,
+  secret_key_base: String,
+  static_root: Option(String),
+  archive_path: Option(String),
+  capture_store: Option(capture_session.Store),
+) -> Result(Nil, String) {
+  let runtime = new_local(static_root, archive_path, capture_store)
   io.println(
     "One-time bootstrap URL: http://"
     <> bind
     <> ":"
     <> int.to_string(port)
     <> "/bootstrap/"
-    <> bootstrap_token,
+    <> runtime.bootstrap_token,
   )
-  let context =
-    api.Context(
-      "0.1.0",
-      mode,
-      static_root,
-      Some(auth_store),
-      archive_path,
-      None,
-      None,
-    )
   let listener =
-    fn(request) { api.handle(request, context) }
+    fn(request) { api.handle(request, runtime.context) }
     |> wisp_mist.handler(secret_key_base)
     |> mist.new
     |> mist.bind(bind)
@@ -77,9 +146,13 @@ pub fn start(
   case mist.start(listener) {
     Ok(_) -> {
       process.sleep_forever()
+      close_local(runtime)
       Ok(Nil)
     }
-    Error(error) -> cleanup_start_error(auth_store, string.inspect(error))
+    Error(error) -> {
+      close_local(runtime)
+      Error(string.inspect(error))
+    }
   }
 }
 
@@ -99,12 +172,16 @@ pub fn new_team(
 ) -> Result(TeamRuntime, String) {
   use paths <- result_try(prepare_data_paths(config.data_dir))
   let #(database_path, blob_root) = paths
+  use blob_backend <- result_try(configured_blob_backend(
+    config.blob_backend,
+    blob_root,
+  ))
   use metadata_store <- result_try(team_store.open(database_path))
   let retention_cutoff_ms =
     int.max(now_ms - config.retention_days * 86_400_000, 0)
   use Nil <- result_try(initialize_retention(
     metadata_store,
-    blob_root,
+    blob_backend,
     retention_cutoff_ms,
   ))
   let sessions = team_auth.new()
@@ -148,7 +225,7 @@ pub fn new_team(
       origin: config.origin,
       oidc: Some(provider),
       relay_inbox: Some(inbox),
-      relay_archive: Some(api.RelayArchive(metadata_store, blob_root)),
+      relay_archive: Some(api.RelayArchiveBackend(metadata_store, blob_backend)),
     )
   let context =
     api.Context(
@@ -162,6 +239,7 @@ pub fn new_team(
         websocket_origin(config.origin),
       )),
       team_security: Some(security),
+      local_capture: None,
     )
   Ok(TeamRuntime(
     context: context,
@@ -175,16 +253,17 @@ pub fn new_team(
     metadata_store: metadata_store,
     database_path: database_path,
     blob_root: blob_root,
+    blob_backend: blob_backend,
     relay_quota: relay_quota,
   ))
 }
 
 fn initialize_retention(
   metadata_store: team_store.Store,
-  blob_root: String,
+  blob_backend: blob_store.Backend,
   cutoff_ms: Int,
 ) -> Result(Nil, String) {
-  case prune_all(metadata_store, blob_root, cutoff_ms) {
+  case prune_all(metadata_store, blob_backend, cutoff_ms) {
     Ok(Nil) -> Ok(Nil)
     Error(error) -> {
       let _ = team_store.close(metadata_store)
@@ -195,20 +274,20 @@ fn initialize_retention(
 
 fn prune_all(
   metadata_store: team_store.Store,
-  blob_root: String,
+  blob_backend: blob_store.Backend,
   cutoff_ms: Int,
 ) -> Result(Nil, String) {
   case
-    relay_archive.prune_before(
+    relay_archive.prune_before_with(
       metadata_store,
-      blob_root,
+      blob_backend,
       cutoff_ms: cutoff_ms,
       limit: 1000,
     )
   {
     Error(error) -> Error(error)
     Ok(relay_archive.PruneResult(_, _, True)) ->
-      prune_all(metadata_store, blob_root, cutoff_ms)
+      prune_all(metadata_store, blob_backend, cutoff_ms)
     Ok(relay_archive.PruneResult(_, _, False)) -> Ok(Nil)
   }
 }
@@ -282,7 +361,7 @@ pub fn start_team(
               runtime.enrollment,
               runtime.inbox,
               runtime.metadata_store,
-              runtime.blob_root,
+              runtime.blob_backend,
               runtime.relay_quota,
               relay_id,
             )
@@ -316,6 +395,17 @@ fn result_try(
   case result {
     Ok(value) -> next(value)
     Error(error) -> Error(error)
+  }
+}
+
+fn configured_blob_backend(
+  config: team_config.BlobBackendConfig,
+  filesystem_root: String,
+) -> Result(blob_store.Backend, String) {
+  case config {
+    team_config.FilesystemBlobs -> Ok(blob_store.filesystem(filesystem_root))
+    team_config.S3Blobs(endpoint, bucket, region, prefix) ->
+      blob_store.s3(endpoint, bucket, region, prefix)
   }
 }
 

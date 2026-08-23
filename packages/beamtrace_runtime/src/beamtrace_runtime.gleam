@@ -1,21 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import argv
-import beamtrace/aql
 import beamtrace/codec
 import beamtrace/diff
 import beamtrace/stats
 import beamtrace/types
 import beamtrace_runtime/api
 import beamtrace_runtime/capture
+import beamtrace_runtime/capture_session
 import beamtrace_runtime/cli
 import beamtrace_runtime/command
 import beamtrace_runtime/export
+import beamtrace_runtime/local_auth
 import beamtrace_runtime/mcp
+import beamtrace_runtime/raw_grant_file
+import beamtrace_runtime/record_process
 import beamtrace_runtime/relay_channel
 import beamtrace_runtime/relay_client
 import beamtrace_runtime/server
 import beamtrace_runtime/storage
 import beamtrace_runtime/team_config
+import beamtrace_runtime/tui_driver
 import beamtrace_tui
 import gleam/int
 import gleam/io
@@ -52,15 +56,35 @@ fn run(command_: cli.Command) -> Int {
       io.print(doctor())
       0
     }
-    cli.Capture(node, trigger, where_aql, out, cookie_file) ->
-      run_capture(node, trigger, where_aql, out, cookie_file)
+    cli.Capture(node, trigger, where_aql, out, cookie_file, max_roots, preset) ->
+      run_capture(node, trigger, where_aql, out, cookie_file, max_roots, preset)
     cli.Attach(node, mode, cookie_file) -> run_attach(node, mode, cookie_file)
     cli.Open(path, mode) -> run_open(path, mode)
     cli.Compare(left, right) -> run_compare(left, right)
     cli.Export(path, format) -> run_export(path, format)
-    cli.Record(child) -> run_record(child)
+    cli.Record(
+      node,
+      trigger,
+      where_aql,
+      out,
+      cookie_file,
+      max_roots,
+      preset,
+      child,
+    ) ->
+      run_record(
+        node,
+        trigger,
+        where_aql,
+        out,
+        cookie_file,
+        max_roots,
+        preset,
+        child,
+      )
     cli.Serve -> run_serve()
-    cli.Relay(hub_url, enrollment_token) -> run_relay(hub_url, enrollment_token)
+    cli.Relay(hub_url, enrollment_token, target) ->
+      run_relay(hub_url, enrollment_token, target)
     cli.Tui(server_url) -> {
       let target = case server_url {
         Some(value) -> value
@@ -76,7 +100,11 @@ fn run(command_: cli.Command) -> Int {
   }
 }
 
-fn run_relay(hub_url: String, enrollment_token: String) -> Int {
+fn run_relay(
+  hub_url: String,
+  enrollment_token: String,
+  target: Option(cli.RelayTarget),
+) -> Int {
   let identity = relay_channel.new_identity()
   case relay_client.enroll(hub_url, enrollment_token, identity) {
     Error(error) ->
@@ -84,12 +112,138 @@ fn run_relay(hub_url: String, enrollment_token: String) -> Int {
     Ok(receipt) -> {
       io.println("Enrolled relay " <> receipt.relay_id)
       io.println("Outbound channel: " <> receipt.channel_url)
-      io.println("Relay channel connected; press Ctrl+C to stop.")
-      case relay_client.run_channel(receipt, identity) {
-        Ok(Nil) -> 0
-        Error(reason) -> fail("relay channel stopped: " <> reason, 2)
+      case target {
+        None -> {
+          io.println("Relay channel connected; press Ctrl+C to stop.")
+          case relay_client.run_channel(receipt, identity) {
+            Ok(Nil) -> 0
+            Error(reason) -> fail("relay channel stopped: " <> reason, 2)
+          }
+        }
+        Some(target) -> run_relay_capture(receipt, identity, target)
       }
     }
+  }
+}
+
+fn run_relay_capture(
+  receipt: relay_client.EnrollmentReceipt,
+  identity: relay_channel.Identity,
+  target: cli.RelayTarget,
+) -> Int {
+  use cookie <- result_or_exit(read_cookie(target.cookie_file))
+  use grant <- raw_grant_or_exit(load_raw_grant(receipt, target.raw_grant_file))
+  let cli.Mfa(module_, function_, arity) = target.trigger
+  let nodes = target.node |> string.split(on: ",") |> list.map(string.trim)
+  io.println(
+    "Relay capture armed for "
+    <> module_
+    <> ":"
+    <> function_
+    <> "/"
+    <> int.to_string(arity)
+    <> "; perform one operation.",
+  )
+  let default_budget = types.default_budget()
+  let #(privacy, budget) = case grant {
+    None -> #(
+      types.Metadata,
+      types.TraceBudget(..default_budget, max_roots: target.max_roots),
+    )
+    Some(raw) -> {
+      let remaining_ms = raw.expires_at_ms - local_auth.now_ms()
+      #(
+        types.Raw(raw.policy),
+        types.TraceBudget(
+          ..default_budget,
+          max_events: int.min(default_budget.max_events, raw.max_events),
+          max_bytes: int.min(default_budget.max_bytes, raw.max_bytes),
+          max_duration_ms: int.min(default_budget.max_duration_ms, remaining_ms),
+          max_roots: target.max_roots,
+        ),
+      )
+    }
+  }
+  let spec =
+    types.CaptureSpec(
+      nodes: nodes,
+      trigger: types.Mfa(module_, function_, arity),
+      where_aql: target.where_aql,
+      privacy: privacy,
+      budget: budget,
+      preset: target.preset,
+    )
+  use captured <- capture_result_or_exit(capture.execute(spec, cookie))
+  let transferred = case grant {
+    None ->
+      relay_client.run_channel_with_events(
+        receipt,
+        identity,
+        relay_channel.Exact,
+        captured.events,
+      )
+    Some(raw) ->
+      relay_client.run_channel_with_raw_events(
+        receipt,
+        identity,
+        relay_channel.Exact,
+        raw.grant,
+        raw.policy,
+        captured.events,
+      )
+  }
+  case transferred {
+    Error(reason) -> fail("relay producer incomplete: " <> reason, 3)
+    Ok(Nil) -> {
+      io.println(
+        "Transferred "
+        <> int.to_string(list.length(captured.events))
+        <> " events after durable hub acknowledgement.",
+      )
+      case captured.completeness {
+        types.Complete -> 0
+        _ -> 3
+      }
+    }
+  }
+}
+
+fn load_raw_grant(
+  receipt: relay_client.EnrollmentReceipt,
+  path: Option(String),
+) -> Result(Option(raw_grant_file.GrantFile), String) {
+  case path {
+    None -> Ok(None)
+    Some(path) -> {
+      io.println(
+        "Raw capture requested. Authorize relay "
+        <> receipt.relay_id
+        <> " and write the one-time grant JSON to "
+        <> path
+        <> ". Waiting up to 5 minutes.",
+      )
+      case raw_grant_file.wait_load(path, 300_000) {
+        Error(error) -> Error(error)
+        Ok(grant) ->
+          case
+            raw_grant_file.authorize_for_relay(
+              grant,
+              receipt.relay_id,
+              local_auth.now_ms(),
+            )
+          {
+            Ok(Nil) -> Ok(Some(grant))
+            Error(error) -> Error(error)
+          }
+      }
+    }
+  }
+}
+
+fn raw_grant_or_exit(result: Result(a, String), next: fn(a) -> Int) -> Int {
+  case result {
+    Ok(value) -> next(value)
+    Error(error) -> fail("raw capture refused: " <> error, 4)
   }
 }
 
@@ -119,28 +273,30 @@ fn run_capture(
   where_aql: Option(String),
   out: String,
   cookie_file: Option(String),
+  max_roots: Int,
+  preset: types.Preset,
 ) -> Int {
   use cookie <- result_or_exit(read_cookie(cookie_file))
   let cli.Mfa(module_, function_, arity) = trigger
   let core_trigger = types.Mfa(module_, function_, arity)
-  use captured <- result_or_exit(capture.remote(
-    node,
+  let nodes = string.split(node, on: ",") |> list.map(string.trim)
+  use result <- capture_result_or_exit(capture.execute(
+    types.CaptureSpec(
+      nodes: nodes,
+      trigger: core_trigger,
+      where_aql: where_aql,
+      privacy: types.Metadata,
+      budget: types.TraceBudget(..types.default_budget(), max_roots: max_roots),
+      preset: preset,
+    ),
     cookie,
-    core_trigger,
-    30_000,
-    capture.default_budget(),
-  ))
-  use result <- result_or_exit(apply_capture_filter(
-    captured,
-    where_aql,
-    core_trigger,
   ))
   let manifest =
     codec.Manifest(
       schema_version: codec.schema_version,
       tool_version: version,
       capture_id: capture_id(),
-      nodes: [node],
+      nodes: nodes,
       completeness: result.completeness,
       privacy: types.Metadata,
       checksums: [],
@@ -159,27 +315,6 @@ fn run_capture(
   }
 }
 
-fn apply_capture_filter(
-  captured: capture.CaptureResult,
-  where_aql: Option(String),
-  trigger: types.Mfa,
-) -> Result(capture.CaptureResult, String) {
-  case where_aql {
-    None -> Ok(captured)
-    Some(source) ->
-      case aql.parse(source) {
-        Ok(query) -> Ok(capture.filter_roots(captured, query, trigger))
-        Error(error) ->
-          Error(
-            "invalid AQL at offset "
-            <> int.to_string(error.offset)
-            <> ": "
-            <> error.message,
-          )
-      }
-  }
-}
-
 fn run_attach(
   node: String,
   mode: cli.UiMode,
@@ -188,18 +323,38 @@ fn run_attach(
   use cookie <- result_or_exit(read_cookie(cookie_file))
   case capture.probe(node, cookie) {
     Error(error) -> fail("attach failed: " <> error, 2)
-    Ok(otp) ->
+    Ok(otp) -> {
+      let capture_store = capture_session.new([node], cookie)
       case mode {
         cli.TuiMode -> {
           io.println("Attached " <> node <> " (OTP " <> otp <> ").")
-          beamtrace_tui.run_attached([], node)
+          beamtrace_tui.run_attached_with_driver(
+            [],
+            node,
+            tui_driver.new(capture_store, version),
+          )
+          capture_session.close(capture_store)
           0
         }
         cli.Web -> {
           io.println("Attached " <> node <> " (OTP " <> otp <> ").")
-          run_server(api.Local, None)
+          io.println("BeamTrace workspace: http://127.0.0.1:4040")
+          case
+            server.start_attached(
+              bind: "127.0.0.1",
+              port: 4040,
+              mode: api.Local,
+              secret_key_base: random_secret(),
+              static_root: Some(web_root()),
+              capture_store: capture_store,
+            )
+          {
+            Ok(Nil) -> 0
+            Error(error) -> fail("server failed: " <> error, 2)
+          }
         }
       }
+    }
   }
 }
 
@@ -263,13 +418,183 @@ fn run_export(path: String, format: cli.ExportFormat) -> Int {
   }
 }
 
-fn run_record(child: List(String)) -> Int {
-  case run_command(child) {
-    Ok(#(status, output)) -> {
-      io.print(output)
-      status
+fn run_record(
+  node: String,
+  trigger: cli.Mfa,
+  where_aql: Option(String),
+  out: String,
+  cookie_file: Option(String),
+  max_roots: Int,
+  preset: types.Preset,
+  child: List(String),
+) -> Int {
+  use cookie <- result_or_exit(read_record_cookie(cookie_file))
+  let nodes = string.split(node, on: ",") |> list.map(string.trim)
+  case nodes {
+    [] -> fail("record requires at least one target node", 2)
+    [root, ..] ->
+      case record_process.start(child, root, cookie) {
+        Error(error) -> fail("record child failed to start: " <> error, 2)
+        Ok(handle) ->
+          case capture.wait_until_available(root, cookie, 10_000) {
+            Error(error) -> {
+              record_process.stop(handle)
+              fail("record target did not start: " <> error, 2)
+            }
+            Ok(Nil) -> {
+              let store = capture_session.new(nodes, cookie)
+              let result =
+                run_record_session(
+                  store,
+                  handle,
+                  nodes,
+                  cookie,
+                  trigger,
+                  where_aql,
+                  out,
+                  max_roots,
+                  preset,
+                )
+              capture_session.close(store)
+              result
+            }
+          }
+      }
+  }
+}
+
+fn run_record_session(
+  store: capture_session.Store,
+  handle: record_process.Handle,
+  nodes: List(String),
+  cookie: String,
+  trigger: cli.Mfa,
+  where_aql: Option(String),
+  out: String,
+  max_roots: Int,
+  preset: types.Preset,
+) -> Int {
+  let cli.Mfa(module_, function_, arity) = trigger
+  let core_trigger = types.Mfa(module_, function_, arity)
+  let spec =
+    capture_session.ArmSpec(
+      trigger: core_trigger,
+      where_aql: where_aql,
+      capture_window_ms: 30_000,
+      budget: capture.default_budget(),
+      max_roots: max_roots,
+      preset: preset,
+    )
+  case capture_session.arm(store, spec), nodes {
+    Error(error), _ -> {
+      record_process.stop(handle)
+      fail("record could not arm capture: " <> string.inspect(error), 2)
     }
-    Error(error) -> fail("record failed: " <> error, 2)
+    _, [] -> {
+      record_process.stop(handle)
+      fail("record requires at least one target node", 2)
+    }
+    Ok(Nil), [root, ..] ->
+      case capture.wait_until_armed(root, cookie, 5000) {
+        Error(error) -> {
+          let status = capture_session.status(store)
+          let _ = capture_session.cancel(store)
+          record_process.stop(handle)
+          fail(
+            "record could not reach the armed state: "
+              <> capture.failure_guidance(error)
+              <> " (capture "
+              <> string.inspect(status)
+              <> ")",
+            capture.failure_exit_code(error),
+          )
+        }
+        Ok(Nil) ->
+          case record_process.release(handle) {
+            Error(error) -> {
+              let _ = capture_session.cancel(store)
+              record_process.stop(handle)
+              fail("record could not release child: " <> error, 2)
+            }
+            Ok(Nil) -> run_record_child(store, handle, nodes, out)
+          }
+      }
+  }
+}
+
+fn run_record_child(
+  store: capture_session.Store,
+  handle: record_process.Handle,
+  nodes: List(String),
+  out: String,
+) -> Int {
+  let captured = capture_session.await(store, 35_000)
+  case record_process.release_finish(handle) {
+    Error(error) -> {
+      record_process.stop(handle)
+      fail("record could not release child shutdown: " <> error, 2)
+    }
+    Ok(Nil) ->
+      case record_process.await(handle, 86_400_000) {
+        Error(error) -> fail("record child failed: " <> error, 2)
+        Ok(#(child_status, output)) -> {
+          io.print(output)
+          case captured {
+            Error(capture_session.CaptureFailed(reason)) ->
+              fail(
+                "record capture failed: " <> capture.failure_guidance(reason),
+                capture.failure_exit_code(reason),
+              )
+            Error(error) ->
+              fail("record capture failed: " <> string.inspect(error), 2)
+            Ok(result) ->
+              case save_result(out, nodes, result, types.Metadata) {
+                Error(error) -> fail("could not save record: " <> error, 2)
+                Ok(Nil) -> {
+                  io.println(
+                    "Saved "
+                    <> int.to_string(list.length(result.events))
+                    <> " events to "
+                    <> out,
+                  )
+                  case child_status {
+                    0 -> capture.exit_code(result.completeness)
+                    _ -> 1
+                  }
+                }
+              }
+          }
+        }
+      }
+  }
+}
+
+fn read_record_cookie(cookie_file: Option(String)) -> Result(String, String) {
+  case cookie_file {
+    Some(path) -> read_cookie_file(path)
+    None -> record_process.ephemeral_cookie()
+  }
+}
+
+fn save_result(
+  out: String,
+  nodes: List(String),
+  result: capture.CaptureResult,
+  privacy: types.Privacy,
+) -> Result(Nil, String) {
+  let manifest =
+    codec.Manifest(
+      schema_version: codec.schema_version,
+      tool_version: version,
+      capture_id: capture_id(),
+      nodes: nodes,
+      completeness: result.completeness,
+      privacy: privacy,
+      checksums: [],
+    )
+  case storage.save(out, manifest, result.events) {
+    Ok(Nil) -> Ok(Nil)
+    Error(error) -> Error(string.inspect(error))
   }
 }
 
@@ -304,6 +629,17 @@ fn result_or_exit(result: Result(a, String), next: fn(a) -> Int) -> Int {
   }
 }
 
+fn capture_result_or_exit(
+  result: Result(a, String),
+  next: fn(a) -> Int,
+) -> Int {
+  case result {
+    Ok(value) -> next(value)
+    Error(error) ->
+      fail(capture.failure_guidance(error), capture.failure_exit_code(error))
+  }
+}
+
 fn fail(message: String, code: Int) -> Int {
   io.println_error("beamtrace: " <> message)
   code
@@ -313,12 +649,20 @@ fn help_text() -> String {
   "BeamTrace — BEAM causal workbench\n\n"
   <> "Usage:\n"
   <> "  beamtrace attach <node> [--web|--tui] [--cookie-file PATH]\n"
-  <> "  beamtrace capture <node> --trigger Module:function/arity [--where AQL] --out FILE\n"
-  <> "  beamtrace record [options] -- <gleam|mix|rebar3 command>\n"
+  <> "  beamtrace capture <node>[,<node>...] --trigger Module:function/arity [--where AQL]\n"
+  <> "                    [--max-roots 1..1000] [--preset PRESET] --out FILE\n"
+  <> "  beamtrace record --node NODE --trigger Module:function/arity --out FILE\n"
+  <> "                   [capture options] -- <gleam|mix|rebar3 command>\n"
   <> "  beamtrace open <file.beamtrace> [--web|--tui]\n"
   <> "  beamtrace compare <left.beamtrace> <right.beamtrace>\n"
   <> "  beamtrace export <file.beamtrace> --format html|jsonl|mermaid|otlp\n"
-  <> "  beamtrace serve | relay | tui | doctor | mcp\n\n"
+  <> "  beamtrace serve\n"
+  <> "  beamtrace relay <https-hub-url> --enroll TOKEN\n"
+  <> "                  [--node NODE --trigger Module:function/arity] [--where AQL]\n"
+  <> "                  [--cookie-file PATH] [--max-roots 1..1000] [--preset PRESET]\n"
+  <> "                  [--raw-grant-file PATH]\n"
+  <> "  beamtrace tui [--server URL]\n"
+  <> "  beamtrace doctor | mcp\n\n"
   <> "Cookie values are accepted only through --cookie-file, BEAMTRACE_COOKIE, or a secure prompt."
 }
 
@@ -342,9 +686,6 @@ fn web_root() -> String
 
 @external(erlang, "beamtrace_cli_ffi", "doctor")
 fn doctor() -> String
-
-@external(erlang, "beamtrace_cli_ffi", "run_command")
-fn run_command(command: List(String)) -> Result(#(Int, String), String)
 
 @external(erlang, "beamtrace_cli_ffi", "halt")
 fn halt(code: Int) -> Nil

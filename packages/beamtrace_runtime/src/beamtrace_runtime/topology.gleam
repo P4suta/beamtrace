@@ -8,8 +8,8 @@ import gleam/string
 pub type ProcessSnapshot {
   ProcessSnapshot(
     id: String,
-    supervisor_parent: Option(String),
-    spawn_parent: Option(String),
+    supervisor_parent: Option(#(String, types.Evidence)),
+    spawn_parent: Option(#(String, types.Evidence)),
     links: List(String),
   )
 }
@@ -26,13 +26,13 @@ pub fn build(snapshots: List(ProcessSnapshot)) -> Graphs {
   Graphs(
     supervision: list.filter_map(snapshots, fn(snapshot) {
       case snapshot.supervisor_parent {
-        Some(parent) -> Ok(Edge(parent, snapshot.id, types.Exact))
+        Some(parent) -> Ok(Edge(parent.0, snapshot.id, parent.1))
         None -> Error(Nil)
       }
     }),
     spawn: list.filter_map(snapshots, fn(snapshot) {
       case snapshot.spawn_parent {
-        Some(parent) -> Ok(Edge(parent, snapshot.id, types.Exact))
+        Some(parent) -> Ok(Edge(parent.0, snapshot.id, parent.1))
         None -> Error(Nil)
       }
     }),

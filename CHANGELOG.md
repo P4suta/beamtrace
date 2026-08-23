@@ -27,3 +27,7 @@ All notable changes will be documented here. The format follows Keep a Changelog
 - Chromium million-event virtualization, keyboard/accessibility/performance acceptance, and Linux PTY coverage.
 - Portable archives with the platform SQLite NIF, SHA-256 inventories, and SPDX 2.3 SBOM; non-root OTP 29 OCI packaging.
 - Six-architecture release workflow, Hex tarball, Homebrew/Scoop metadata, and GitHub OIDC artifact attestations.
+- Real capture-backed `record`, attach-driven Web/TUI Capture, shared bounded Live sampling, and visual multi-run Compare workspaces.
+- Relay producer capture with durable acknowledgements and permissioned raw grants that are hashed at rest, relay-bound, atomically budgeted, redaction-validated, and audited.
+- HTTPS S3-compatible SigV4 blob storage with create-only writes, verified reads, retention, custom CA support, and real MinIO TLS dogfooding.
+- Self-contained native archives with bundled ERTS/OTP runtime closure and host-runtime-independent acceptance.

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
+import beamtrace_runtime/blob_store
 import beamtrace_runtime/relay_archive
 import beamtrace_runtime/team_store
 import gleam/option.{None, Some}
@@ -28,6 +29,25 @@ pub fn accepted_frame_is_durable_and_readable_after_reopen_test() {
   |> should.equal(Ok(Some(frame)))
   relay_archive.read_payload(blobs, frame) |> should.equal(Ok(payload))
   team_store.close(reopened) |> should.equal(Ok(Nil))
+}
+
+pub fn relay_archive_backend_adapter_preserves_immutable_verified_contract_test() {
+  let assert Ok(store) = team_store.open(":memory:")
+  let backend = blob_store.filesystem("build/beamtrace-relay-backend-adapter")
+  let relay_id = "relay-00112233445566778899aabb"
+  let assert Ok(frame) =
+    relay_archive.persist_with(
+      store,
+      backend,
+      relay_id,
+      1,
+      relay_archive.Exact,
+      "backend-payload",
+      100,
+    )
+  relay_archive.read_payload_with(backend, frame)
+  |> should.equal(Ok("backend-payload"))
+  team_store.close(store) |> should.equal(Ok(Nil))
 }
 
 pub fn relay_frame_sequence_cannot_be_replaced_with_other_content_test() {

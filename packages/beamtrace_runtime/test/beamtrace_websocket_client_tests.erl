@@ -33,7 +33,7 @@ server_text_frame_parser_rejects_masking_fragmentation_and_large_frames_test() -
     ?assertEqual(
         {error, <<"frame_too_large">>},
         beamtrace_websocket_client_ffi:decode_server_frame_binary(
-            <<16#81, 127, 0, 0, 0, 0, 0, 16, 0, 1>>
+            <<16#81, 127, 0, 0, 0, 0, 0, 17, 0, 1>>
         )
     ).
 

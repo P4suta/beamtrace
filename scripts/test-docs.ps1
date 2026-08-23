@@ -10,26 +10,27 @@ $expectations = [ordered]@{
         'durable annotations and hash-chained audit history',
         'Admin-only `/api/v1/audit`',
         'outbound relay WebSocket',
-        'Raw team relay capture is intentionally rejected',
-        'Portable archives currently require Erlang/OTP 27–29 on the host'
+        'separately authorized bounded raw capture',
+        'Native release archives include ERTS'
     )
     'docs/roadmap.md' = @(
-        '## Remaining integration work',
-        'S3-compatible blob adapter',
-        'relay CLI producer hookup',
-        'bundled ERTS archives'
+        '## Post-alpha release operations',
+        'HTTPS S3-compatible SigV4 blobs',
+        'relay producer capture',
+        'bundled ERTS'
     )
     'docs/architecture.md' = @(
         'relay_frames.event_count',
-        'SQLite WAL schema version 5',
+        'SQLite WAL schema version 6',
         'Audit chains are verified when the team runtime opens',
         'Registered relay public keys are restored after a hub restart',
         'Credit is replenished only after durable acceptance',
-        'Raw batches are rejected at the team relay boundary'
+        'Raw batches additionally require a relay-bound one-time grant'
     )
     'docs/development.md' = @(
         './scripts/test-web-e2e.ps1',
         './scripts/test-hex-package.ps1',
+        './scripts/test-s3-dogfood.ps1',
         './scripts/test-oci.ps1 -Build',
         './scripts/test-release.ps1'
     )
@@ -51,6 +52,9 @@ foreach ($entry in $expectations.GetEnumerator()) {
 $readme = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'README.md')
 if ($readme.Contains('OIDC endpoint integration, durable SQLite/S3 team storage, and a persistent relay WebSocket remain roadmap work')) {
     throw 'README still reports implemented team boundaries as roadmap work.'
+}
+if ($readme.Contains('Raw team relay capture is intentionally rejected') -or $readme.Contains('bundled ERTS archives are still pending')) {
+    throw 'README still reports completed raw-capture or bundled-runtime work as pending.'
 }
 $roadmap = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'docs/roadmap.md')
 if ($roadmap.Contains('durable shared annotations/audit records')) {

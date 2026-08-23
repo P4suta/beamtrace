@@ -2,6 +2,7 @@ import beamtrace_web/workspace
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import gleeunit/should
 
 fn event(index: Int, internal: Bool) {
@@ -152,4 +153,186 @@ pub fn remote_search_reloads_globally_and_ignores_stale_responses_test() {
   searched.events |> should.equal(search_page.events)
   searched.total_events |> should.equal(1)
   workspace.needs_page(searched) |> should.be_false()
+}
+
+pub fn capture_controls_preserve_the_trigger_and_track_the_real_session_test() {
+  let model =
+    workspace.init_remote()
+    |> workspace.update(workspace.UserChangedTrigger("shop:checkout/1"))
+    |> workspace.update(workspace.UserChangedCaptureWhere("arg.0.tag == order"))
+    |> workspace.update(workspace.UserChangedCapturePreset("gen-server"))
+    |> workspace.update(workspace.UserChangedMaxRoots("3"))
+    |> workspace.update(workspace.UserRequestedArm)
+
+  model.trigger_input |> should.equal("shop:checkout/1")
+  model.capture_where |> should.equal("arg.0.tag == order")
+  model.capture_preset |> should.equal("gen-server")
+  model.capture_max_roots |> should.equal("3")
+  model.capture_phase |> should.equal(workspace.Arming)
+
+  let armed = workspace.update(model, workspace.CaptureArmAccepted)
+  armed.capture_phase |> should.equal(workspace.Armed)
+
+  let ready =
+    workspace.update(
+      armed,
+      workspace.CaptureStatusLoaded(workspace.Ready(12, "complete")),
+    )
+  ready.capture_phase |> should.equal(workspace.Ready(12, "complete"))
+  ready.capture_notice |> should.equal("")
+  ready.viewport_start |> should.equal(0)
+}
+
+pub fn capture_rejects_an_invalid_root_count_before_network_io_test() {
+  let model =
+    workspace.init_remote()
+    |> workspace.update(workspace.UserChangedTrigger("shop:checkout/1"))
+    |> workspace.update(workspace.UserChangedMaxRoots("0"))
+    |> workspace.update(workspace.UserRequestedArm)
+
+  model.capture_phase |> should.equal(workspace.Failed("invalid_root_budget"))
+  model.capture_notice |> should.equal("Max roots must be between 1 and 1000")
+}
+
+pub fn mfa_suggestions_are_bounded_model_state_not_fake_static_entries_test() {
+  let model =
+    workspace.init_remote()
+    |> workspace.update(
+      workspace.MfaSuggestionsLoaded([
+        "shop:checkout/1",
+        "shop:checkout/2",
+      ]),
+    )
+  model.mfa_suggestions
+  |> should.equal(["shop:checkout/1", "shop:checkout/2"])
+
+  model
+  |> workspace.update(workspace.UserChangedTrigger(""))
+  |> fn(model) { model.mfa_suggestions }
+  |> should.equal([])
+}
+
+pub fn failed_or_cancelled_capture_is_never_presented_as_complete_test() {
+  let model = workspace.init_remote()
+  let occupied =
+    model
+    |> workspace.update(
+      workspace.CaptureStatusLoaded(workspace.Failed("system_tracer_occupied")),
+    )
+  occupied.capture_phase
+  |> should.equal(workspace.Failed("system_tracer_occupied"))
+  occupied.capture_notice
+  |> string.contains("Live")
+  |> should.be_true()
+
+  model
+  |> workspace.update(workspace.UserRequestedCancel)
+  |> fn(model) { model.capture_phase }
+  |> should.equal(workspace.Cancelling)
+}
+
+pub fn live_snapshot_replaces_process_state_and_filters_without_touching_capture_test() {
+  let capture_rows = [event(1, False)]
+  let snapshot =
+    workspace.LiveSnapshot(
+      generation: 7,
+      sampled_at_ms: 1234,
+      rows: [live_row("<0.42.0>", "orders worker")],
+      findings: [
+        workspace.LiveFinding(
+          "<0.42.0>",
+          "orders worker",
+          "mailbox_growth",
+          "mailbox is growing above its baseline",
+          workspace.Inferred("EWMA exceeded baseline with hysteresis", 0.8),
+        ),
+      ],
+      supervision: [
+        workspace.TopologyEdge(
+          "orders_sup",
+          "<0.42.0>",
+          workspace.Inferred("proc_lib ancestor metadata", 0.85),
+        ),
+      ],
+      spawn: [],
+      links: [
+        workspace.TopologyEdge("<0.7.0>", "<0.42.0>", workspace.Exact),
+      ],
+    )
+  let model =
+    workspace.init(capture_rows)
+    |> workspace.update(workspace.UserSelectedMode(workspace.Live))
+    |> workspace.update(workspace.LiveLoaded(snapshot))
+    |> workspace.update(workspace.UserChangedQuery("ORDERS"))
+
+  model.events |> should.equal(capture_rows)
+  model.live_generation |> should.equal(7)
+  workspace.filtered_live_rows(model)
+  |> should.equal([live_row("<0.42.0>", "orders worker")])
+  workspace.live_findings_for(model, "<0.42.0>")
+  |> list.length
+  |> should.equal(1)
+
+  model
+  |> workspace.update(workspace.UserSelectedLiveProcess("<0.42.0>"))
+  |> workspace.selected_live_process
+  |> should.equal(Ok(live_row("<0.42.0>", "orders worker")))
+}
+
+fn live_row(pid: String, label: String) -> workspace.LiveRow {
+  workspace.LiveRow(
+    node: "app@host",
+    pid: pid,
+    label: label,
+    registered_name: "orders",
+    process_label: label,
+    initial_call: "orders_worker:init/1",
+    mailbox_len: 50,
+    memory_bytes: 10_000,
+    reductions: 1000,
+    heap_words: 100,
+    total_heap_words: 200,
+    link_count: 1,
+    status: "waiting",
+    current_function: "gen_server:loop/7",
+    links: ["<0.7.0>"],
+    ancestors: ["orders_sup"],
+  )
+}
+
+pub fn compare_requires_two_to_twenty_paths_and_preserves_capture_state_test() {
+  let original = [event(1, False)]
+  let invalid =
+    workspace.init(original)
+    |> workspace.update(workspace.UserSelectedMode(workspace.Compare))
+    |> workspace.update(workspace.UserChangedComparePaths("only.beamtrace"))
+    |> workspace.update(workspace.UserRequestedCompare)
+  invalid.compare_error
+  |> should.equal(Some("Enter 2–20 distinct .beamtrace paths"))
+
+  let ready =
+    invalid
+    |> workspace.update(workspace.UserChangedComparePaths(
+      "left.beamtrace\nslow.beamtrace\nmissing.beamtrace",
+    ))
+    |> workspace.update(workspace.UserRequestedCompare)
+  ready.compare_loading |> should.be_true()
+  workspace.compare_paths(ready)
+  |> should.equal([
+    "left.beamtrace",
+    "slow.beamtrace",
+    "missing.beamtrace",
+  ])
+
+  let report =
+    workspace.CompareReport(
+      "left.beamtrace",
+      3,
+      [workspace.CompareRun("slow.beamtrace", 1, 0, 0, [])],
+      [workspace.BranchStatistic("orders|send:tag:work", 10, 100, 2, 3, 0.66)],
+    )
+  let compared = workspace.update(ready, workspace.CompareLoaded(report))
+  compared.events |> should.equal(original)
+  compared.compare_report |> should.equal(Some(report))
+  compared.compare_loading |> should.be_false()
 }

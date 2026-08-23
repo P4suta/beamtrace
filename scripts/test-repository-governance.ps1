@@ -166,7 +166,8 @@ $ci = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/workflows/ci.y
 foreach ($marker in @(
     'name: TDD Gate',
     'if: ${{ always() }}',
-    'needs: [compatibility, distribution, language-fixtures, browser-e2e, oci, repository-governance]',
+    'needs: [compatibility, distribution, language-fixtures, browser-e2e, oci, s3-compatible, repository-governance]',
+    './scripts/test-s3-dogfood.ps1',
     './scripts/test-repository-governance.ps1'
 )) {
     if (-not $ci.Contains($marker)) {

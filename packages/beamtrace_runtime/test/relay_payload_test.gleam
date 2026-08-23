@@ -84,3 +84,64 @@ pub fn relay_rejects_raw_unknown_and_oversized_batch_shapes_test() {
   |> relay_payload.decode
   |> should.equal(Error("batch_event_limit"))
 }
+
+pub fn authorized_raw_batch_is_strictly_validated_and_token_is_not_canonicalized_test() {
+  let grant = string.repeat("A", 43)
+  let policy = types.RawPolicy(["password", "token"], 2, 64)
+  let fingerprint = string.repeat("c", 64)
+  let raw_event =
+    event(
+      types.MapView(2, [
+        #(types.Atom("token"), types.Redacted("key policy")),
+        #(
+          types.Atom("answer"),
+          types.Scalar("integer", Some("42"), Some(fingerprint)),
+        ),
+      ]),
+    )
+  let assert Ok(source) =
+    relay_payload.encode_raw("exact", grant, policy, [raw_event])
+  source |> string.contains(grant) |> should.be_true()
+  relay_payload.decode(source)
+  |> should.equal(Error("raw_capture_not_authorized"))
+
+  let assert Ok(decoded) = relay_payload.decode_for_ingest(source)
+  let assert relay_payload.RawBatch(received_grant, received_policy) =
+    decoded.privacy
+  received_grant |> should.equal(grant)
+  received_policy |> should.equal(policy)
+  decoded.canonical |> string.contains(grant) |> should.be_false()
+  decoded.canonical
+  |> string.contains("\"privacy\":\"raw\"")
+  |> should.be_true()
+}
+
+pub fn authorized_raw_batch_rejects_redaction_and_depth_policy_violations_test() {
+  let grant = string.repeat("A", 43)
+  let fingerprint = string.repeat("d", 64)
+  let leaked =
+    event(
+      types.MapView(1, [
+        #(
+          types.Atom("password"),
+          types.Scalar("string", Some(sentinel), Some(fingerprint)),
+        ),
+      ]),
+    )
+  relay_payload.encode_raw(
+    "exact",
+    grant,
+    types.RawPolicy(["password"], 2, 64),
+    [leaked],
+  )
+  |> should.equal(Error("raw_redaction_required"))
+
+  let too_deep = event(types.Tuple([types.Tuple([types.Atom("visible")])]))
+  relay_payload.encode_raw(
+    "exact",
+    grant,
+    types.RawPolicy(["password"], 1, 64),
+    [too_deep],
+  )
+  |> should.equal(Error("raw_depth_exceeded"))
+}

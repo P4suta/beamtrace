@@ -3,7 +3,7 @@
 
 -include_lib("kernel/include/file.hrl").
 
--export([put/3, read/2, read_verified/4, delete/2]).
+-export([put/3, read/2, read_verified/4, delete/2, verify_payload/3]).
 
 -define(MAX_PATH_BYTES, 4096).
 -define(MAX_KEY_BYTES, 1024).
@@ -48,6 +48,23 @@ read_verified(Root, Key, ExpectedSha256, ExpectedBytes)
             end
     end;
 read_verified(_Root, _Key, _ExpectedSha256, _ExpectedBytes) ->
+    {error, <<"invalid_blob_checksum">>}.
+
+verify_payload(Payload, ExpectedSha256, ExpectedBytes)
+        when is_binary(Payload), is_binary(ExpectedSha256),
+             is_integer(ExpectedBytes), ExpectedBytes > 0,
+             ExpectedBytes =< ?MAX_BLOB_BYTES ->
+    case valid_sha256(ExpectedSha256) of
+        false -> {error, <<"invalid_blob_checksum">>};
+        true ->
+            ActualSha256 = hex(crypto:hash(sha256, Payload)),
+            case byte_size(Payload) =:= ExpectedBytes
+                    andalso ActualSha256 =:= ExpectedSha256 of
+                true -> {ok, Payload};
+                false -> {error, <<"blob_checksum_mismatch">>}
+            end
+    end;
+verify_payload(_Payload, _ExpectedSha256, _ExpectedBytes) ->
     {error, <<"invalid_blob_checksum">>}.
 
 delete(Root, Key) when is_binary(Root), is_binary(Key) ->

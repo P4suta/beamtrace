@@ -8,10 +8,12 @@
     agent_binary/0,
     probe/1,
     sample_processes/3,
+    search_mfas/3,
     inject/1,
     inject/2,
     start_agent/3,
     arm_agent/3,
+    capture_agent_status/1,
     listen_agent/3,
     grant/3,
     stop_agent/2,
@@ -20,6 +22,8 @@
 ]).
 
 -define(RPC_TIMEOUT, 10000).
+-define(AGENT_PROTOCOL_VERSION, 1).
+-define(AGENT_MODULE_HASH, <<"b7a54d1c-beamtrace-agent-v2">>).
 -define(REQUIRED_AGENT_EXPORTS, [
     {version, 0},
     {start, 2},
@@ -102,6 +106,75 @@ sample_processes(Node, Offset, Limit)
 sample_processes(_Node, _Offset, _Limit) ->
     {error, invalid_sample_window}.
 
+search_mfas(Node, Query, Limit)
+        when is_atom(Node), is_binary(Query), byte_size(Query) =< 256,
+             is_integer(Limit), Limit > 0, Limit =< 200 ->
+    case safe_erpc(Node, code, all_loaded, []) of
+        {ok, Loaded} when is_list(Loaded) ->
+            Modules = lists:sort([Module || {Module, _Filename} <- Loaded, is_atom(Module)]),
+            {ok, search_modules(Node, Modules, string:lowercase(Query), Limit, [])};
+        {ok, Other} -> {error, {unexpected_module_list, Other}};
+        {error, Reason} -> {error, {mfa_search_failed, Reason}}
+    end;
+search_mfas(_Node, _Query, _Limit) ->
+    {error, invalid_mfa_search}.
+
+search_modules(_Node, _Modules, _Query, 0, Accumulator) ->
+    lists:reverse(Accumulator);
+search_modules(_Node, [], _Query, _Remaining, Accumulator) ->
+    lists:reverse(Accumulator);
+search_modules(Node, [Module | Rest], Query, Remaining, Accumulator) ->
+    ModuleBinary = atom_to_binary(Module, utf8),
+    case module_may_match(ModuleBinary, Query) of
+        false -> search_modules(Node, Rest, Query, Remaining, Accumulator);
+        true ->
+            case safe_erpc(Node, Module, module_info, [exports]) of
+                {ok, Exports} when is_list(Exports) ->
+                    {NextRemaining, NextAccumulator} = add_matching_exports(
+                        ModuleBinary,
+                        Exports,
+                        Query,
+                        Remaining,
+                        Accumulator
+                    ),
+                    search_modules(Node, Rest, Query, NextRemaining, NextAccumulator);
+                _ -> search_modules(Node, Rest, Query, Remaining, Accumulator)
+            end
+    end.
+
+module_may_match(_Module, <<>>) -> true;
+module_may_match(Module, Query) ->
+    case binary:split(Query, <<":">>) of
+        [ModuleQuery, _FunctionQuery] when byte_size(ModuleQuery) > 0 ->
+            binary:match(string:lowercase(Module), ModuleQuery) =/= nomatch;
+        _ -> true
+    end.
+
+add_matching_exports(_Module, _Exports, _Query, 0, Accumulator) ->
+    {0, Accumulator};
+add_matching_exports(_Module, [], _Query, Remaining, Accumulator) ->
+    {Remaining, Accumulator};
+add_matching_exports(Module, [{module_info, _Arity} | Rest], Query, Remaining, Accumulator) ->
+    add_matching_exports(Module, Rest, Query, Remaining, Accumulator);
+add_matching_exports(Module, [{Function, Arity} | Rest], Query, Remaining, Accumulator)
+        when is_atom(Function), is_integer(Arity), Arity >= 0 ->
+    FunctionBinary = atom_to_binary(Function, utf8),
+    Candidate = <<Module/binary, ":", FunctionBinary/binary, "/",
+        (integer_to_binary(Arity))/binary>>,
+    case Query =:= <<>> orelse binary:match(string:lowercase(Candidate), Query) =/= nomatch of
+        true ->
+            add_matching_exports(
+                Module,
+                Rest,
+                Query,
+                Remaining - 1,
+                [#{module => Module, function => FunctionBinary, arity => Arity} | Accumulator]
+            );
+        false -> add_matching_exports(Module, Rest, Query, Remaining, Accumulator)
+    end;
+add_matching_exports(Module, [_Invalid | Rest], Query, Remaining, Accumulator) ->
+    add_matching_exports(Module, Rest, Query, Remaining, Accumulator).
+
 sample_process_slice(_Node, [], _Offset, _Limit) -> {ok, [], 0};
 sample_process_slice(Node, Pids, Offset, Limit) ->
     Count = length(Pids),
@@ -117,6 +190,7 @@ sample_process_slice(Node, Pids, Offset, Limit) ->
 sample_process(Node, Pid) ->
     Keys = [
         registered_name,
+        label,
         initial_call,
         message_queue_len,
         memory,
@@ -124,6 +198,7 @@ sample_process(Node, Pid) ->
         heap_size,
         total_heap_size,
         links,
+        {dictionary, '$ancestors'},
         status,
         current_function
     ],
@@ -134,6 +209,7 @@ sample_process(Node, Pid) ->
                 pid => list_to_binary(pid_to_list(Pid)),
                 node => atom_to_binary(Node, utf8),
                 registered_name => safe_registered_name(Info),
+                process_label => safe_process_label(Info),
                 initial_call => proplists:get_value(initial_call, Info, undefined),
                 message_queue_len => proplists:get_value(message_queue_len, Info, 0),
                 memory => proplists:get_value(memory, Info, 0),
@@ -141,6 +217,8 @@ sample_process(Node, Pid) ->
                 heap_size => proplists:get_value(heap_size, Info, 0),
                 total_heap_size => proplists:get_value(total_heap_size, Info, 0),
                 link_count => length(proplists:get_value(links, Info, [])),
+                links => safe_links(Info),
+                ancestors => safe_ancestors(Info),
                 status => proplists:get_value(status, Info, undefined),
                 current_function => proplists:get_value(current_function, Info, undefined)
             }};
@@ -153,6 +231,39 @@ safe_registered_name(Info) ->
         Name when is_atom(Name) -> atom_to_binary(Name, utf8);
         _ -> undefined
     end.
+
+safe_process_label(Info) ->
+    safe_identity_text(proplists:get_value(label, Info, undefined)).
+
+safe_links(Info) ->
+    [list_to_binary(pid_to_list(Pid))
+        || Pid <- proplists:get_value(links, Info, []), is_pid(Pid)].
+
+safe_ancestors(Info) ->
+    case proplists:get_value({dictionary, '$ancestors'}, Info, undefined) of
+        Ancestors when is_list(Ancestors) ->
+            lists:sublist([
+                Text || Ancestor <- Ancestors,
+                        Text <- [safe_identity_text(Ancestor)],
+                        Text =/= undefined
+            ], 32);
+        _ -> []
+    end.
+
+safe_identity_text(undefined) -> undefined;
+safe_identity_text(Value) when is_atom(Value) -> atom_to_binary(Value, utf8);
+safe_identity_text(Value) when is_pid(Value) -> list_to_binary(pid_to_list(Value));
+safe_identity_text(Value) when is_binary(Value), byte_size(Value) =< 256 -> Value;
+safe_identity_text(Value) when is_list(Value) ->
+    try
+        Binary = unicode:characters_to_binary(Value),
+        case byte_size(Binary) =< 256 of
+            true -> Binary;
+            false -> undefined
+        end
+    catch _:_ -> undefined
+    end;
+safe_identity_text(_Value) -> undefined.
 
 inject(Node) when is_atom(Node) ->
     case agent_binary() of
@@ -228,6 +339,19 @@ arm_agent(Node, Agent, MFA)
     case safe_erpc(Node, beamtrace_agent, arm, [Agent, MFA]) of
         {ok, Result} -> Result;
         {error, Reason} -> {error, {agent_arm_failed, Reason}}
+    end.
+
+capture_agent_status(Node) when is_atom(Node) ->
+    case safe_erpc(Node, seq_trace, get_system_tracer, []) of
+        {ok, false} -> {error, not_armed};
+        {ok, Agent} when is_pid(Agent) ->
+            case safe_erpc(Node, beamtrace_agent, status, [Agent]) of
+                {ok, #{armed := true}} -> {ok, armed};
+                {ok, _Status} -> {error, not_armed};
+                {error, _Reason} -> {error, system_tracer_occupied}
+            end;
+        {ok, _Existing} -> {error, system_tracer_occupied};
+        {error, Reason} -> {error, Reason}
     end.
 
 listen_agent(Node, Agent, Label)
@@ -337,9 +461,8 @@ remote_version(Node) ->
     end.
 
 compatible_version(Version) when is_map(Version) ->
-    Local = beamtrace_agent:version(),
-    maps:get(protocol, Version, undefined) =:= maps:get(protocol, Local)
-        andalso maps:get(module_hash, Version, undefined) =:= maps:get(module_hash, Local);
+    maps:get(protocol, Version, undefined) =:= ?AGENT_PROTOCOL_VERSION
+        andalso maps:get(module_hash, Version, undefined) =:= ?AGENT_MODULE_HASH;
 compatible_version(_Version) ->
     false.
 

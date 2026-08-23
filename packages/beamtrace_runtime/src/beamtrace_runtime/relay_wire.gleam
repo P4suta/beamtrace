@@ -11,9 +11,9 @@ const protocol_version = 1
 
 const max_hello_bytes = 16_384
 
-const max_envelope_bytes = 1_048_576
+pub const max_envelope_bytes = 1_048_576
 
-const max_encoded_envelope_bytes = 1_114_112
+pub const max_encoded_envelope_bytes = 1_114_112
 
 pub type Hello {
   Hello(

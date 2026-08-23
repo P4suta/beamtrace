@@ -1,3 +1,4 @@
+import beamtrace/types
 import beamtrace_runtime/live
 import gleam/list
 import gleam/option.{None, Some}
@@ -52,20 +53,25 @@ pub fn otp27_uses_system_monitor_and_newer_otp_uses_isolated_trace_system_test()
 
 pub fn process_sample_uses_stable_metadata_label_and_bounded_deltas_test() {
   let previous =
-    live.normalize_sample(live.RawProcessSample(
-      "app@host",
-      "<0.42.0>",
-      "orders",
-      "orders_worker:init/1",
-      2,
-      10_000,
-      100,
-      200,
-      300,
-      2,
-      "waiting",
-      "gen_server:loop/7",
-    ))
+    live.normalize_sample(
+      live.RawProcessSample(
+        "app@host",
+        "<0.42.0>",
+        "orders",
+        "order worker",
+        "orders_worker:init/1",
+        2,
+        10_000,
+        100,
+        200,
+        300,
+        2,
+        "waiting",
+        "gen_server:loop/7",
+        ["<0.7.0>"],
+        ["orders_sup"],
+      ),
+    )
   let current =
     live.ProcessSample(
       ..previous,
@@ -74,7 +80,9 @@ pub fn process_sample_uses_stable_metadata_label_and_bounded_deltas_test() {
       reductions: 175,
     )
 
-  previous.label |> should.equal("orders")
+  previous.label |> should.equal("order worker")
+  previous.links |> should.equal(["<0.7.0>"])
+  previous.ancestors |> should.equal(["orders_sup"])
   live.delta(previous, current)
   |> should.equal(Some(live.ProcessDelta(7, 2000, 75)))
 
@@ -83,20 +91,62 @@ pub fn process_sample_uses_stable_metadata_label_and_bounded_deltas_test() {
 }
 
 pub fn sample_without_registered_name_falls_back_to_initial_call_test() {
-  live.normalize_sample(live.RawProcessSample(
-    "app@host",
-    "<0.7.0>",
-    "",
-    "worker:start/0",
-    0,
-    1,
-    2,
-    3,
-    4,
-    0,
-    "waiting",
-    "worker:loop/0",
-  ))
+  live.normalize_sample(
+    live.RawProcessSample(
+      "app@host",
+      "<0.7.0>",
+      "",
+      "",
+      "worker:start/0",
+      0,
+      1,
+      2,
+      3,
+      4,
+      0,
+      "waiting",
+      "worker:loop/0",
+      [],
+      [],
+    ),
+  )
   |> fn(sample) { sample.label }
   |> should.equal("worker:start/0")
+}
+
+pub fn process_label_has_priority_and_live_analysis_explains_growth_test() {
+  let previous =
+    live.normalize_sample(
+      live.RawProcessSample(
+        "app@host",
+        "<0.8.0>",
+        "registered",
+        "friendly worker",
+        "worker:start/0",
+        1,
+        1000,
+        10,
+        10,
+        20,
+        0,
+        "waiting",
+        "worker:loop/0",
+        [],
+        ["root_sup"],
+      ),
+    )
+  let current =
+    live.ProcessSample(
+      ..previous,
+      mailbox_len: 50,
+      memory_bytes: 10_000,
+      reductions: 1000,
+    )
+
+  current.label |> should.equal("friendly worker")
+  let findings = live.analyze([previous], [current])
+  findings |> list.length |> fn(count) { count > 0 } |> should.be_true()
+  findings
+  |> list.all(fn(finding) { finding.evidence != types.Exact })
+  |> should.be_true()
 }

@@ -963,6 +963,26 @@ function append(first, second) {
 function prepend2(list, item) {
   return prepend(item, list);
 }
+function flatten_loop(loop$lists, loop$acc) {
+  while (true) {
+    let lists = loop$lists;
+    let acc = loop$acc;
+    if (lists instanceof Empty) {
+      return reverse(acc);
+    } else {
+      let list = lists.head;
+      let further_lists = lists.tail;
+      loop$lists = further_lists;
+      loop$acc = reverse_and_prepend(list, acc);
+    }
+  }
+}
+function flatten(lists) {
+  return flatten_loop(lists, List$Empty$const);
+}
+function flat_map(list, fun) {
+  return flatten(map2(list, fun));
+}
 function fold2(loop$list, loop$initial, loop$fun) {
   while (true) {
     let list = loop$list;
@@ -994,6 +1014,44 @@ function find(loop$list, loop$is_desired) {
       } else {
         loop$list = rest$1;
         loop$is_desired = is_desired;
+      }
+    }
+  }
+}
+function all(loop$list, loop$predicate) {
+  while (true) {
+    let list = loop$list;
+    let predicate = loop$predicate;
+    if (list instanceof Empty) {
+      return true;
+    } else {
+      let first$1 = list.head;
+      let rest$1 = list.tail;
+      let $ = predicate(first$1);
+      if ($) {
+        loop$list = rest$1;
+        loop$predicate = predicate;
+      } else {
+        return $;
+      }
+    }
+  }
+}
+function any(loop$list, loop$predicate) {
+  while (true) {
+    let list = loop$list;
+    let predicate = loop$predicate;
+    if (list instanceof Empty) {
+      return false;
+    } else {
+      let first$1 = list.head;
+      let rest$1 = list.tail;
+      let $ = predicate(first$1);
+      if ($) {
+        return $;
+      } else {
+        loop$list = rest$1;
+        loop$predicate = predicate;
       }
     }
   }
@@ -1370,6 +1428,31 @@ function concat_loop(loop$strings, loop$accumulator) {
 function concat2(strings) {
   return concat_loop(strings, "");
 }
+function join_loop(loop$strings, loop$separator, loop$accumulator) {
+  while (true) {
+    let strings = loop$strings;
+    let separator = loop$separator;
+    let accumulator = loop$accumulator;
+    if (strings instanceof Empty) {
+      return accumulator;
+    } else {
+      let string = strings.head;
+      let strings$1 = strings.tail;
+      loop$strings = strings$1;
+      loop$separator = separator;
+      loop$accumulator = accumulator + separator + string;
+    }
+  }
+}
+function join(strings, separator) {
+  if (strings instanceof Empty) {
+    return "";
+  } else {
+    let first$1 = strings.head;
+    let rest = strings.tail;
+    return join_loop(rest, separator, first$1);
+  }
+}
 function trim(string) {
   let _pipe = string;
   let _pipe$1 = trim_start(_pipe);
@@ -1586,6 +1669,39 @@ function decode_error(expected, found) {
 function field(field_name, field_decoder, next) {
   return subfield(toList([field_name]), field_decoder, next);
 }
+function optional_field(key, default$, field_decoder, next) {
+  return new Decoder((data) => {
+    let _block;
+    let _block$1;
+    let $1 = index2(data, key);
+    if ($1 instanceof Ok) {
+      let $22 = $1[0];
+      if ($22 instanceof Some) {
+        let data$1 = $22[0];
+        _block$1 = field_decoder.function(data$1);
+      } else {
+        _block$1 = [default$, List$Empty$const];
+      }
+    } else {
+      let kind = $1[0];
+      _block$1 = [
+        default$,
+        toList([
+          new DecodeError(kind, classify_dynamic(data), List$Empty$const)
+        ])
+      ];
+    }
+    let _pipe = _block$1;
+    _block = push_path(_pipe, toList([key]));
+    let $ = _block;
+    let out = $[0];
+    let errors1 = $[1];
+    let $2 = next(out).function(data);
+    let out$1 = $2[0];
+    let errors2 = $2[1];
+    return [out$1, append(errors1, errors2)];
+  });
+}
 function optional(inner) {
   return new Decoder((data) => {
     let $ = is_null(data);
@@ -1606,8 +1722,16 @@ function failure(placeholder, name) {
 }
 
 // build/dev/javascript/gleam_stdlib/gleam_stdlib.mjs
+var Nil = undefined;
 function identity(x) {
   return x;
+}
+function parse_int(value) {
+  if (/^[-+]?(\d+)$/.test(value)) {
+    return Result$Ok(parseInt(value));
+  } else {
+    return Result$Error(Nil);
+  }
 }
 function to_string(term) {
   return term.toString();
@@ -1638,6 +1762,9 @@ function contains_string(haystack, needle) {
 }
 function starts_with(haystack, needle) {
   return haystack.startsWith(needle);
+}
+function ends_with(haystack, needle) {
+  return haystack.endsWith(needle);
 }
 var unicode_whitespaces = [
   " ",
@@ -2808,6 +2935,9 @@ function h1(attrs, children) {
 function h2(attrs, children) {
   return element2("h2", attrs, children);
 }
+function h3(attrs, children) {
+  return element2("h3", attrs, children);
+}
 function main(attrs, children) {
   return element2("main", attrs, children);
 }
@@ -2823,14 +2953,11 @@ function div(attrs, children) {
 function li(attrs, children) {
   return element2("li", attrs, children);
 }
-function ol(attrs, children) {
-  return element2("ol", attrs, children);
-}
 function p(attrs, children) {
   return element2("p", attrs, children);
 }
-function a(attrs, children) {
-  return element2("a", attrs, children);
+function ul(attrs, children) {
+  return element2("ul", attrs, children);
 }
 function span(attrs, children) {
   return element2("span", attrs, children);
@@ -2862,11 +2989,23 @@ function tr(attrs, children) {
 function button(attrs, children) {
   return element2("button", attrs, children);
 }
+function datalist(attrs, children) {
+  return element2("datalist", attrs, children);
+}
 function input(attrs) {
   return element2("input", attrs, empty_list);
 }
 function label(attrs, children) {
   return element2("label", attrs, children);
+}
+function option(attrs, label2) {
+  return element2("option", attrs, toList([text2(label2)]));
+}
+function output(attrs, children) {
+  return element2("output", attrs, children);
+}
+function select(attrs, children) {
+  return element2("select", attrs, children);
 }
 function textarea(attrs, content) {
   return element2("textarea", prepend(property2("value", string3(content)), attrs), toList([text2(content)]));
@@ -3760,43 +3899,43 @@ class Config2 extends CustomType {
 var default_config = /* @__PURE__ */ new Config2(true, true, false, empty_list, empty_list, empty_list, false, Option$None$const, Option$None$const, Option$None$const, Option$None$const, Option$None$const, Option$None$const, Option$None$const);
 
 // build/dev/javascript/lustre/lustre/internals/equals.ffi.mjs
-var isEqual2 = (a2, b) => {
-  if (a2 === b) {
+var isEqual2 = (a, b) => {
+  if (a === b) {
     return true;
   }
-  if (a2 == null || b == null) {
+  if (a == null || b == null) {
     return false;
   }
-  const type = typeof a2;
+  const type = typeof a;
   if (type !== typeof b) {
     return false;
   }
   if (type !== "object") {
     return false;
   }
-  const ctor = a2.constructor;
+  const ctor = a.constructor;
   if (ctor !== b.constructor) {
     return false;
   }
-  if (Array.isArray(a2)) {
-    return areArraysEqual(a2, b);
+  if (Array.isArray(a)) {
+    return areArraysEqual(a, b);
   }
-  return areObjectsEqual(a2, b);
+  return areObjectsEqual(a, b);
 };
-var areArraysEqual = (a2, b) => {
-  let index4 = a2.length;
+var areArraysEqual = (a, b) => {
+  let index4 = a.length;
   if (index4 !== b.length) {
     return false;
   }
   while (index4--) {
-    if (!isEqual2(a2[index4], b[index4])) {
+    if (!isEqual2(a[index4], b[index4])) {
       return false;
     }
   }
   return true;
 };
-var areObjectsEqual = (a2, b) => {
-  const properties = Object.keys(a2);
+var areObjectsEqual = (a, b) => {
+  const properties = Object.keys(a);
   let index4 = properties.length;
   if (Object.keys(b).length !== index4) {
     return false;
@@ -3806,7 +3945,7 @@ var areObjectsEqual = (a2, b) => {
     if (!Object.hasOwn(b, property3)) {
       return false;
     }
-    if (!isEqual2(a2[property3], b[property3])) {
+    if (!isEqual2(a[property3], b[property3])) {
       return false;
     }
   }
@@ -4757,13 +4896,13 @@ var iterate = (list4, callback) => {
     }
   }
 };
-var append4 = (a2, b) => {
-  if (!List$NonEmpty$rest(a2)) {
+var append4 = (a, b) => {
+  if (!List$NonEmpty$rest(a)) {
     return b;
   } else if (!List$NonEmpty$rest(b)) {
-    return a2;
+    return a;
   } else {
-    return append(a2, b);
+    return append(a, b);
   }
 };
 
@@ -5840,7 +5979,7 @@ class Runtime2 {
   #handle_effect(effect) {
     const dispatch2 = (message) => this.send(Message$EffectDispatchedMessage(message));
     const emit2 = (name, data) => this.send(Message$EffectEmitEvent(name, data));
-    const select = () => {
+    const select2 = () => {
       return;
     };
     const internals = () => {
@@ -5850,7 +5989,7 @@ class Runtime2 {
     const subscribe2 = (key, decoder) => this.send(Message$EffectRequestedContextSubscription(key, decoder));
     const unsubscribe2 = (key) => this.send(Message$EffectRemovedContextSubscription(key));
     globalThis.queueMicrotask(() => {
-      perform(effect, dispatch2, emit2, select, internals, provide2, subscribe2, unsubscribe2);
+      perform(effect, dispatch2, emit2, select2, internals, provide2, subscribe2, unsubscribe2);
     });
   }
 }
@@ -5895,6 +6034,34 @@ class Inferred extends CustomType {
     this.confidence = confidence;
   }
 }
+class Unavailable extends CustomType {
+}
+var CapturePhase$Unavailable$const = new Unavailable;
+class Idle extends CustomType {
+}
+var CapturePhase$Idle$const = new Idle;
+class Arming extends CustomType {
+}
+var CapturePhase$Arming$const = new Arming;
+class Armed extends CustomType {
+}
+var CapturePhase$Armed$const = new Armed;
+class Cancelling extends CustomType {
+}
+var CapturePhase$Cancelling$const = new Cancelling;
+class Ready extends CustomType {
+  constructor(event_count, completeness) {
+    super();
+    this.event_count = event_count;
+    this.completeness = completeness;
+  }
+}
+class Failed extends CustomType {
+  constructor(reason) {
+    super();
+    this.reason = reason;
+  }
+}
 class EventRow extends CustomType {
   constructor(id2, actor, kind, timestamp_ns, duration_ns, evidence, anomalous, internal) {
     super();
@@ -5917,8 +6084,99 @@ class EventPage extends CustomType {
     this.limit = limit;
   }
 }
+class LiveRow extends CustomType {
+  constructor(node, pid, label2, registered_name, process_label, initial_call, mailbox_len, memory_bytes, reductions, heap_words, total_heap_words, link_count, status, current_function, links, ancestors) {
+    super();
+    this.node = node;
+    this.pid = pid;
+    this.label = label2;
+    this.registered_name = registered_name;
+    this.process_label = process_label;
+    this.initial_call = initial_call;
+    this.mailbox_len = mailbox_len;
+    this.memory_bytes = memory_bytes;
+    this.reductions = reductions;
+    this.heap_words = heap_words;
+    this.total_heap_words = total_heap_words;
+    this.link_count = link_count;
+    this.status = status;
+    this.current_function = current_function;
+    this.links = links;
+    this.ancestors = ancestors;
+  }
+}
+class LiveFinding extends CustomType {
+  constructor(pid, label2, kind, summary, evidence) {
+    super();
+    this.pid = pid;
+    this.label = label2;
+    this.kind = kind;
+    this.summary = summary;
+    this.evidence = evidence;
+  }
+}
+class TopologyEdge extends CustomType {
+  constructor(from3, to, evidence) {
+    super();
+    this.from = from3;
+    this.to = to;
+    this.evidence = evidence;
+  }
+}
+class LiveSnapshot extends CustomType {
+  constructor(generation, sampled_at_ms, rows, findings, supervision, spawn, links) {
+    super();
+    this.generation = generation;
+    this.sampled_at_ms = sampled_at_ms;
+    this.rows = rows;
+    this.findings = findings;
+    this.supervision = supervision;
+    this.spawn = spawn;
+    this.links = links;
+  }
+}
+class CompareItem extends CustomType {
+  constructor(status, left_id, right_id, latency_delta_ns, reason) {
+    super();
+    this.status = status;
+    this.left_id = left_id;
+    this.right_id = right_id;
+    this.latency_delta_ns = latency_delta_ns;
+    this.reason = reason;
+  }
+}
+class CompareRun extends CustomType {
+  constructor(path, added, removed, changed, items) {
+    super();
+    this.path = path;
+    this.added = added;
+    this.removed = removed;
+    this.changed = changed;
+    this.items = items;
+  }
+}
+class BranchStatistic extends CustomType {
+  constructor(signature, p50_ns, p95_ns, occurrences, total_runs, occurrence_rate) {
+    super();
+    this.signature = signature;
+    this.p50_ns = p50_ns;
+    this.p95_ns = p95_ns;
+    this.occurrences = occurrences;
+    this.total_runs = total_runs;
+    this.occurrence_rate = occurrence_rate;
+  }
+}
+class CompareReport extends CustomType {
+  constructor(baseline, run_count, reports, statistics) {
+    super();
+    this.baseline = baseline;
+    this.run_count = run_count;
+    this.reports = reports;
+    this.statistics = statistics;
+  }
+}
 class Model extends CustomType {
-  constructor(remote, mode, events2, total_events, loaded_start, loaded_limit, loaded_query, loading, load_error, selected_event_id, query, show_internal, viewport_start, viewport_size, zoom, palette_open, search_focused, bookmarks, annotation) {
+  constructor(remote, mode, events2, total_events, loaded_start, loaded_limit, loaded_query, loading, load_error, selected_event_id, query, show_internal, viewport_start, viewport_size, zoom, palette_open, search_focused, bookmarks, annotation, trigger_input, mfa_suggestions, capture_where, capture_preset, capture_max_roots, save_path, capture_phase, capture_notice, live_rows, live_findings, live_supervision, live_spawn, live_links, live_generation, live_sampled_at_ms, live_loading, live_error, selected_live_pid, compare_paths_input, compare_loading, compare_error, compare_report) {
     super();
     this.remote = remote;
     this.mode = mode;
@@ -5939,6 +6197,28 @@ class Model extends CustomType {
     this.search_focused = search_focused;
     this.bookmarks = bookmarks;
     this.annotation = annotation;
+    this.trigger_input = trigger_input;
+    this.mfa_suggestions = mfa_suggestions;
+    this.capture_where = capture_where;
+    this.capture_preset = capture_preset;
+    this.capture_max_roots = capture_max_roots;
+    this.save_path = save_path;
+    this.capture_phase = capture_phase;
+    this.capture_notice = capture_notice;
+    this.live_rows = live_rows;
+    this.live_findings = live_findings;
+    this.live_supervision = live_supervision;
+    this.live_spawn = live_spawn;
+    this.live_links = live_links;
+    this.live_generation = live_generation;
+    this.live_sampled_at_ms = live_sampled_at_ms;
+    this.live_loading = live_loading;
+    this.live_error = live_error;
+    this.selected_live_pid = selected_live_pid;
+    this.compare_paths_input = compare_paths_input;
+    this.compare_loading = compare_loading;
+    this.compare_error = compare_error;
+    this.compare_report = compare_report;
   }
 }
 class UserSelectedMode extends CustomType {
@@ -6016,12 +6296,183 @@ class PageLoadFailed extends CustomType {
     this.reason = reason;
   }
 }
+class UserChangedTrigger extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+}
+class MfaSuggestionsLoaded extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+}
+class UserChangedCaptureWhere extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+}
+class UserChangedCapturePreset extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+}
+class UserChangedMaxRoots extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+}
+class UserRequestedArm extends CustomType {
+}
+var Msg$UserRequestedArm$const = new UserRequestedArm;
+class CaptureArmAccepted extends CustomType {
+}
+var Msg$CaptureArmAccepted$const = new CaptureArmAccepted;
+class CaptureArmFailed extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+}
+class PollCaptureStatus extends CustomType {
+}
+var Msg$PollCaptureStatus$const = new PollCaptureStatus;
+class CaptureStatusLoaded extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+}
+class UserRequestedCancel extends CustomType {
+}
+var Msg$UserRequestedCancel$const = new UserRequestedCancel;
+class CaptureCancelFailed extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+}
+class UserChangedSavePath extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+}
+class UserRequestedSave extends CustomType {
+}
+var Msg$UserRequestedSave$const = new UserRequestedSave;
+class CaptureSaved extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+}
+class CaptureSaveFailed extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+}
+class PollLive extends CustomType {
+}
+var Msg$PollLive$const = new PollLive;
+class LiveLoaded extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+}
+class LiveLoadFailed extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+}
+class UserSelectedLiveProcess extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+}
+class UserChangedComparePaths extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+}
+class UserRequestedCompare extends CustomType {
+}
+var Msg$UserRequestedCompare$const = new UserRequestedCompare;
+class CompareLoaded extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+}
+class CompareFailed extends CustomType {
+  constructor($0) {
+    super();
+    this[0] = $0;
+  }
+}
 function init(events2) {
-  return new Model(false, Mode$Capture$const, events2, length(events2), 0, length(events2), "", false, Option$None$const, Option$None$const, "", false, 0, 80, 1, false, false, List$Empty$const, "");
+  return new Model(false, Mode$Capture$const, events2, length(events2), 0, length(events2), "", false, Option$None$const, Option$None$const, "", false, 0, 80, 1, false, false, List$Empty$const, "", "", List$Empty$const, "", "generic", "1", "capture.beamtrace", CapturePhase$Unavailable$const, "", List$Empty$const, List$Empty$const, List$Empty$const, List$Empty$const, List$Empty$const, 0, 0, false, Option$None$const, Option$None$const, `baseline.beamtrace
+candidate.beamtrace`, false, Option$None$const, Option$None$const);
 }
 function init_remote() {
   let _record = init(List$Empty$const);
-  return new Model(true, _record.mode, _record.events, _record.total_events, _record.loaded_start, 200, _record.loaded_query, true, _record.load_error, _record.selected_event_id, _record.query, _record.show_internal, _record.viewport_start, 80, _record.zoom, _record.palette_open, _record.search_focused, _record.bookmarks, _record.annotation);
+  return new Model(true, _record.mode, _record.events, _record.total_events, _record.loaded_start, 200, _record.loaded_query, true, _record.load_error, _record.selected_event_id, _record.query, _record.show_internal, _record.viewport_start, 80, _record.zoom, _record.palette_open, _record.search_focused, _record.bookmarks, _record.annotation, _record.trigger_input, _record.mfa_suggestions, _record.capture_where, _record.capture_preset, _record.capture_max_roots, _record.save_path, CapturePhase$Idle$const, _record.capture_notice, _record.live_rows, _record.live_findings, _record.live_supervision, _record.live_spawn, _record.live_links, _record.live_generation, _record.live_sampled_at_ms, _record.live_loading, _record.live_error, _record.selected_live_pid, _record.compare_paths_input, _record.compare_loading, _record.compare_error, _record.compare_report);
+}
+function compare_paths(model) {
+  let _pipe = model.compare_paths_input;
+  let _pipe$1 = split2(_pipe, `
+`);
+  let _pipe$2 = map2(_pipe$1, trim);
+  return filter(_pipe$2, (path) => {
+    return path !== "";
+  });
+}
+function unique_strings(loop$items, loop$seen) {
+  while (true) {
+    let items = loop$items;
+    let seen = loop$seen;
+    if (items instanceof Empty) {
+      return true;
+    } else {
+      let item = items.head;
+      let rest = items.tail;
+      let $ = contains(seen, item);
+      if ($) {
+        return false;
+      } else {
+        loop$items = rest;
+        loop$seen = prepend(item, seen);
+      }
+    }
+  }
+}
+function valid_compare_paths(paths) {
+  let count = length(paths);
+  return count >= 2 && count <= 20 && all(paths, (path) => {
+    return ends_with(lowercase(path), ".beamtrace");
+  }) && unique_strings(paths, List$Empty$const);
+}
+function parse_root_budget(model) {
+  let $ = parse_int(trim(model.capture_max_roots));
+  if ($ instanceof Ok) {
+    let value2 = $[0];
+    if (value2 >= 1 && value2 <= 1000) {
+      return $;
+    } else {
+      return new Error2(undefined);
+    }
+  } else {
+    return new Error2(undefined);
+  }
 }
 function remote_query(model) {
   return trim(model.query);
@@ -6058,27 +6509,39 @@ function update2(loop$model, loop$message) {
     let message = loop$message;
     if (message instanceof UserSelectedMode) {
       let mode = message[0];
-      return new Model(model.remote, mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation);
+      return new Model(model.remote, mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, (() => {
+        if (mode instanceof Live) {
+          return true;
+        } else {
+          return false;
+        }
+      })(), (() => {
+        if (mode instanceof Live) {
+          return Option$None$const;
+        } else {
+          return model.live_error;
+        }
+      })(), model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
     } else if (message instanceof UserSelectedEvent) {
       let id2 = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, new Some(id2), model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation);
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, new Some(id2), model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
     } else if (message instanceof UserChangedQuery) {
       let query = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, Option$None$const, model.selected_event_id, query, model.show_internal, 0, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation);
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, Option$None$const, model.selected_event_id, query, model.show_internal, 0, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
     } else if (message instanceof UserToggledInternalNoise) {
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, !model.show_internal, 0, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation);
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, !model.show_internal, 0, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
     } else if (message instanceof UserFocusedSearch) {
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, true, model.bookmarks, model.annotation);
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, true, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
     } else if (message instanceof UserOpenedPalette) {
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, true, model.search_focused, model.bookmarks, model.annotation);
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, true, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
     } else if (message instanceof UserClosedPalette) {
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, false, model.search_focused, model.bookmarks, model.annotation);
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, false, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
     } else if (message instanceof UserToggledBookmark) {
       let id2 = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, toggle_member(model.bookmarks, id2), model.annotation);
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, toggle_member(model.bookmarks, id2), model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
     } else if (message instanceof UserChangedAnnotation) {
       let annotation = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, annotation);
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
     } else if (message instanceof UserPressedKey) {
       let key = message[0];
       let $ = keyboard_shortcut(key);
@@ -6092,40 +6555,165 @@ function update2(loop$model, loop$message) {
     } else if (message instanceof ViewportChanged) {
       let start5 = message.start;
       let size3 = message.size;
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, Option$None$const, model.selected_event_id, model.query, model.show_internal, max2(start5, 0), min2(max2(size3, 1), 1000), model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation);
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, Option$None$const, model.selected_event_id, model.query, model.show_internal, max2(start5, 0), min2(max2(size3, 1), 1000), model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
     } else if (message instanceof UserZoomed) {
       let zoom = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, clamp(zoom, 0.25, 4), model.palette_open, model.search_focused, model.bookmarks, model.annotation);
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, clamp(zoom, 0.25, 4), model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
     } else if (message instanceof PageLoaded) {
       let query = message.query;
       let page = message.page;
       let $ = !model.remote || query === remote_query(model);
       if ($) {
-        return new Model(model.remote, model.mode, page.events, page.total, page.start, page.limit, query, false, Option$None$const, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation);
+        return new Model(model.remote, model.mode, page.events, page.total, page.start, page.limit, query, false, Option$None$const, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
       } else {
-        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, false, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation);
+        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, false, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
       }
-    } else {
+    } else if (message instanceof PageLoadFailed) {
       let query = message.query;
       let reason = message.reason;
       let $ = !model.remote || query === remote_query(model);
       if ($) {
-        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, false, new Some(reason), model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation);
+        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, false, new Some(reason), model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
       } else {
-        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, false, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation);
+        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, false, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
       }
+    } else if (message instanceof UserChangedTrigger) {
+      let trigger = message[0];
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, trigger, (() => {
+        let $ = trim(trigger);
+        if ($ === "") {
+          return List$Empty$const;
+        } else {
+          return model.mfa_suggestions;
+        }
+      })(), model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+    } else if (message instanceof MfaSuggestionsLoaded) {
+      let suggestions = message[0];
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, take(suggestions, 200), model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+    } else if (message instanceof UserChangedCaptureWhere) {
+      let source = message[0];
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, source, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+    } else if (message instanceof UserChangedCapturePreset) {
+      let preset = message[0];
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+    } else if (message instanceof UserChangedMaxRoots) {
+      let max_roots = message[0];
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+    } else if (message instanceof UserRequestedArm) {
+      let $ = trim(model.trigger_input);
+      let $1 = parse_root_budget(model);
+      if ($ === "") {
+        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, new Failed("trigger_required"), "Enter an MFA trigger", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+      } else if ($1 instanceof Ok) {
+        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, CapturePhase$Arming$const, "Arming " + trim(model.trigger_input), model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+      } else {
+        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, new Failed("invalid_root_budget"), "Max roots must be between 1 and 1000", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+      }
+    } else if (message instanceof CaptureArmAccepted) {
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, CapturePhase$Armed$const, "Capture armed; perform one operation", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+    } else if (message instanceof CaptureArmFailed) {
+      let reason = message[0];
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, new Failed(reason), reason, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+    } else if (message instanceof PollCaptureStatus) {
+      return model;
+    } else if (message instanceof CaptureStatusLoaded) {
+      let phase = message[0];
+      if (phase instanceof Ready) {
+        let count = phase.event_count;
+        return new Model(model.remote, model.mode, model.events, count, 0, 0, "", false, Option$None$const, model.selected_event_id, model.query, model.show_internal, 0, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, phase, "", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+      } else if (phase instanceof Failed) {
+        let $ = phase.reason;
+        if ($ === "system_tracer_occupied") {
+          return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, phase, "Exact capture was refused; another tracer owns the node. Use Live for bounded inferred sampling.", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+        } else {
+          return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+        }
+      } else {
+        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+      }
+    } else if (message instanceof UserRequestedCancel) {
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, CapturePhase$Cancelling$const, "Stopping capture and cleaning the target", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+    } else if (message instanceof CaptureCancelFailed) {
+      let reason = message[0];
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, new Failed(reason), reason, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+    } else if (message instanceof UserChangedSavePath) {
+      let path = message[0];
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+    } else if (message instanceof UserRequestedSave) {
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, "Saving capture", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+    } else if (message instanceof CaptureSaved) {
+      let path = message[0];
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, "Saved " + path, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+    } else if (message instanceof CaptureSaveFailed) {
+      let reason = message[0];
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, reason, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+    } else if (message instanceof PollLive) {
+      let $ = model.mode;
+      if ($ instanceof Live) {
+        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, true, Option$None$const, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+      } else {
+        return model;
+      }
+    } else if (message instanceof LiveLoaded) {
+      let snapshot = message[0];
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, snapshot.rows, snapshot.findings, snapshot.supervision, snapshot.spawn, snapshot.links, snapshot.generation, snapshot.sampled_at_ms, false, Option$None$const, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+    } else if (message instanceof LiveLoadFailed) {
+      let reason = message[0];
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, false, new Some(reason), model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+    } else if (message instanceof UserSelectedLiveProcess) {
+      let pid = message[0];
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, new Some(pid), model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
+    } else if (message instanceof UserChangedComparePaths) {
+      let paths = message[0];
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, paths, model.compare_loading, Option$None$const, model.compare_report);
+    } else if (message instanceof UserRequestedCompare) {
+      let $ = valid_compare_paths(compare_paths(model));
+      if ($) {
+        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, true, Option$None$const, model.compare_report);
+      } else {
+        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, false, new Some("Enter 2–20 distinct .beamtrace paths"), model.compare_report);
+      }
+    } else if (message instanceof CompareLoaded) {
+      let report = message[0];
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, false, Option$None$const, new Some(report));
+    } else {
+      let reason = message[0];
+      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, false, new Some(reason), model.compare_report);
     }
   }
 }
 function begin_loading(model) {
-  return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, true, Option$None$const, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation);
+  return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, true, Option$None$const, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report);
 }
 function needs_page(model) {
   let requested_end = min2(model.viewport_start + model.viewport_size, model.total_events);
   let loaded_end = model.loaded_start + model.loaded_limit;
   let outside_loaded_window = model.viewport_start < model.loaded_start || requested_end > loaded_end;
   let stale_query = model.loaded_query !== remote_query(model);
-  return model.remote && !model.loading && model.load_error instanceof None && (outside_loaded_window || stale_query);
+  return model.remote && model.mode instanceof Capture && !model.loading && model.load_error instanceof None && (outside_loaded_window || stale_query);
+}
+function filtered_live_rows(model) {
+  let query = lowercase(remote_query(model));
+  let _pipe = model.live_rows;
+  return filter(_pipe, (row) => {
+    return query === "" || contains_string(lowercase(row.pid), query) || contains_string(lowercase(row.label), query) || contains_string(lowercase(row.status), query) || contains_string(lowercase(row.current_function), query);
+  });
+}
+function selected_live_process(model) {
+  let $ = model.selected_live_pid;
+  if ($ instanceof Some) {
+    let pid = $[0];
+    return find(model.live_rows, (row) => {
+      return row.pid === pid;
+    });
+  } else {
+    return new Error2(undefined);
+  }
+}
+function live_findings_for(model, pid) {
+  return filter(model.live_findings, (finding) => {
+    return finding.pid === pid;
+  });
 }
 function filtered_events(model) {
   let _block;
@@ -6286,7 +6874,7 @@ function installShortcuts(handler) {
 }
 
 // build/dev/javascript/beamtrace_web/beamtrace_web/canvas.mjs
-function payload(model) {
+function event_payload(model) {
   let _pipe = model;
   let _pipe$1 = visible_events(_pipe);
   let _pipe$2 = array2(_pipe$1, (row) => {
@@ -6312,13 +6900,589 @@ function payload(model) {
   });
   return to_string2(_pipe$2);
 }
+function live_payload(model) {
+  let _pipe = model;
+  let _pipe$1 = filtered_live_rows(_pipe);
+  let _pipe$2 = take(_pipe$1, 200);
+  let _pipe$3 = array2(_pipe$2, (row) => {
+    let anomalous = any(model.live_findings, (finding) => {
+      return finding.pid === row.pid;
+    });
+    return object2(toList([
+      ["id", string3(row.pid)],
+      ["actor", string3(row.label)],
+      ["kind", string3(row.status)],
+      ["timestamp_ns", int3(row.reductions)],
+      ["duration_ns", int3(row.mailbox_len)],
+      ["anomalous", bool(anomalous)],
+      [
+        "evidence",
+        string3((() => {
+          if (anomalous) {
+            return "inferred";
+          } else {
+            return "exact";
+          }
+        })())
+      ]
+    ]));
+  });
+  return to_string2(_pipe$3);
+}
+function payload(model) {
+  let $ = model.mode;
+  if ($ instanceof Live) {
+    return live_payload(model);
+  } else {
+    return event_payload(model);
+  }
+}
+
+// build/dev/javascript/beamtrace_web/beamtrace_web/capture_control_ffi.mjs
+var captureActive = false;
+var mfaSearchTimer;
+var mfaSearchController;
+async function request(path, options = {}) {
+  const response = await fetch(path, {
+    credentials: "same-origin",
+    headers: {
+      accept: "application/json",
+      ...options.body ? { "content-type": "application/json" } : {}
+    },
+    ...options
+  });
+  const body = await response.text();
+  if (!response.ok) {
+    let detail = `request failed (${response.status})`;
+    try {
+      const parsed = JSON.parse(body);
+      if (typeof parsed.error === "string")
+        detail = parsed.error;
+    } catch {}
+    throw new Error(detail);
+  }
+  return body;
+}
+function complete(promise, onSuccess, onError) {
+  promise.then(onSuccess).catch((error) => {
+    onError(error instanceof Error ? error.message : "capture request failed");
+  });
+}
+function armCapture(trigger, whereAql, preset, maxRoots, onSuccess, onError) {
+  complete(request("/api/v1/sessions/current/arm", {
+    method: "POST",
+    body: JSON.stringify({
+      trigger: trigger.trim(),
+      where: whereAql.trim() || null,
+      capture_window_ms: 30000,
+      max_events: 1e5,
+      max_bytes: 64000000,
+      max_agent_mailbox: 1e4,
+      max_roots: Number.parseInt(maxRoots, 10),
+      preset
+    })
+  }).then((body) => {
+    captureActive = true;
+    return body;
+  }), onSuccess, onError);
+}
+function fetchCaptureStatus(onSuccess, onError) {
+  complete(request("/api/v1/sessions/current", { method: "GET" }).then((body) => {
+    try {
+      const status = JSON.parse(body).status;
+      if (status === "ready" || status === "failed" || status === "idle") {
+        captureActive = false;
+      }
+    } catch {}
+    return body;
+  }), onSuccess, onError);
+}
+function searchMfas(query, onSuccess, onError) {
+  globalThis.clearTimeout(mfaSearchTimer);
+  mfaSearchController?.abort();
+  const normalized = query.trim();
+  if (!normalized) {
+    onSuccess('{"candidates":[]}');
+    return;
+  }
+  mfaSearchTimer = globalThis.setTimeout(() => {
+    mfaSearchController = new AbortController;
+    request(`/api/v1/targets/current/mfas?q=${encodeURIComponent(normalized)}&limit=20`, { method: "GET", signal: mfaSearchController.signal }).then(onSuccess).catch((error) => {
+      if (error?.name !== "AbortError") {
+        onError(error instanceof Error ? error.message : "MFA search failed");
+      }
+    });
+  }, 120);
+}
+function cancelCapture(onSuccess, onError) {
+  complete(request("/api/v1/sessions/current/cancel", { method: "POST" }), onSuccess, onError);
+}
+function saveCapture(path, onSuccess, onError) {
+  complete(request("/api/v1/sessions/current/save", {
+    method: "POST",
+    body: JSON.stringify({ path })
+  }), onSuccess, onError);
+}
+function schedule(delayMs, callback) {
+  globalThis.setTimeout(callback, Math.max(0, delayMs));
+}
+function installPageCleanup() {
+  globalThis.addEventListener("pagehide", () => {
+    if (!captureActive)
+      return;
+    captureActive = false;
+    fetch("/api/v1/sessions/current/cancel", {
+      method: "POST",
+      credentials: "same-origin",
+      keepalive: true,
+      headers: { accept: "application/json" }
+    }).catch(() => {});
+  });
+}
+
+// build/dev/javascript/beamtrace_web/beamtrace_web/capture_control.mjs
+class StatusPayload extends CustomType {
+  constructor(status, event_count, completeness, reason) {
+    super();
+    this.status = status;
+    this.event_count = event_count;
+    this.completeness = completeness;
+    this.reason = reason;
+  }
+}
+
+class MfaCandidatePayload extends CustomType {
+  constructor(mfa) {
+    super();
+    this.mfa = mfa;
+  }
+}
+
+class MfaSearchPayload extends CustomType {
+  constructor(candidates) {
+    super();
+    this.candidates = candidates;
+  }
+}
+function arm(trigger, where_aql, preset, max_roots) {
+  return from2((dispatch2) => {
+    return armCapture(trigger, where_aql, preset, max_roots, (_) => {
+      return dispatch2(Msg$CaptureArmAccepted$const);
+    }, (reason) => {
+      return dispatch2(new CaptureArmFailed(reason));
+    });
+  });
+}
+function status_decoder() {
+  return field("status", string2, (status) => {
+    return optional_field("event_count", 0, int2, (event_count) => {
+      return optional_field("completeness", "", string2, (completeness) => {
+        return optional_field("reason", "", string2, (reason) => {
+          return success(new StatusPayload(status, event_count, completeness, reason));
+        });
+      });
+    });
+  });
+}
+function decode_status(source) {
+  let $ = parse(source, status_decoder());
+  if ($ instanceof Ok) {
+    let payload2 = $[0];
+    let $1 = payload2.status;
+    if ($1 === "idle") {
+      return new Ok(CapturePhase$Idle$const);
+    } else if ($1 === "armed") {
+      return new Ok(CapturePhase$Armed$const);
+    } else if ($1 === "cancelling") {
+      return new Ok(CapturePhase$Cancelling$const);
+    } else if ($1 === "ready") {
+      return new Ok(new Ready(payload2.event_count, payload2.completeness));
+    } else if ($1 === "failed") {
+      return new Ok(new Failed(payload2.reason));
+    } else {
+      return new Error2("unknown capture status");
+    }
+  } else {
+    return new Error2("invalid capture status");
+  }
+}
+function status() {
+  return from2((dispatch2) => {
+    return fetchCaptureStatus((body) => {
+      let $ = decode_status(body);
+      if ($ instanceof Ok) {
+        let phase = $[0];
+        return dispatch2(new CaptureStatusLoaded(phase));
+      } else {
+        let reason = $[0];
+        return dispatch2(new CaptureArmFailed(reason));
+      }
+    }, (_) => {
+      return dispatch2(new CaptureStatusLoaded(CapturePhase$Unavailable$const));
+    });
+  });
+}
+function mfa_candidate_decoder() {
+  return field("mfa", string2, (mfa) => {
+    return success(new MfaCandidatePayload(mfa));
+  });
+}
+function mfa_search_decoder() {
+  return field("candidates", list2(mfa_candidate_decoder()), (candidates) => {
+    return success(new MfaSearchPayload(candidates));
+  });
+}
+function decode_mfas(source) {
+  let $ = parse(source, mfa_search_decoder());
+  if ($ instanceof Ok) {
+    let payload2 = $[0];
+    return new Ok((() => {
+      let _pipe = payload2.candidates;
+      return map2(_pipe, (candidate) => {
+        return candidate.mfa;
+      });
+    })());
+  } else {
+    return new Error2("invalid MFA search response");
+  }
+}
+function search_mfas(query) {
+  return from2((dispatch2) => {
+    return searchMfas(query, (body) => {
+      let $ = decode_mfas(body);
+      if ($ instanceof Ok) {
+        let candidates = $[0];
+        return dispatch2(new MfaSuggestionsLoaded(candidates));
+      } else {
+        return dispatch2(new MfaSuggestionsLoaded(List$Empty$const));
+      }
+    }, (_) => {
+      return dispatch2(new MfaSuggestionsLoaded(List$Empty$const));
+    });
+  });
+}
+function poll_after(delay_ms) {
+  return from2((dispatch2) => {
+    return schedule(delay_ms, () => {
+      return dispatch2(Msg$PollCaptureStatus$const);
+    });
+  });
+}
+function cancel() {
+  return from2((dispatch2) => {
+    return cancelCapture((_) => {
+      return dispatch2(new CaptureStatusLoaded(CapturePhase$Cancelling$const));
+    }, (reason) => {
+      return dispatch2(new CaptureCancelFailed(reason));
+    });
+  });
+}
+function save(path) {
+  return from2((dispatch2) => {
+    return saveCapture(path, (_) => {
+      return dispatch2(new CaptureSaved(path));
+    }, (reason) => {
+      return dispatch2(new CaptureSaveFailed(reason));
+    });
+  });
+}
+function install_cleanup() {
+  return from2((_) => {
+    return installPageCleanup();
+  });
+}
+
+// build/dev/javascript/beamtrace_web/beamtrace_web/compare_control_ffi.mjs
+function requestCompare(body, onSuccess, onError) {
+  fetch("/api/v1/compare", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      accept: "application/json",
+      "content-type": "application/json"
+    },
+    body
+  }).then(async (response) => {
+    const payload2 = await response.text();
+    if (!response.ok) {
+      let reason = `compare request failed (${response.status})`;
+      try {
+        const parsed = JSON.parse(payload2);
+        if (typeof parsed.error === "string")
+          reason = parsed.error;
+      } catch {}
+      throw new Error(reason);
+    }
+    return payload2;
+  }).then(onSuccess).catch((error) => {
+    onError(error instanceof Error ? error.message : "compare request failed");
+  });
+}
+
+// build/dev/javascript/beamtrace_web/beamtrace_web/compare_control.mjs
+function statistic_decoder() {
+  return field("signature", string2, (signature) => {
+    return field("p50_ns", int2, (p50_ns) => {
+      return field("p95_ns", int2, (p95_ns) => {
+        return field("occurrences", int2, (occurrences) => {
+          return field("total_runs", int2, (total_runs) => {
+            return field("occurrence_rate", float2, (occurrence_rate) => {
+              return success(new BranchStatistic(signature, p50_ns, p95_ns, occurrences, total_runs, occurrence_rate));
+            });
+          });
+        });
+      });
+    });
+  });
+}
+function item_decoder() {
+  return field("status", string2, (status2) => {
+    return optional_field("left_id", "", string2, (left_id) => {
+      return optional_field("right_id", "", string2, (right_id) => {
+        return optional_field("latency_delta_ns", 0, int2, (latency_delta_ns) => {
+          return optional_field("reason", "", string2, (reason) => {
+            if (status2 === "matched") {
+              return success(new CompareItem(status2, left_id, right_id, latency_delta_ns, reason));
+            } else if (status2 === "added") {
+              return success(new CompareItem(status2, left_id, right_id, latency_delta_ns, reason));
+            } else if (status2 === "removed") {
+              return success(new CompareItem(status2, left_id, right_id, latency_delta_ns, reason));
+            } else if (status2 === "changed") {
+              return success(new CompareItem(status2, left_id, right_id, latency_delta_ns, reason));
+            } else {
+              return failure(new CompareItem("", "", "", 0, ""), "compare item status");
+            }
+          });
+        });
+      });
+    });
+  });
+}
+function run_decoder() {
+  return field("path", string2, (path) => {
+    return field("added", int2, (added) => {
+      return field("removed", int2, (removed) => {
+        return field("changed", int2, (changed) => {
+          return field("items", list2(item_decoder()), (items) => {
+            return success(new CompareRun(path, added, removed, changed, items));
+          });
+        });
+      });
+    });
+  });
+}
+function report_decoder() {
+  return field("baseline", string2, (baseline) => {
+    return field("run_count", int2, (run_count) => {
+      return field("reports", list2(run_decoder()), (reports) => {
+        return field("statistics", list2(statistic_decoder()), (statistics) => {
+          return success(new CompareReport(baseline, run_count, reports, statistics));
+        });
+      });
+    });
+  });
+}
+function decode_report(source) {
+  let $ = parse(source, report_decoder());
+  if ($ instanceof Ok) {
+    return $;
+  } else {
+    let errors = $[0];
+    return new Error2(inspect2(errors));
+  }
+}
+function run2(paths) {
+  return from2((dispatch2) => {
+    return requestCompare((() => {
+      let _pipe = object2(toList([["paths", array2(paths, string3)]]));
+      return to_string2(_pipe);
+    })(), (body) => {
+      let $ = decode_report(body);
+      if ($ instanceof Ok) {
+        let report = $[0];
+        return dispatch2(new CompareLoaded(report));
+      } else {
+        let reason = $[0];
+        return dispatch2(new CompareFailed(reason));
+      }
+    }, (reason) => {
+      return dispatch2(new CompareFailed(reason));
+    });
+  });
+}
+
+// build/dev/javascript/beamtrace_web/beamtrace_web/live_control_ffi.mjs
+function fetchLive(onSuccess, onError) {
+  fetch("/api/v1/live?limit=200", {
+    method: "GET",
+    credentials: "same-origin",
+    headers: { accept: "application/json" }
+  }).then(async (response) => {
+    const body = await response.text();
+    if (!response.ok) {
+      let reason = `live request failed (${response.status})`;
+      try {
+        const parsed = JSON.parse(body);
+        if (typeof parsed.error === "string")
+          reason = parsed.error;
+      } catch {}
+      throw new Error(reason);
+    }
+    return body;
+  }).then(onSuccess).catch((error) => {
+    onError(error instanceof Error ? error.message : "live request failed");
+  });
+}
+function schedule2(delayMs, callback) {
+  globalThis.setTimeout(callback, Math.max(0, delayMs));
+}
+
+// build/dev/javascript/beamtrace_web/beamtrace_web/live_control.mjs
+class TopologyPayload extends CustomType {
+  constructor(supervision, spawn, links) {
+    super();
+    this.supervision = supervision;
+    this.spawn = spawn;
+    this.links = links;
+  }
+}
+function evidence_decoder() {
+  return field("status", string2, (status2) => {
+    if (status2 === "exact") {
+      return success(Evidence$Exact$const);
+    } else if (status2 === "inferred") {
+      return field("reason", string2, (reason) => {
+        return field("confidence", float2, (confidence) => {
+          return success(new Inferred(reason, confidence));
+        });
+      });
+    } else {
+      return failure(Evidence$Exact$const, "live evidence");
+    }
+  });
+}
+function topology_edge_decoder() {
+  return field("from", string2, (from3) => {
+    return field("to", string2, (to) => {
+      return field("evidence", evidence_decoder(), (evidence) => {
+        return success(new TopologyEdge(from3, to, evidence));
+      });
+    });
+  });
+}
+function topology_decoder() {
+  return field("supervision", list2(topology_edge_decoder()), (supervision) => {
+    return field("spawn", list2(topology_edge_decoder()), (spawn) => {
+      return field("links", list2(topology_edge_decoder()), (links) => {
+        return success(new TopologyPayload(supervision, spawn, links));
+      });
+    });
+  });
+}
+function finding_decoder() {
+  return field("pid", string2, (pid) => {
+    return field("label", string2, (label2) => {
+      return field("kind", string2, (kind) => {
+        return field("summary", string2, (summary) => {
+          return field("evidence", evidence_decoder(), (evidence) => {
+            return success(new LiveFinding(pid, label2, kind, summary, evidence));
+          });
+        });
+      });
+    });
+  });
+}
+function row_decoder() {
+  return field("node", string2, (node) => {
+    return field("pid", string2, (pid) => {
+      return field("label", string2, (label2) => {
+        return field("registered_name", string2, (registered_name) => {
+          return field("process_label", string2, (process_label) => {
+            return field("initial_call", string2, (initial_call) => {
+              return field("mailbox_len", int2, (mailbox_len) => {
+                return field("memory_bytes", int2, (memory_bytes) => {
+                  return field("reductions", int2, (reductions) => {
+                    return field("heap_words", int2, (heap_words) => {
+                      return field("total_heap_words", int2, (total_heap_words) => {
+                        return field("link_count", int2, (link_count) => {
+                          return field("status", string2, (status2) => {
+                            return field("current_function", string2, (current_function) => {
+                              return field("links", list2(string2), (links) => {
+                                return field("ancestors", list2(string2), (ancestors) => {
+                                  return success(new LiveRow(node, pid, label2, registered_name, process_label, initial_call, mailbox_len, memory_bytes, reductions, heap_words, total_heap_words, link_count, status2, current_function, links, ancestors));
+                                });
+                              });
+                            });
+                          });
+                        });
+                      });
+                    });
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+}
+function snapshot_decoder() {
+  return field("node", string2, (_) => {
+    return field("generation", int2, (generation) => {
+      return field("sampled_at_ms", int2, (sampled_at_ms) => {
+        return field("next_offset", int2, (_2) => {
+          return field("samples", list2(row_decoder()), (rows) => {
+            return field("findings", list2(finding_decoder()), (findings) => {
+              return field("topology", topology_decoder(), (topology) => {
+                return success(new LiveSnapshot(generation, sampled_at_ms, rows, findings, topology.supervision, topology.spawn, topology.links));
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+}
+function decode_snapshot(source) {
+  let $ = parse(source, snapshot_decoder());
+  if ($ instanceof Ok) {
+    return $;
+  } else {
+    let errors = $[0];
+    return new Error2(inspect2(errors));
+  }
+}
+function load() {
+  return from2((dispatch2) => {
+    return fetchLive((body) => {
+      let $ = decode_snapshot(body);
+      if ($ instanceof Ok) {
+        let snapshot = $[0];
+        return dispatch2(new LiveLoaded(snapshot));
+      } else {
+        let reason = $[0];
+        return dispatch2(new LiveLoadFailed(reason));
+      }
+    }, (reason) => {
+      return dispatch2(new LiveLoadFailed(reason));
+    });
+  });
+}
+function poll_after2(delay_ms) {
+  return from2((dispatch2) => {
+    return schedule2(delay_ms, () => {
+      return dispatch2(Msg$PollLive$const);
+    });
+  });
+}
 
 // build/dev/javascript/beamtrace_web/beamtrace_web/page.mjs
 function is_internal(actor) {
   let normalized = lowercase(actor);
   return contains_string(normalized, "logger") || contains_string(normalized, "code_server") || contains_string(normalized, "beamtrace") || contains_string(normalized, "standard_io");
 }
-function evidence_decoder() {
+function evidence_decoder2() {
   return field("kind", string2, (kind) => {
     if (kind === "exact") {
       return success(Evidence$Exact$const);
@@ -6367,7 +7531,7 @@ function event_decoder() {
     return field("process", actor_decoder(), (actor) => {
       return field("local_timestamp_ns", int2, (timestamp_ns) => {
         return field("event", kind_decoder(), (kind) => {
-          return field("evidence", evidence_decoder(), (evidence) => {
+          return field("evidence", evidence_decoder2(), (evidence) => {
             return success(new EventRow(id2, actor, kind, timestamp_ns, 0, evidence, kind === "exit" || kind === "gap", is_internal(actor)));
           });
         });
@@ -6424,7 +7588,7 @@ function fetchPage(start5, limit, search, onSuccess, onError) {
 }
 
 // build/dev/javascript/beamtrace_web/beamtrace_web/page_loader.mjs
-function load(start5, limit, query) {
+function load2(start5, limit, query) {
   return from2((dispatch2) => {
     return fetchPage(start5, limit, query, (body) => {
       let $ = decode3(body);
@@ -6457,6 +7621,13 @@ function on_input(message) {
 }
 
 // build/dev/javascript/beamtrace_web/beamtrace_web/view.mjs
+class ComparedItem extends CustomType {
+  constructor(path, item) {
+    super();
+    this.path = path;
+    this.item = item;
+  }
+}
 function zoom_label(value2) {
   if (value2 === 0.25) {
     return "25%";
@@ -6470,6 +7641,31 @@ function zoom_label(value2) {
     return "400%";
   } else {
     return "custom";
+  }
+}
+function compare_summary(model) {
+  let $ = model.compare_loading;
+  let $1 = model.compare_error;
+  let $2 = model.compare_report;
+  if ($) {
+    return "Loading bounded trace set…";
+  } else if ($1 instanceof Some) {
+    let reason = $1[0];
+    return "Compare unavailable · " + reason;
+  } else if ($2 instanceof Some) {
+    let report = $2[0];
+    let added = fold2(report.reports, 0, (total, run3) => {
+      return total + run3.added;
+    });
+    let removed = fold2(report.reports, 0, (total, run3) => {
+      return total + run3.removed;
+    });
+    let changed = fold2(report.reports, 0, (total, run3) => {
+      return total + run3.changed;
+    });
+    return to_string(report.run_count) + " runs · +" + to_string(added) + " −" + to_string(removed) + " ~" + to_string(changed);
+  } else {
+    return "No comparison loaded";
   }
 }
 function definition(label2, value2) {
@@ -6493,6 +7689,41 @@ function panel_heading(title, index4) {
     strong(List$Empty$const, toList([text3(title)]))
   ]));
 }
+function compare_inspector(model) {
+  return aside(toList([
+    class$("inspector panel"),
+    aria_label("Compare inspector"),
+    attribute2("tabindex", "0")
+  ]), toList([
+    panel_heading("Compare inspector", "03"),
+    (() => {
+      let $ = model.compare_report;
+      if ($ instanceof Some) {
+        let report = $[0];
+        return div(toList([class$("inspector-content")]), toList([
+          definition("Baseline", report.baseline),
+          definition("Runs", to_string(report.run_count)),
+          definition("Aligned candidates", to_string(length(report.reports))),
+          definition("Branch signatures", to_string(length(report.statistics))),
+          definition("Normalization", "logical actor · term shape · root-relative time")
+        ]));
+      } else {
+        return div(toList([class$("empty-state")]), toList([
+          p(List$Empty$const, toList([
+            text3("Run a comparison to inspect branch statistics.")
+          ]))
+        ]));
+      }
+    })()
+  ]));
+}
+function list_text(items) {
+  if (items instanceof Empty) {
+    return "None observed";
+  } else {
+    return join(items, ", ");
+  }
+}
 function mode_title(mode) {
   if (mode instanceof Capture) {
     return "Exact causal sequence";
@@ -6511,57 +7742,246 @@ function mode_slug(mode) {
     return "compare";
   }
 }
-function session_item(id2, trigger, status, active) {
-  return li(List$Empty$const, toList([
-    button(toList([
-      class$((() => {
-        if (active) {
-          return "session active";
-        } else {
-          return "session";
-        }
-      })())
-    ]), toList([
-      span(List$Empty$const, toList([
-        strong(List$Empty$const, toList([text3(id2)])),
-        text3(trigger)
+function statistics_table(rows) {
+  return div(toList([class$("event-table-wrap compare-statistics")]), toList([
+    table(toList([aria_label("Multi-run branch statistics")]), toList([
+      thead(List$Empty$const, toList([
+        tr(List$Empty$const, toList([
+          th(List$Empty$const, toList([text3("Logical branch signature")])),
+          th(List$Empty$const, toList([text3("Latency")])),
+          th(List$Empty$const, toList([text3("Occurrence")]))
+        ]))
       ])),
-      span(toList([class$("session-status")]), toList([text3(status)]))
+      tbody(List$Empty$const, map2(rows, (row) => {
+        return tr(List$Empty$const, toList([
+          td(List$Empty$const, toList([text3(row.signature)])),
+          td(List$Empty$const, toList([
+            text3("p50 " + to_string(row.p50_ns) + " ns · p95 " + to_string(row.p95_ns) + " ns")
+          ])),
+          td(List$Empty$const, toList([
+            text3(to_string(row.occurrences) + "/" + to_string(row.total_runs) + " runs")
+          ]))
+        ]));
+      }))
     ]))
   ]));
 }
-function session_navigator() {
+function or_dash(value2) {
+  if (value2 === "") {
+    return "—";
+  } else {
+    return value2;
+  }
+}
+function latency_delta(item) {
+  let $ = item.status;
+  if ($ === "matched") {
+    let $1 = item.latency_delta_ns >= 0;
+    if ($1) {
+      return "+" + to_string(item.latency_delta_ns) + " ns";
+    } else {
+      return to_string(item.latency_delta_ns) + " ns";
+    }
+  } else {
+    return "—";
+  }
+}
+function compare_status_class(status2) {
+  if (status2 === "added") {
+    return "anomalous";
+  } else if (status2 === "removed") {
+    return "anomalous";
+  } else if (status2 === "changed") {
+    return "anomalous";
+  } else {
+    return "";
+  }
+}
+function alignment_row(row) {
+  return tr(toList([class$(compare_status_class(row.item.status))]), toList([
+    td(List$Empty$const, toList([text3(row.path)])),
+    td(List$Empty$const, toList([
+      span(toList([class$("kind-pill")]), toList([text3(row.item.status)]))
+    ])),
+    td(List$Empty$const, toList([text3(or_dash(row.item.left_id))])),
+    td(List$Empty$const, toList([text3(or_dash(row.item.right_id))])),
+    td(List$Empty$const, toList([text3(latency_delta(row.item))])),
+    td(List$Empty$const, toList([text3(or_dash(row.item.reason))]))
+  ]));
+}
+function alignment_table(rows) {
+  return div(toList([class$("event-table-wrap compare-alignment")]), toList([
+    table(toList([aria_label("Accessible trace alignment table")]), toList([
+      thead(List$Empty$const, toList([
+        tr(List$Empty$const, toList([
+          th(List$Empty$const, toList([text3("Candidate")])),
+          th(List$Empty$const, toList([text3("Status")])),
+          th(List$Empty$const, toList([text3("Baseline event")])),
+          th(List$Empty$const, toList([text3("Candidate event")])),
+          th(List$Empty$const, toList([text3("Latency Δ")])),
+          th(List$Empty$const, toList([text3("Reason")]))
+        ]))
+      ])),
+      tbody(List$Empty$const, map2(rows, alignment_row))
+    ]))
+  ]));
+}
+function compare_workspace(model) {
+  let _block;
+  let $ = model.compare_report;
+  if ($ instanceof Some) {
+    let report = $[0];
+    let _pipe = report.reports;
+    _block = flat_map(_pipe, (run3) => {
+      return map2(run3.items, (item) => {
+        return new ComparedItem(run3.path, item);
+      });
+    });
+  } else {
+    _block = List$Empty$const;
+  }
+  let items = _block;
+  return section(toList([
+    class$("causal panel compare-panel"),
+    aria_label("Trace comparison")
+  ]), toList([
+    div(toList([class$("panel-toolbar")]), toList([
+      div(List$Empty$const, toList([
+        p(toList([class$("eyebrow")]), toList([text3("compare")])),
+        h2(List$Empty$const, toList([text3("PID-independent causal alignment")]))
+      ])),
+      span(toList([
+        class$("window-count"),
+        aria_live("polite")
+      ]), toList([text3(compare_summary(model))]))
+    ])),
+    (() => {
+      let $1 = model.compare_report;
+      if ($1 instanceof Some) {
+        let report = $1[0];
+        return div(toList([class$("compare-results")]), toList([alignment_table(items), statistics_table(report.statistics)]));
+      } else {
+        return div(toList([class$("empty-state compare-empty")]), toList([
+          p(List$Empty$const, toList([
+            text3("Enter two or more local .beamtrace paths. The first run is the baseline.")
+          ]))
+        ]));
+      }
+    })()
+  ]));
+}
+function live_evidence_label(findings) {
+  if (findings instanceof Empty) {
+    return "Exact sample";
+  } else {
+    let finding = findings.head;
+    return evidence_label(finding.evidence);
+  }
+}
+function finding_names(findings) {
+  if (findings instanceof Empty) {
+    return "None";
+  } else {
+    let _pipe = findings;
+    let _pipe$1 = map2(_pipe, (finding) => {
+      return finding.kind;
+    });
+    return join(_pipe$1, ", ");
+  }
+}
+function live_status(model, visible_count) {
+  let $ = model.live_loading;
+  let $1 = model.live_error;
+  if ($) {
+    return "Refreshing bounded sample…";
+  } else if ($1 instanceof Some) {
+    let reason = $1[0];
+    return "Live unavailable · " + reason;
+  } else {
+    return to_string(visible_count) + " processes · Generation " + to_string(model.live_generation);
+  }
+}
+function capture_phase_label(phase) {
+  if (phase instanceof Unavailable) {
+    return "Offline session";
+  } else if (phase instanceof Idle) {
+    return "Idle";
+  } else if (phase instanceof Arming) {
+    return "Arming";
+  } else if (phase instanceof Armed) {
+    return "Armed";
+  } else if (phase instanceof Cancelling) {
+    return "Cancelling";
+  } else if (phase instanceof Ready) {
+    let count = phase.event_count;
+    let completeness = phase.completeness;
+    return "Ready · " + to_string(count) + " events · " + completeness;
+  } else {
+    let reason = phase.reason;
+    return "Failed · " + reason;
+  }
+}
+function session_navigator(model) {
   return nav(toList([
     class$("navigator panel"),
-    aria_label("Session navigator")
+    aria_label("Session navigator"),
+    attribute2("tabindex", "0")
   ]), toList([
     panel_heading("Nodes & sessions", "01"),
     section(List$Empty$const, toList([
-      h2(List$Empty$const, toList([text3("Connected nodes")])),
-      button(toList([class$("node-card selected")]), toList([
+      h2(List$Empty$const, toList([text3("Current target")])),
+      div(toList([class$("node-card selected")]), toList([
         span(toList([class$("status-dot healthy")]), List$Empty$const),
         span(List$Empty$const, toList([
-          strong(List$Empty$const, toList([text3("checkout@local")])),
-          span(List$Empty$const, toList([text3("OTP 29 · connected")]))
-        ]))
-      ])),
-      button(toList([class$("node-card")]), toList([
-        span(toList([class$("status-dot warning")]), List$Empty$const),
-        span(List$Empty$const, toList([
-          strong(List$Empty$const, toList([text3("payments@local")])),
-          span(List$Empty$const, toList([text3("clock ±3.2 ms")]))
+          strong(List$Empty$const, toList([text3("Attached BEAM session")])),
+          span(List$Empty$const, toList([
+            text3(capture_phase_label(model.capture_phase))
+          ]))
         ]))
       ]))
     ])),
     section(List$Empty$const, toList([
-      h2(List$Empty$const, toList([text3("Capture sessions")])),
-      ol(toList([class$("session-list")]), toList([
-        session_item("#1042", "checkout.handle/1", "Complete", true),
-        session_item("#1041", "checkout.handle/1", "Truncated", false),
-        session_item("#1040", "worker.run/2", "Complete", false)
+      h2(List$Empty$const, toList([text3("Capture session")])),
+      p(List$Empty$const, toList([
+        text3((() => {
+          let $ = trim(model.trigger_input);
+          if ($ === "") {
+            return "No trigger armed";
+          } else {
+            return $;
+          }
+        })())
       ]))
     ]))
   ]));
+}
+function capture_ready(phase) {
+  if (phase instanceof Ready) {
+    return true;
+  } else {
+    return false;
+  }
+}
+function capture_busy(phase) {
+  if (phase instanceof Arming) {
+    return true;
+  } else if (phase instanceof Armed) {
+    return true;
+  } else if (phase instanceof Cancelling) {
+    return true;
+  } else {
+    return false;
+  }
+}
+function capture_arm_disabled(phase) {
+  if (phase instanceof Unavailable) {
+    return true;
+  } else {
+    return capture_busy(phase);
+  }
+}
+function preset_option(value2, label2) {
+  return option(toList([value(value2)]), label2);
 }
 function palette2(model) {
   let $ = model.palette_open;
@@ -6590,7 +8010,7 @@ function palette2(model) {
     return div(List$Empty$const, List$Empty$const);
   }
 }
-function minimap(model) {
+function event_minimap(model) {
   let previous = max2(model.viewport_start - model.viewport_size, 0);
   let last_start = max2(model.total_events - model.viewport_size, 0);
   let next = min2(model.viewport_start + model.viewport_size, last_start);
@@ -6617,6 +8037,31 @@ function minimap(model) {
     ]), toList([text3("Next")])),
     span(toList([class$("zoom-label")]), toList([text3("Zoom " + zoom_label(model.zoom))]))
   ]));
+}
+function minimap(model) {
+  let $ = model.mode;
+  if ($ instanceof Capture) {
+    return event_minimap(model);
+  } else if ($ instanceof Live) {
+    return footer(toList([
+      class$("minimap"),
+      aria_label("Live sampling status")
+    ]), toList([
+      span(List$Empty$const, toList([
+        text3("Generation " + to_string(model.live_generation) + " · sampled at " + to_string(model.live_sampled_at_ms) + " ms")
+      ])),
+      span(List$Empty$const, toList([
+        text3(to_string(length(model.live_findings)) + " active inferred anomalies")
+      ]))
+    ]));
+  } else {
+    return footer(toList([
+      class$("minimap"),
+      aria_label("Compare summary")
+    ]), toList([
+      span(List$Empty$const, toList([text3(compare_summary(model))]))
+    ]));
+  }
 }
 function inspector_event(model, row) {
   let bookmarked = contains(model.bookmarks, row.id);
@@ -6650,10 +8095,7 @@ function inspector_event(model, row) {
     definition("Evidence", evidence_label(row.evidence)),
     definition("Duration", to_string(row.duration_ns) + " ns"),
     definition("Boundary", "None observed"),
-    a(toList([
-      class$("source-link"),
-      attribute2("href", "vscode://file/src/checkout.gleam:42")
-    ]), toList([text3("Open source · checkout.gleam:42")])),
+    definition("Source", "Unavailable in this event metadata"),
     label(toList([class$("annotation")]), toList([
       span(List$Empty$const, toList([text3("Annotation")])),
       textarea(toList([
@@ -6666,10 +8108,11 @@ function inspector_event(model, row) {
     ]))
   ]));
 }
-function inspector(model) {
+function event_inspector(model) {
   return aside(toList([
     class$("inspector panel"),
-    aria_label("Event inspector")
+    aria_label("Event inspector"),
+    attribute2("tabindex", "0")
   ]), toList([
     panel_heading("Event inspector", "03"),
     (() => {
@@ -6686,6 +8129,75 @@ function inspector(model) {
       }
     })()
   ]));
+}
+function live_inspector_process(model, row) {
+  let findings = live_findings_for(model, row.pid);
+  return div(toList([class$("inspector-content")]), toList([
+    div(toList([class$("inspector-title")]), toList([
+      div(List$Empty$const, toList([
+        p(toList([class$("eyebrow")]), toList([text3(row.status)])),
+        h2(List$Empty$const, toList([text3(row.label)]))
+      ]))
+    ])),
+    definition("PID", row.pid + " @ " + row.node),
+    definition("Initial call", row.initial_call),
+    definition("Current function", row.current_function),
+    definition("Mailbox", to_string(row.mailbox_len)),
+    definition("Memory", to_string(row.memory_bytes) + " bytes"),
+    definition("Heap", to_string(row.total_heap_words) + " words"),
+    definition("Ancestors", list_text(row.ancestors)),
+    definition("Links", list_text(row.links)),
+    section(toList([class$("finding-list")]), toList([
+      h3(List$Empty$const, toList([text3("Anomaly evidence")])),
+      (() => {
+        if (findings instanceof Empty) {
+          return p(List$Empty$const, toList([
+            text3("No anomaly crossed its hysteresis threshold.")
+          ]));
+        } else {
+          return ul(List$Empty$const, map2(findings, (finding) => {
+            return li(List$Empty$const, toList([
+              strong(List$Empty$const, toList([text3(finding.kind)])),
+              span(List$Empty$const, toList([text3(finding.summary)])),
+              span(List$Empty$const, toList([text3(evidence_label(finding.evidence))]))
+            ]));
+          }));
+        }
+      })()
+    ]))
+  ]));
+}
+function live_inspector(model) {
+  return aside(toList([
+    class$("inspector panel"),
+    aria_label("Process inspector"),
+    attribute2("tabindex", "0")
+  ]), toList([
+    panel_heading("Process inspector", "03"),
+    (() => {
+      let $ = selected_live_process(model);
+      if ($ instanceof Ok) {
+        let row = $[0];
+        return live_inspector_process(model, row);
+      } else {
+        return div(toList([class$("empty-state")]), toList([
+          p(List$Empty$const, toList([
+            text3("Select a process to inspect sampled metadata and evidence.")
+          ]))
+        ]));
+      }
+    })()
+  ]));
+}
+function inspector(model) {
+  let $ = model.mode;
+  if ($ instanceof Capture) {
+    return event_inspector(model);
+  } else if ($ instanceof Live) {
+    return live_inspector(model);
+  } else {
+    return compare_inspector(model);
+  }
 }
 function event_row(row) {
   return tr(toList([
@@ -6726,7 +8238,7 @@ function event_table(rows) {
     ]))
   ]));
 }
-function causal_workspace(model) {
+function event_workspace(model) {
   let visible = visible_events(model);
   let shown_count = length(visible);
   let total_count = model.total_events;
@@ -6786,18 +8298,253 @@ function causal_workspace(model) {
         attribute2("width", "1600"),
         attribute2("height", "620"),
         aria_hidden(true)
-      ])),
-      div(toList([
-        class$("lane-labels"),
-        aria_hidden(true)
-      ]), toList([
-        span(List$Empty$const, toList([text3("checkout")])),
-        span(List$Empty$const, toList([text3("cart_server")])),
-        span(List$Empty$const, toList([text3("payment_worker")]))
       ]))
     ])),
     event_table(visible)
   ]));
+}
+function live_row(model, row) {
+  let findings = live_findings_for(model, row.pid);
+  return tr(toList([
+    class$((() => {
+      if (findings instanceof Empty) {
+        return "";
+      } else {
+        return "anomalous";
+      }
+    })()),
+    on_click(new UserSelectedLiveProcess(row.pid))
+  ]), toList([
+    td(List$Empty$const, toList([
+      button(toList([class$("event-link")]), toList([text3(row.label)]))
+    ])),
+    td(List$Empty$const, toList([text3(row.pid)])),
+    td(List$Empty$const, toList([text3(to_string(row.mailbox_len))])),
+    td(List$Empty$const, toList([text3(to_string(row.memory_bytes) + " B")])),
+    td(List$Empty$const, toList([text3(to_string(row.reductions))])),
+    td(List$Empty$const, toList([text3(row.status)])),
+    td(List$Empty$const, toList([text3(finding_names(findings))])),
+    td(List$Empty$const, toList([text3(live_evidence_label(findings))]))
+  ]));
+}
+function live_table(model, rows) {
+  return div(toList([class$("event-table-wrap")]), toList([
+    table(toList([aria_label("Accessible live process table")]), toList([
+      thead(List$Empty$const, toList([
+        tr(List$Empty$const, toList([
+          th(List$Empty$const, toList([text3("Process")])),
+          th(List$Empty$const, toList([text3("PID")])),
+          th(List$Empty$const, toList([text3("Mailbox")])),
+          th(List$Empty$const, toList([text3("Memory")])),
+          th(List$Empty$const, toList([text3("Reductions")])),
+          th(List$Empty$const, toList([text3("Status")])),
+          th(List$Empty$const, toList([text3("Anomalies")])),
+          th(List$Empty$const, toList([text3("Evidence")]))
+        ]))
+      ])),
+      tbody(List$Empty$const, map2(rows, (row) => {
+        return live_row(model, row);
+      }))
+    ]))
+  ]));
+}
+function live_workspace(model) {
+  let rows = filtered_live_rows(model);
+  return section(toList([
+    class$("causal panel"),
+    aria_label("Live processes")
+  ]), toList([
+    div(toList([class$("panel-toolbar")]), toList([
+      div(List$Empty$const, toList([
+        p(toList([class$("eyebrow")]), toList([text3("live")])),
+        h2(List$Empty$const, toList([text3("Bounded process sampling")]))
+      ])),
+      div(toList([class$("toolbar-actions")]), toList([
+        span(toList([class$("window-count")]), toList([
+          text3("Topology · supervision " + to_string(length(model.live_supervision)) + " · spawn " + to_string(length(model.live_spawn)) + " · links " + to_string(length(model.live_links)))
+        ])),
+        span(toList([
+          class$("window-count"),
+          aria_live("polite")
+        ]), toList([text3(live_status(model, length(rows)))]))
+      ]))
+    ])),
+    div(toList([class$("canvas-frame")]), toList([
+      canvas(toList([
+        id("causal-canvas"),
+        attribute2("width", "1600"),
+        attribute2("height", "620"),
+        aria_hidden(true)
+      ]))
+    ])),
+    live_table(model, rows)
+  ]));
+}
+function causal_workspace(model) {
+  let $ = model.mode;
+  if ($ instanceof Capture) {
+    return event_workspace(model);
+  } else if ($ instanceof Live) {
+    return live_workspace(model);
+  } else {
+    return compare_workspace(model);
+  }
+}
+function compare_controls(model) {
+  return section(toList([
+    class$("capture-controls compare-controls"),
+    aria_label("Compare controls")
+  ]), toList([
+    label(List$Empty$const, toList([
+      span(List$Empty$const, toList([text3("Trace paths · baseline first")])),
+      textarea(toList([
+        aria_label("Trace paths"),
+        placeholder(`baseline.beamtrace
+candidate.beamtrace
+optional-third.beamtrace`),
+        value(model.compare_paths_input),
+        on_input((var0) => {
+          return new UserChangedComparePaths(var0);
+        })
+      ]), model.compare_paths_input)
+    ])),
+    button(toList([
+      disabled(model.compare_loading),
+      on_click(Msg$UserRequestedCompare$const)
+    ]), toList([text3("Run comparison")])),
+    output(toList([
+      class$("capture-status"),
+      aria_live("polite")
+    ]), toList([
+      text3((() => {
+        let $ = model.compare_loading;
+        if ($) {
+          return "Comparing traces";
+        } else {
+          let $1 = model.compare_report;
+          if ($1 instanceof Some) {
+            let report = $1[0];
+            return "Compared " + to_string(report.run_count) + " runs";
+          } else {
+            return "Ready";
+          }
+        }
+      })()),
+      span(List$Empty$const, toList([
+        text3((() => {
+          let $ = model.compare_error;
+          if ($ instanceof Some) {
+            let reason = $[0];
+            return reason;
+          } else {
+            return "PID and clock origins are excluded from alignment";
+          }
+        })())
+      ]))
+    ]))
+  ]));
+}
+function capture_controls(model) {
+  let $ = model.mode;
+  if ($ instanceof Capture) {
+    return section(toList([
+      class$("capture-controls"),
+      aria_label("Capture controls")
+    ]), toList([
+      label(List$Empty$const, toList([
+        span(List$Empty$const, toList([text3("MFA trigger")])),
+        input(toList([
+          type_("text"),
+          aria_label("MFA trigger"),
+          placeholder("module:function/arity"),
+          attribute2("list", "mfa-candidates"),
+          value(model.trigger_input),
+          on_input((var0) => {
+            return new UserChangedTrigger(var0);
+          })
+        ])),
+        datalist(toList([id("mfa-candidates")]), map2(model.mfa_suggestions, (candidate) => {
+          return option(toList([value(candidate)]), candidate);
+        }))
+      ])),
+      label(List$Empty$const, toList([
+        span(List$Empty$const, toList([text3("AQL condition")])),
+        input(toList([
+          type_("text"),
+          aria_label("AQL condition"),
+          placeholder("arg.0.tag == order"),
+          value(model.capture_where),
+          on_input((var0) => {
+            return new UserChangedCaptureWhere(var0);
+          })
+        ]))
+      ])),
+      label(List$Empty$const, toList([
+        span(List$Empty$const, toList([text3("Framework preset")])),
+        select(toList([
+          aria_label("Framework preset"),
+          value(model.capture_preset),
+          on_input((var0) => {
+            return new UserChangedCapturePreset(var0);
+          })
+        ]), toList([
+          preset_option("generic", "Generic"),
+          preset_option("gleam-actor", "Gleam actor"),
+          preset_option("wisp-mist", "Wisp / Mist"),
+          preset_option("gen-server", "GenServer"),
+          preset_option("phoenix", "Phoenix"),
+          preset_option("erlang-supervisor", "Erlang supervisor")
+        ]))
+      ])),
+      label(List$Empty$const, toList([
+        span(List$Empty$const, toList([text3("Max roots")])),
+        input(toList([
+          type_("number"),
+          aria_label("Max roots"),
+          attribute2("min", "1"),
+          attribute2("max", "1000"),
+          value(model.capture_max_roots),
+          on_input((var0) => {
+            return new UserChangedMaxRoots(var0);
+          })
+        ]))
+      ])),
+      button(toList([
+        disabled(capture_arm_disabled(model.capture_phase)),
+        on_click(Msg$UserRequestedArm$const)
+      ]), toList([text3("Arm capture")])),
+      button(toList([
+        disabled(!capture_busy(model.capture_phase)),
+        on_click(Msg$UserRequestedCancel$const)
+      ]), toList([text3("Cancel capture")])),
+      label(List$Empty$const, toList([
+        span(List$Empty$const, toList([text3("Save path")])),
+        input(toList([
+          type_("text"),
+          aria_label("Save path"),
+          value(model.save_path),
+          on_input((var0) => {
+            return new UserChangedSavePath(var0);
+          })
+        ]))
+      ])),
+      button(toList([
+        disabled(!capture_ready(model.capture_phase)),
+        on_click(Msg$UserRequestedSave$const)
+      ]), toList([text3("Save capture")])),
+      output(toList([
+        class$("capture-status"),
+        aria_live("polite")
+      ]), toList([
+        text3(capture_phase_label(model.capture_phase)),
+        span(List$Empty$const, toList([text3(model.capture_notice)]))
+      ]))
+    ]));
+  } else if ($ instanceof Compare) {
+    return compare_controls(model);
+  } else {
+    return div(List$Empty$const, List$Empty$const);
+  }
 }
 function mode_button(current, mode, label2, shortcut) {
   return button(toList([
@@ -6869,7 +8616,12 @@ function workspace(model) {
     attribute2("data-mode", mode_slug(model.mode))
   ]), toList([
     workspace_header(model),
-    div(toList([class$("workspace-grid")]), toList([session_navigator(), causal_workspace(model), inspector(model)])),
+    capture_controls(model),
+    div(toList([class$("workspace-grid")]), toList([
+      session_navigator(model),
+      causal_workspace(model),
+      inspector(model)
+    ])),
     minimap(model),
     palette2(model)
   ]));
@@ -6896,26 +8648,101 @@ function draw_effect(model) {
     return draw(root2, source, zoom);
   });
 }
-function update3(model, message) {
-  let next = update2(model, message);
+function finish_update(next, extra_effects) {
   let $ = needs_page(next);
   if ($) {
     let loading = begin_loading(next);
     return [
       loading,
-      batch(toList([
-        draw_effect(loading),
-        load(loading.viewport_start, page_limit(loading), remote_query(loading))
-      ]))
+      batch(prepend(draw_effect(loading), prepend(load2(loading.viewport_start, page_limit(loading), remote_query(loading)), extra_effects)))
     ];
   } else {
-    return [next, draw_effect(next)];
+    return [next, batch(prepend(draw_effect(next), extra_effects))];
+  }
+}
+function update3(model, message) {
+  if (message instanceof UserSelectedMode) {
+    let $ = message[0];
+    if ($ instanceof Live) {
+      return finish_update(update2(model, message), toList([load()]));
+    } else {
+      return finish_update(update2(model, message), List$Empty$const);
+    }
+  } else if (message instanceof UserChangedTrigger) {
+    let query = message[0];
+    return finish_update(update2(model, message), toList([search_mfas(query)]));
+  } else if (message instanceof UserRequestedArm) {
+    let next = update2(model, message);
+    let $ = next.capture_phase;
+    if ($ instanceof Arming) {
+      return finish_update(next, toList([
+        arm(next.trigger_input, next.capture_where, next.capture_preset, next.capture_max_roots)
+      ]));
+    } else {
+      return finish_update(next, List$Empty$const);
+    }
+  } else if (message instanceof CaptureArmAccepted) {
+    return finish_update(update2(model, message), toList([poll_after(150)]));
+  } else if (message instanceof PollCaptureStatus) {
+    return finish_update(update2(model, message), toList([status()]));
+  } else if (message instanceof CaptureStatusLoaded) {
+    let phase = message[0];
+    let next = update2(model, message);
+    if (phase instanceof Arming) {
+      return finish_update(next, toList([poll_after(150)]));
+    } else if (phase instanceof Armed) {
+      return finish_update(next, toList([poll_after(150)]));
+    } else if (phase instanceof Cancelling) {
+      return finish_update(next, toList([poll_after(150)]));
+    } else {
+      return finish_update(next, List$Empty$const);
+    }
+  } else if (message instanceof UserRequestedCancel) {
+    return finish_update(update2(model, message), toList([cancel()]));
+  } else if (message instanceof UserRequestedSave) {
+    return finish_update(update2(model, message), toList([save(model.save_path)]));
+  } else if (message instanceof PollLive) {
+    let next = update2(model, message);
+    let $ = next.mode;
+    if ($ instanceof Live) {
+      return finish_update(next, toList([load()]));
+    } else {
+      return finish_update(next, List$Empty$const);
+    }
+  } else if (message instanceof LiveLoaded) {
+    let next = update2(model, message);
+    let $ = next.mode;
+    if ($ instanceof Live) {
+      return finish_update(next, toList([poll_after2(1000)]));
+    } else {
+      return finish_update(next, List$Empty$const);
+    }
+  } else if (message instanceof LiveLoadFailed) {
+    let next = update2(model, message);
+    let $ = next.mode;
+    if ($ instanceof Live) {
+      return finish_update(next, toList([poll_after2(2000)]));
+    } else {
+      return finish_update(next, List$Empty$const);
+    }
+  } else if (message instanceof UserRequestedCompare) {
+    let next = update2(model, message);
+    let $ = next.compare_loading;
+    if ($) {
+      return finish_update(next, toList([run2(compare_paths(next))]));
+    } else {
+      return finish_update(next, List$Empty$const);
+    }
+  } else {
+    return finish_update(update2(model, message), List$Empty$const);
   }
 }
 function startup_effect(model) {
   return batch(toList([
     draw_effect(model),
-    load(0, 200, remote_query(model)),
+    load2(0, 200, remote_query(model)),
+    status(),
+    install_cleanup(),
     from2((dispatch2) => {
       return installShortcuts((key) => {
         return dispatch2(new UserPressedKey(key));
@@ -6931,7 +8758,7 @@ function main2() {
   let app = application(init2, update3, workspace);
   let $ = start4(app, "#app", undefined);
   if (!($ instanceof Ok)) {
-    throw makeError("let_assert", FILEPATH, "beamtrace_web", 11, "main", "Pattern match failed, no pattern matched the value.", { value: $, start: 293, end: 354, pattern_start: 304, pattern_end: 309 });
+    throw makeError("let_assert", FILEPATH, "beamtrace_web", 14, "main", "Pattern match failed, no pattern matched the value.", { value: $, start: 401, end: 462, pattern_start: 412, pattern_end: 417 });
   }
   return;
 }

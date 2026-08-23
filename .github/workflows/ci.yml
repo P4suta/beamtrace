@@ -117,6 +117,23 @@ jobs:
         shell: pwsh
         run: ./scripts/test-oci.ps1 -Build
 
+  s3-compatible:
+    name: S3-compatible TLS round trip
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: '29'
+          gleam-version: '1.18.1'
+          rebar3-version: '3.27.0'
+      - name: Exercise signed object writes, reads, conflicts, and deletion over TLS
+        shell: pwsh
+        run: ./scripts/test-s3-dogfood.ps1
+
   repository-governance:
     name: Repository governance
     runs-on: ubuntu-latest
@@ -132,7 +149,7 @@ jobs:
   tdd-gate:
     name: TDD Gate
     if: ${{ always() }}
-    needs: [compatibility, distribution, language-fixtures, browser-e2e, oci, repository-governance]
+    needs: [compatibility, distribution, language-fixtures, browser-e2e, oci, s3-compatible, repository-governance]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

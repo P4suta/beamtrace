@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
+import beamtrace/types
 import beamtrace_runtime/annotations
 import beamtrace_runtime/api
 import beamtrace_runtime/audit
 import beamtrace_runtime/audit_store
+import beamtrace_runtime/blob_store
+import beamtrace_runtime/capture
+import beamtrace_runtime/capture_session
 import beamtrace_runtime/enrollment_store
 import beamtrace_runtime/local_auth
 import beamtrace_runtime/rbac
@@ -30,6 +34,25 @@ pub fn listener_start_failure_closes_bootstrap_store_test() {
 
   local_auth.exchange(store, token, 1001)
   |> should.equal(Error("closed"))
+}
+
+pub fn local_runtime_owns_and_closes_the_attached_capture_session_test() {
+  let capture_store =
+    capture_session.new_with_backend(fn(_spec) {
+      Ok(capture.CaptureResult([], types.Complete))
+    })
+  let runtime = server.new_local(None, None, Some(capture_store))
+
+  runtime.context.local_capture |> should.equal(Some(capture_store))
+  runtime.context.mode |> should.equal(api.Local)
+  runtime.bootstrap_token
+  |> string.length
+  |> fn(length) { length > 20 }
+  |> should.be_true()
+
+  server.close_local(runtime)
+  capture_session.status(capture_store)
+  |> should.equal(capture_session.Failed("session_closed"))
 }
 
 pub fn team_runtime_wires_oidc_and_one_time_relay_enrollment_without_cookie_test() {
@@ -115,6 +138,26 @@ pub fn team_restart_applies_configured_relay_retention_test() {
   team_store.relay_frame_count(restarted.metadata_store, relay_id)
   |> should.equal(Ok(0))
   server.close_team(restarted)
+}
+
+pub fn team_runtime_routes_relay_archives_to_the_configured_s3_backend_test() {
+  let base = team_configuration(fresh_data_dir(), 7)
+  let config =
+    team_config.Config(
+      ..base,
+      blob_backend: team_config.S3Blobs(
+        "https://objects.example",
+        "beamtrace-prod",
+        "ap-northeast-1",
+        "captures/team-a",
+      ),
+    )
+  let assert Ok(runtime) = server.new_team(config, None, None, 2000)
+  let assert blob_store.S3(_) = runtime.blob_backend
+  let assert Some(security) = runtime.context.team_security
+  let assert Some(api.RelayArchiveBackend(_, blob_store.S3(_))) =
+    security.relay_archive
+  server.close_team(runtime)
 }
 
 pub fn team_restart_restores_annotations_and_audit_chain_test() {
@@ -217,6 +260,7 @@ fn team_configuration(data_dir: String, retention_days: Int) {
     relay_max_events: 10_000,
     relay_max_bytes: 64_000_000,
     enrollment_ttl_ms: 60_000,
+    blob_backend: team_config.FilesystemBlobs,
   )
 }
 

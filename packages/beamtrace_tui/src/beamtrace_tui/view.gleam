@@ -84,15 +84,18 @@ fn render_sidebar(
     Some(value) -> value
     None -> "not armed"
   }
+  let capture = capture_phase(state.capture_phase)
   let content =
     status
     <> "\n"
     <> node
     <> "\n\nCAPTURE\n"
-    <> "#1042  current\n"
-    <> "#1041  truncated\n\nARMED MFA\n"
+    <> capture
+    <> "\n\nARMED MFA\n"
     <> trigger
     <> "\n\nPRIVACY\nmetadata (default)"
+    <> "\n\nLIVE\ngeneration "
+    <> int.to_string(state.live_generation)
 
   target
   |> block.render(area, frame)
@@ -145,12 +148,14 @@ fn render_inspector(
     model.NormalFocus -> "Press a command key"
   }
   let content =
-    "EVIDENCE\nExact\n\nCOMPLETENESS\nComplete\n\nBOUNDARY\nnone observed\n\n"
+    "SESSION\n"
+    <> capture_phase(state.capture_phase)
+    <> "\n\nEVENT EVIDENCE\nSelect an event from the causal chain\n\n"
     <> input
     <> "\n\n"
     <> state.notice
     <> "\n\nACTIONS\n"
-    <> "a attach\nr arm MFA\n! anomalies\n/ search\ns save\nw open Web"
+    <> "a attach\nr arm MFA\nx cancel\n! anomalies\n/ search\ns save\nw open Web"
 
   target
   |> block.render(area, frame)
@@ -174,7 +179,7 @@ fn render_footer(
     target,
     area,
     paragraph.paragraph_new(
-      " a attach   r arm   ! anomalies   / search   s save   w Web   q quit  │  "
+      " a attach   r arm   x cancel   ! anomalies   / search   s save   w Web   q quit  │  "
       <> status,
     )
       |> paragraph.with_style(style.new(background, amber, style.bold())),
@@ -215,12 +220,31 @@ fn anomaly_content(state: model.Model) -> String {
   }
 }
 
-fn live_content(_state: model.Model) -> String {
-  "mailbox growth     ▁▂▃▅▇  +42/min\n"
-  <> "reductions        ▁▁▂▆█  +3.8σ\n"
-  <> "memory            ▁▂▂▃▄  18.4 MiB\n"
-  <> "restart rate      ▁▁▁▅▇  4/10s\n\n"
-  <> "Sampling is split across processes; full message trace is off."
+fn live_content(state: model.Model) -> String {
+  case model.visible_live_events(state) {
+    [] ->
+      state.live_summary
+      <> "\n\nWaiting for bounded process samples.\n\nFull message tracing remains off."
+    rows ->
+      state.live_summary
+      <> "\nGeneration "
+      <> int.to_string(state.live_generation)
+      <> "\n\n"
+      <> { rows |> list.map(format_event) |> string.join("\n│\n") }
+  }
+}
+
+fn capture_phase(phase: model.CapturePhase) -> String {
+  case phase {
+    model.CaptureUnavailable -> "unavailable"
+    model.CaptureIdle -> "idle"
+    model.CaptureArming -> "arming"
+    model.CaptureArmed -> "armed"
+    model.CaptureCancelling -> "cancelling"
+    model.CaptureReady(count, completeness) ->
+      "ready · " <> int.to_string(count) <> " events · " <> completeness
+    model.CaptureFailed(reason) -> "failed · " <> reason
+  }
 }
 
 fn format_event(event: model.Event) -> String {

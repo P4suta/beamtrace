@@ -1,3 +1,6 @@
+import beamtrace/anomaly
+import beamtrace/types
+import beamtrace_runtime/topology
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -7,6 +10,7 @@ pub type RawProcessSample {
     node: String,
     pid: String,
     registered_name: String,
+    process_label: String,
     initial_call: String,
     mailbox_len: Int,
     memory_bytes: Int,
@@ -16,6 +20,8 @@ pub type RawProcessSample {
     link_count: Int,
     status: String,
     current_function: String,
+    links: List(String),
+    ancestors: List(String),
   )
 }
 
@@ -25,6 +31,7 @@ pub type ProcessSample {
     pid: String,
     label: String,
     registered_name: String,
+    process_label: String,
     initial_call: String,
     mailbox_len: Int,
     memory_bytes: Int,
@@ -34,6 +41,8 @@ pub type ProcessSample {
     link_count: Int,
     status: String,
     current_function: String,
+    links: List(String),
+    ancestors: List(String),
   )
 }
 
@@ -41,17 +50,29 @@ pub type ProcessDelta {
   ProcessDelta(mailbox_growth: Int, memory_growth: Int, reductions_used: Int)
 }
 
+pub type LiveFinding {
+  LiveFinding(
+    pid: String,
+    label: String,
+    kind: String,
+    summary: String,
+    evidence: types.Evidence,
+  )
+}
+
 pub fn normalize_sample(raw: RawProcessSample) -> ProcessSample {
-  let label = case raw.registered_name, raw.initial_call {
-    "", "" -> raw.pid
-    "", initial_call -> initial_call
-    registered_name, _ -> registered_name
+  let label = case raw.process_label, raw.registered_name, raw.initial_call {
+    process_label, _, _ if process_label != "" -> process_label
+    "", registered_name, _ if registered_name != "" -> registered_name
+    "", "", initial_call if initial_call != "" -> initial_call
+    _, _, _ -> raw.pid
   }
   ProcessSample(
     node: raw.node,
     pid: raw.pid,
     label: label,
     registered_name: raw.registered_name,
+    process_label: raw.process_label,
     initial_call: raw.initial_call,
     mailbox_len: raw.mailbox_len,
     memory_bytes: raw.memory_bytes,
@@ -61,7 +82,96 @@ pub fn normalize_sample(raw: RawProcessSample) -> ProcessSample {
     link_count: raw.link_count,
     status: raw.status,
     current_function: raw.current_function,
+    links: raw.links,
+    ancestors: raw.ancestors,
   )
+}
+
+pub fn analyze(
+  previous: List(ProcessSample),
+  current: List(ProcessSample),
+) -> List(LiveFinding) {
+  current
+  |> list.flat_map(fn(sample) {
+    case find_sample(previous, sample.node, sample.pid) {
+      Error(_) -> []
+      Ok(before) -> sample_findings(before, sample)
+    }
+  })
+}
+
+pub fn topology_graphs(samples: List(ProcessSample)) -> topology.Graphs {
+  samples
+  |> list.map(fn(sample) {
+    let supervisor = case sample.ancestors {
+      [parent, ..] ->
+        Some(#(parent, types.inferred("proc_lib ancestor metadata", 0.85)))
+      [] -> None
+    }
+    topology.ProcessSnapshot(
+      id: sample.pid,
+      supervisor_parent: supervisor,
+      spawn_parent: None,
+      links: sample.links,
+    )
+  })
+  |> topology.build
+}
+
+fn sample_findings(
+  previous: ProcessSample,
+  current: ProcessSample,
+) -> List(LiveFinding) {
+  let detector =
+    anomaly.new_detector(alpha: 0.2, open_after: 1, close_after: 2)
+    |> anomaly.observe(anomaly.Mailbox, int.to_float(previous.mailbox_len), 0)
+    |> anomaly.observe(anomaly.Memory, int.to_float(previous.memory_bytes), 0)
+    |> anomaly.observe(anomaly.Heap, int.to_float(previous.total_heap_words), 0)
+    |> anomaly.observe(anomaly.Reductions, int.to_float(previous.reductions), 0)
+    |> anomaly.observe(anomaly.Mailbox, int.to_float(current.mailbox_len), 1)
+    |> anomaly.observe(anomaly.Memory, int.to_float(current.memory_bytes), 1)
+    |> anomaly.observe(anomaly.Heap, int.to_float(current.total_heap_words), 1)
+    |> anomaly.observe(anomaly.Reductions, int.to_float(current.reductions), 1)
+
+  list.map(detector.active, fn(alert) {
+    LiveFinding(
+      pid: current.pid,
+      label: current.label,
+      kind: anomaly_name(alert.kind),
+      summary: alert.summary,
+      evidence: alert.evidence,
+    )
+  })
+}
+
+fn find_sample(
+  samples: List(ProcessSample),
+  node: String,
+  pid: String,
+) -> Result(ProcessSample, Nil) {
+  case samples {
+    [] -> Error(Nil)
+    [sample, ..rest] ->
+      case sample.node == node && sample.pid == pid {
+        True -> Ok(sample)
+        False -> find_sample(rest, node, pid)
+      }
+  }
+}
+
+fn anomaly_name(kind: anomaly.AnomalyKind) -> String {
+  case kind {
+    anomaly.MailboxGrowth -> "mailbox_growth"
+    anomaly.MemoryGrowth -> "memory_growth"
+    anomaly.HeapGrowth -> "heap_growth"
+    anomaly.ReductionSpike -> "reduction_spike"
+    anomaly.ProcessLeak -> "process_leak"
+    anomaly.RestartStorm -> "restart_storm"
+    anomaly.BusyDistributionPort -> "busy_distribution_port"
+    anomaly.LongGarbageCollection -> "long_gc"
+    anomaly.LongSchedule -> "long_schedule"
+    anomaly.LargeHeap -> "large_heap"
+  }
 }
 
 pub fn delta(

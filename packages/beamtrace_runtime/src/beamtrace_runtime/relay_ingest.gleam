@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
+import beamtrace_runtime/blob_store
+import beamtrace_runtime/raw_grant
 import beamtrace_runtime/relay_archive
 import beamtrace_runtime/relay_inbox
 import beamtrace_runtime/relay_payload
@@ -43,12 +45,36 @@ pub fn accept_with_quota(
   received_at_ms: Int,
   quota: Quota,
 ) -> Result(relay_inbox.AppendStatus, String) {
-  case relay_payload.decode(payload) {
+  accept_with_backend_quota(
+    metadata,
+    blob_store.filesystem(blob_root),
+    inbox,
+    relay_id,
+    sequence,
+    mode,
+    payload,
+    received_at_ms,
+    quota,
+  )
+}
+
+pub fn accept_with_backend_quota(
+  metadata: team_store.Store,
+  backend: blob_store.Backend,
+  inbox: relay_inbox.Store,
+  relay_id: String,
+  sequence: Int,
+  mode: relay_inbox.Mode,
+  payload: String,
+  received_at_ms: Int,
+  quota: Quota,
+) -> Result(relay_inbox.AppendStatus, String) {
+  case relay_payload.decode_for_ingest(payload) {
     Error(error) -> Error(error)
     Ok(batch) ->
       accept_validated(
         metadata,
-        blob_root,
+        backend,
         inbox,
         relay_id,
         sequence,
@@ -62,7 +88,7 @@ pub fn accept_with_quota(
 
 fn accept_validated(
   metadata: team_store.Store,
-  blob_root: String,
+  backend: blob_store.Backend,
   inbox: relay_inbox.Store,
   relay_id: String,
   sequence: Int,
@@ -88,10 +114,16 @@ fn accept_validated(
           {
             True, _ -> Error("relay_event_quota")
             _, True -> Error("relay_byte_quota")
-            False, False ->
+            False, False -> {
+              use Nil <- result_try(authorize_privacy(
+                metadata,
+                relay_id,
+                batch,
+                received_at_ms,
+              ))
               persist_and_publish(
                 metadata,
-                blob_root,
+                backend,
                 inbox,
                 relay_id,
                 sequence,
@@ -100,9 +132,31 @@ fn accept_validated(
                 batch.event_count,
                 received_at_ms,
               )
+            }
           }
         }
       }
+  }
+}
+
+fn authorize_privacy(
+  metadata: team_store.Store,
+  relay_id: String,
+  batch: relay_payload.Batch,
+  now_ms: Int,
+) -> Result(Nil, String) {
+  case batch.privacy {
+    relay_payload.MetadataBatch -> Ok(Nil)
+    relay_payload.RawBatch(token, policy) ->
+      raw_grant.reserve(
+        metadata,
+        token,
+        relay_id,
+        policy,
+        events: batch.event_count,
+        bytes: string.byte_size(batch.canonical),
+        now_ms: now_ms,
+      )
   }
 }
 
@@ -115,7 +169,7 @@ fn mode_matches(mode: relay_inbox.Mode, encoded: String) -> Bool {
 
 fn persist_and_publish(
   metadata: team_store.Store,
-  blob_root: String,
+  backend: blob_store.Backend,
   inbox: relay_inbox.Store,
   relay_id: String,
   sequence: Int,
@@ -129,9 +183,9 @@ fn persist_and_publish(
     relay_inbox.Live -> relay_archive.Live
   }
   case
-    relay_archive.persist_events(
+    relay_archive.persist_events_with(
       metadata,
-      blob_root,
+      backend,
       relay_id,
       sequence,
       archive_mode,
@@ -150,5 +204,15 @@ fn persist_and_publish(
         payload,
         received_at_ms,
       )
+  }
+}
+
+fn result_try(
+  result: Result(a, e),
+  next: fn(a) -> Result(b, e),
+) -> Result(b, e) {
+  case result {
+    Ok(value) -> next(value)
+    Error(error) -> Error(error)
   }
 }

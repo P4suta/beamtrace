@@ -4,6 +4,7 @@ import beamtrace/types
 import beamtrace_runtime/capture
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import gleeunit/should
 
 pub fn relay_events_become_exact_acyclic_trace_test() {
@@ -60,15 +61,130 @@ pub fn relay_events_become_exact_acyclic_trace_test() {
   )
 }
 
+pub fn relay_term_shapes_survive_normalization_without_scalar_disclosure_test() {
+  let metadata = capture.RawProcessMetadata("", "", "", "", -1, [], "")
+  let raw = [
+    capture.RawEventWithTerm(
+      "root",
+      "r1",
+      "app@host",
+      "<0.1.0>",
+      1,
+      "root",
+      "",
+      "",
+      0,
+      "root",
+      metadata,
+      capture.RawList(1, [capture.RawAtom("order")]),
+    ),
+    capture.RawEventWithTerm(
+      "send",
+      "r1",
+      "app@host",
+      "<0.1.0>",
+      2,
+      "send",
+      "app@host",
+      "<0.2.0>",
+      7,
+      "call",
+      metadata,
+      capture.RawTuple(3, [
+        capture.RawAtom("$gen_call"),
+        capture.RawScalar("reference", "", "salted-reference"),
+        capture.RawTuple(2, [
+          capture.RawAtom("checkout"),
+          capture.RawScalar("integer", "", "salted-integer"),
+        ]),
+      ]),
+    ),
+  ]
+
+  let result = capture.normalize(raw, "complete", types.Mfa("shop", "run", 1))
+  let assert [root, sent] = result.events
+  root.kind
+  |> should.equal(
+    types.Root(types.Mfa("shop", "run", 1), [
+      types.Atom("order"),
+    ]),
+  )
+  sent.kind
+  |> should.equal(types.Send(
+    types.ProcessRef("app@host", "<0.2.0>"),
+    types.Constructor("$gen_call", [
+      types.Scalar("reference", None, Some("salted-reference")),
+      types.Constructor("checkout", [
+        types.Scalar("integer", None, Some("salted-integer")),
+      ]),
+    ]),
+    7,
+  ))
+}
+
 pub fn truncated_capture_maps_to_exit_code_three_test() {
   let completeness = capture.parse_completeness("truncated:event_budget")
   completeness |> should.equal(types.Truncated("event_budget"))
   completeness |> capture.exit_code |> should.equal(3)
 }
 
+pub fn occupied_system_tracer_is_a_safety_refusal_with_live_fallback_test() {
+  capture.failure_exit_code("system_tracer_occupied") |> should.equal(4)
+  capture.failure_guidance("system_tracer_occupied")
+  |> string.contains("Live")
+  |> should.be_true()
+  capture.failure_exit_code("nodedown") |> should.equal(2)
+}
+
 pub fn inferred_capture_preserves_reason_test() {
   capture.parse_completeness("inferred:system_tracer_occupied")
   |> should.equal(types.InferredCapture("system_tracer_occupied"))
+}
+
+pub fn capture_spec_compiles_agent_filter_and_preserves_only_the_residual_test() {
+  let spec =
+    types.CaptureSpec(
+      ..types.default_capture_spec(types.Mfa("shop", "checkout", 1)),
+      nodes: ["one@host", "two@host"],
+      where_aql: Some("arg.0.tag == allowed and process.label == checkout"),
+      budget: types.TraceBudget(
+        max_events: 500,
+        max_bytes: 100_000,
+        max_duration_ms: 2500,
+        max_agent_mailbox: 50,
+        max_roots: 3,
+      ),
+      preset: types.GenServer,
+    )
+  let assert Ok(prepared) = capture.prepare(spec)
+
+  prepared.predicate
+  |> should.equal(aql.AgentArgTag(0, aql.AgentEqual, "allowed"))
+  prepared.residual
+  |> should.equal(
+    Some(aql.Compare("process.label", aql.Equal, aql.StringValue("checkout"))),
+  )
+  prepared.spec |> should.equal(spec)
+}
+
+pub fn impossible_or_unbounded_capture_spec_fails_before_distribution_test() {
+  let impossible =
+    types.CaptureSpec(
+      ..types.default_capture_spec(types.Mfa("shop", "checkout", 1)),
+      nodes: ["app@host"],
+      where_aql: Some("module == other"),
+    )
+  capture.prepare(impossible)
+  |> should.equal(Error("capture_filter_cannot_match_trigger"))
+
+  let unbounded =
+    types.CaptureSpec(
+      ..impossible,
+      where_aql: None,
+      budget: types.TraceBudget(0, 1, 1, 1, 1),
+    )
+  capture.prepare(unbounded)
+  |> should.equal(Error("invalid_event_budget"))
 }
 
 pub fn unknown_wire_event_becomes_gap_not_fake_message_test() {
@@ -326,6 +442,74 @@ pub fn aql_match_keeps_the_entire_matching_root_chain_test() {
   filtered.completeness |> should.equal(types.Complete)
 }
 
+pub fn duplicate_agent_labels_are_split_into_distinct_causal_roots_test() {
+  let trigger = types.Mfa("shop", "checkout", 0)
+  let result =
+    capture.normalize(
+      [
+        capture.RawEvent(
+          "root-a",
+          "session-label",
+          "app@host",
+          "<0.1.0>",
+          1,
+          "root",
+          "",
+          "",
+          0,
+          "root",
+        ),
+        capture.RawEvent(
+          "send-a",
+          "session-label",
+          "app@host",
+          "<0.1.0>",
+          2,
+          "send",
+          "app@host",
+          "<0.2.0>",
+          1,
+          "call",
+        ),
+        capture.RawEvent(
+          "root-b",
+          "session-label",
+          "app@host",
+          "<0.3.0>",
+          3,
+          "root",
+          "",
+          "",
+          0,
+          "root",
+        ),
+        capture.RawEvent(
+          "send-b",
+          "session-label",
+          "app@host",
+          "<0.3.0>",
+          4,
+          "send",
+          "app@host",
+          "<0.4.0>",
+          1,
+          "cast",
+        ),
+      ],
+      "complete",
+      trigger,
+    )
+
+  result.events
+  |> list.map(fn(event) { #(event.id, event.root_id, event.evidence) })
+  |> should.equal([
+    #("root-a", "root-a", types.Exact),
+    #("send-a", "root-a", types.Exact),
+    #("root-b", "root-b", types.Exact),
+    #("send-b", "root-b", types.Exact),
+  ])
+}
+
 pub fn aql_can_match_trigger_mfa_without_splitting_its_chain_test() {
   let trigger = types.Mfa("shop", "checkout", 1)
   let result =
@@ -364,4 +548,55 @@ pub fn aql_can_match_trigger_mfa_without_splitting_its_chain_test() {
   capture.filter_roots(result, query, trigger).events
   |> list.length
   |> should.equal(2)
+}
+
+pub fn residual_aql_can_match_root_argument_shape_and_logical_process_test() {
+  let metadata =
+    capture.RawProcessMetadata("", "checkout", "", "", -1, [], "slot")
+  let result =
+    capture.normalize(
+      [
+        capture.RawEventWithTerm(
+          "root",
+          "r1",
+          "app@host",
+          "<0.1.0>",
+          1,
+          "root",
+          "",
+          "",
+          0,
+          "root",
+          metadata,
+          capture.RawList(1, [
+            capture.RawTuple(2, [
+              capture.RawAtom("order"),
+              capture.RawScalar("integer", "", "fingerprint"),
+            ]),
+          ]),
+        ),
+        capture.RawEvent(
+          "stop",
+          "r1",
+          "app@host",
+          "<0.1.0>",
+          2,
+          "stop",
+          "",
+          "",
+          0,
+          "complete",
+        ),
+      ],
+      "complete",
+      types.Mfa("shop", "run", 1),
+    )
+  let assert Ok(query) =
+    aql.parse(
+      "process.label == checkout and arg.0.tag == order and arg.0.type == tuple",
+    )
+
+  capture.filter_roots(result, query, types.Mfa("shop", "run", 1)).events
+  |> list.map(fn(event) { event.id })
+  |> should.equal(["root", "stop"])
 }

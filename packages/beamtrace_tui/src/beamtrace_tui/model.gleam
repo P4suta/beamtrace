@@ -19,6 +19,16 @@ pub type Focus {
   SaveFocus
 }
 
+pub type CapturePhase {
+  CaptureUnavailable
+  CaptureIdle
+  CaptureArming
+  CaptureArmed
+  CaptureCancelling
+  CaptureReady(event_count: Int, completeness: String)
+  CaptureFailed(reason: String)
+}
+
 pub type Event {
   Event(
     id: String,
@@ -35,6 +45,7 @@ pub type Model {
     events: List(Event),
     node: Option(String),
     connected: Bool,
+    capture_phase: CapturePhase,
     screen: Screen,
     focus: Focus,
     armed_trigger: Option(String),
@@ -46,6 +57,9 @@ pub type Model {
     trigger_input: String,
     save_input: String,
     quit: Bool,
+    live_events: List(Event),
+    live_generation: Int,
+    live_summary: String,
   )
 }
 
@@ -59,10 +73,22 @@ pub type Msg {
   OpenCapture
   OpenLive
   AttachSubmitted(String)
+  AttachAccepted(String)
+  AttachFailed(String)
   ArmRequested(String)
+  ArmAccepted(String)
+  ArmFailed(String)
+  CaptureCancellingStarted
+  CaptureCompleted(List(Event), String)
+  CaptureBecameIdle
+  CaptureFailedWith(String)
   SearchChanged(String)
   SaveRequested(String)
+  SaveSucceeded(String)
+  SaveFailed(String)
   DismissNotice
+  LiveUpdated(events: List(Event), generation: Int, summary: String)
+  LiveFailed(String)
 }
 
 pub fn init(events: List(Event)) -> Model {
@@ -70,6 +96,7 @@ pub fn init(events: List(Event)) -> Model {
     events: events,
     node: None,
     connected: False,
+    capture_phase: CaptureUnavailable,
     screen: AttachScreen,
     focus: AttachFocus,
     armed_trigger: None,
@@ -81,6 +108,9 @@ pub fn init(events: List(Event)) -> Model {
     trigger_input: "",
     save_input: "capture.beamtrace",
     quit: False,
+    live_events: [],
+    live_generation: 0,
+    live_summary: "Waiting for bounded process samples",
   )
 }
 
@@ -89,9 +119,22 @@ pub fn open_archive(events: List(Event), node: Option(String)) -> Model {
     ..init(events),
     node: node,
     connected: False,
+    capture_phase: CaptureReady(list.length(events), "offline"),
     screen: CaptureScreen,
     focus: NormalFocus,
     notice: "Opened offline trace",
+  )
+}
+
+pub fn attached(events: List(Event), node: String) -> Model {
+  Model(
+    ..init(events),
+    node: Some(node),
+    connected: True,
+    capture_phase: CaptureIdle,
+    screen: CaptureScreen,
+    focus: NormalFocus,
+    notice: "Attached " <> node,
   )
 }
 
@@ -122,29 +165,90 @@ pub fn update(model: Model, message: Msg) -> Model {
     AttachSubmitted(node) ->
       Model(
         ..model,
+        connected: False,
+        focus: NormalFocus,
+        notice: "Attaching " <> node,
+      )
+    AttachAccepted(node) ->
+      Model(
+        ..model,
         node: Some(node),
         connected: True,
+        capture_phase: CaptureIdle,
         screen: CaptureScreen,
         focus: NormalFocus,
         notice: "Attached " <> node,
       )
+    AttachFailed(reason) ->
+      Model(..model, connected: False, focus: AttachFocus, notice: reason)
     ArmRequested(trigger) ->
       Model(
         ..model,
-        armed_trigger: Some(trigger),
+        armed_trigger: None,
+        capture_phase: CaptureArming,
         screen: CaptureScreen,
         focus: NormalFocus,
-        notice: "Armed " <> trigger,
+        notice: "Arming " <> trigger,
       )
+    ArmAccepted(trigger) ->
+      Model(
+        ..model,
+        armed_trigger: Some(trigger),
+        capture_phase: CaptureArmed,
+        focus: NormalFocus,
+        notice: "Capture armed; perform one operation",
+      )
+    ArmFailed(reason) ->
+      Model(
+        ..model,
+        armed_trigger: None,
+        capture_phase: CaptureFailed(reason),
+        focus: NormalFocus,
+        notice: reason,
+      )
+    CaptureCancellingStarted ->
+      Model(
+        ..model,
+        capture_phase: CaptureCancelling,
+        notice: "Stopping capture and cleaning the target",
+      )
+    CaptureCompleted(events, completeness) ->
+      Model(
+        ..model,
+        events: events,
+        capture_phase: CaptureReady(list.length(events), completeness),
+        notice: "Capture complete",
+      )
+    CaptureBecameIdle ->
+      Model(
+        ..model,
+        capture_phase: CaptureIdle,
+        armed_trigger: None,
+        notice: "Capture idle",
+      )
+    CaptureFailedWith(reason) ->
+      Model(..model, capture_phase: CaptureFailed(reason), notice: reason)
     SearchChanged(query) -> Model(..model, query: query, focus: SearchFocus)
     SaveRequested(path) ->
       Model(
         ..model,
-        save_path: Some(path),
+        save_path: None,
         focus: NormalFocus,
-        notice: "Saved " <> path,
+        notice: "Saving " <> path,
       )
+    SaveSucceeded(path) ->
+      Model(..model, save_path: Some(path), notice: "Saved " <> path)
+    SaveFailed(reason) -> Model(..model, save_path: None, notice: reason)
     DismissNotice -> Model(..model, notice: "")
+    LiveUpdated(events, generation, summary) ->
+      Model(
+        ..model,
+        live_events: events,
+        live_generation: generation,
+        live_summary: summary,
+      )
+    LiveFailed(reason) ->
+      Model(..model, live_summary: "Live unavailable · " <> reason)
   }
 }
 
@@ -162,7 +266,20 @@ pub fn visible_events(model: Model) -> List(Event) {
 }
 
 pub fn anomalies(model: Model) -> List(Event) {
-  list.filter(model.events, fn(event) { event.anomalous })
+  list.filter(model.live_events, fn(event) { event.anomalous })
+}
+
+pub fn visible_live_events(model: Model) -> List(Event) {
+  let query = model.query |> string.trim |> string.lowercase
+  case query {
+    "" -> model.live_events
+    _ ->
+      list.filter(model.live_events, fn(event) {
+        string.contains(string.lowercase(event.id), query)
+        || string.contains(string.lowercase(event.actor), query)
+        || string.contains(string.lowercase(event.kind), query)
+      })
+  }
 }
 
 pub fn key_to_message(key: String) -> Option(Msg) {
@@ -183,12 +300,16 @@ pub fn key_to_message(key: String) -> Option(Msg) {
 /// key handling; those operations are emitted as explicit model messages.
 pub fn handle_key(model: Model, raw_key: String) -> Model {
   let key = keys.match(raw_key)
-  case model.focus {
-    AttachFocus -> handle_attach_key(model, key)
-    ArmFocus -> handle_arm_key(model, key)
-    SearchFocus -> handle_search_key(model, key)
-    SaveFocus -> handle_save_key(model, key)
-    NormalFocus -> handle_normal_key(model, key)
+  case key {
+    keys.Alt("q") -> Model(..model, quit: True)
+    _ ->
+      case model.focus {
+        AttachFocus -> handle_attach_key(model, key)
+        ArmFocus -> handle_arm_key(model, key)
+        SearchFocus -> handle_search_key(model, key)
+        SaveFocus -> handle_save_key(model, key)
+        NormalFocus -> handle_normal_key(model, key)
+      }
   }
 }
 

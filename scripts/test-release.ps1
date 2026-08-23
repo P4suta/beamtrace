@@ -58,6 +58,24 @@ $ci = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/workflows/ci.y
 if (-not $ci.Contains('./scripts/test-oci.ps1 -Build')) {
     throw 'CI does not exercise the real OCI image boundary.'
 }
+if (-not $ci.Contains('./scripts/test-s3-dogfood.ps1')) {
+    throw 'CI does not exercise the real S3-compatible TLS boundary.'
+}
+
+$s3Dogfood = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'test-s3-dogfood.ps1')
+if ($s3Dogfood.Contains('host.docker.internal')) {
+    throw 'S3 dogfood must not depend on the Docker Desktop-only host.docker.internal name.'
+}
+foreach ($marker in @('docker network create', '--network $networkName', 'docker network rm')) {
+    if (-not $s3Dogfood.Contains($marker)) {
+        throw "S3 dogfood is missing its portable container network boundary: $marker"
+    }
+}
+
+$recordDogfood = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'test-record-dogfood.ps1')
+if (-not $recordDogfood.Contains("'^[A-Za-z0-9_.-]+$'")) {
+    throw 'Record dogfood must accept a safe fully-qualified macOS runner hostname.'
+}
 
 Write-Host 'Release acceptance passed.'
 exit 0

@@ -74,6 +74,20 @@ injection_lifecycle() ->
 
         {ok, loaded, _} = beamtrace_relay:inject(Node),
         ok = load_fixture(Node),
+        {ok, Candidates} = beamtrace_relay:search_mfas(
+            Node,
+            <<"agent_fixture:tri">>,
+            20
+        ),
+        ?assert(lists:member(
+            #{
+                module => <<"beamtrace_agent_fixture">>,
+                function => <<"trigger">>,
+                arity => 1
+            },
+            Candidates
+        )),
+        ?assert(length(Candidates) =< 20),
         relay_death_cleans_exact_trace(Node),
         ?assertEqual(false, erpc:call(Node, seq_trace, get_system_tracer, []))
     after

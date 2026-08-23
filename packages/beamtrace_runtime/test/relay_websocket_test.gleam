@@ -25,6 +25,22 @@ pub fn ingest_stop_frames_explain_budget_privacy_and_storage_failures_test() {
   |> should.equal(
     "{\"type\":\"stop\",\"completeness\":\"truncated\",\"reason\":\"privacy_policy\"}",
   )
+  relay_websocket.ingest_control_frame(Error("raw_capture_grant_denied"))
+  |> should.equal(
+    "{\"type\":\"stop\",\"completeness\":\"truncated\",\"reason\":\"privacy_policy\"}",
+  )
+  relay_websocket.ingest_control_frame(Error("raw_redaction_required"))
+  |> should.equal(
+    "{\"type\":\"stop\",\"completeness\":\"truncated\",\"reason\":\"privacy_policy\"}",
+  )
+  relay_websocket.ingest_control_frame(Error("batch_event_limit"))
+  |> should.equal(
+    "{\"type\":\"stop\",\"completeness\":\"truncated\",\"reason\":\"hub_quota\"}",
+  )
+  relay_websocket.ingest_control_frame(Error("invalid_payload"))
+  |> should.equal(
+    "{\"type\":\"stop\",\"completeness\":\"truncated\",\"reason\":\"relay_protocol\"}",
+  )
   relay_websocket.ingest_control_frame(Error("disk_full"))
   |> should.equal(
     "{\"type\":\"stop\",\"completeness\":\"truncated\",\"reason\":\"hub_storage_error\"}",

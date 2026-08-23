@@ -16,6 +16,7 @@
     status/1,
     stop/1,
     version/0,
+    semantic/2,
     shape_term/2,
     claim_system_tracer/1,
     release_system_tracer/1
@@ -31,7 +32,7 @@
 ]).
 
 -define(PROTOCOL_VERSION, 1).
--define(MODULE_HASH, <<"f0d2b539-beamtrace-agent-v1">>).
+-define(MODULE_HASH, <<"b7a54d1c-beamtrace-agent-v2">>).
 -define(DEFAULT_MAX_EVENTS, 100000).
 -define(DEFAULT_MAX_BYTES, 64000000).
 -define(DEFAULT_MAX_MAILBOX, 10000).
@@ -43,11 +44,13 @@
     owner_monitor,
     capture_id,
     mode = exact,
+    preset = generic,
     privacy = #{mode => metadata, salt => <<>>},
     max_events = ?DEFAULT_MAX_EVENTS,
     max_bytes = ?DEFAULT_MAX_BYTES,
     max_agent_mailbox = ?DEFAULT_MAX_MAILBOX,
     max_roots = 1,
+    root_filter = all,
     max_duration_ms = ?DEFAULT_DURATION_MS,
     batch_size = ?DEFAULT_BATCH_SIZE,
     credits = 0,
@@ -120,6 +123,7 @@ init({Owner, Options}) ->
         owner_monitor = Monitor,
         capture_id = CaptureId,
         mode = maps:get(mode, Options, exact),
+        preset = maps:get(preset, Options, generic),
         privacy = Privacy,
         max_events = positive_option(max_events, Options, ?DEFAULT_MAX_EVENTS),
         max_bytes = positive_option(max_bytes, Options, ?DEFAULT_MAX_BYTES),
@@ -129,6 +133,7 @@ init({Owner, Options}) ->
             ?DEFAULT_MAX_MAILBOX
         ),
         max_roots = positive_option(max_roots, Options, 1),
+        root_filter = maps:get(root_filter, Options, all),
         max_duration_ms = positive_option(
             max_duration_ms,
             Options,
@@ -273,7 +278,11 @@ arm_loaded(MFA, State) ->
             try
                 Session = trace:session_create(beamtrace_capture, self(), []),
                 Label = capture_label(State),
-                MatchSpec = root_match_spec(Label),
+                MatchSpec = root_match_spec(
+                    Label,
+                    element(3, MFA),
+                    State#state.root_filter
+                ),
                 case trace:function(Session, MFA, MatchSpec, [meta]) of
                     0 ->
                         _ = trace:session_destroy(Session),
@@ -336,18 +345,109 @@ listen_capture(_Label, State) ->
 capture_label(#state{label = Label}) when is_integer(Label), Label >= 0 -> Label;
 capture_label(_State) -> erlang:unique_integer([positive, monotonic]).
 
-root_match_spec(Label) ->
-    [
-        {'_', [], [
-            {set_seq_token, label, Label},
-            {set_seq_token, send, true},
-            {set_seq_token, 'receive', true},
-            {set_seq_token, print, true},
-            {set_seq_token, monotonic_timestamp, true},
-            {trace, [], [procs, set_on_spawn, monotonic_timestamp]},
-            {message, {const, {beamtrace_root, Label}}}
-        ]}
-    ].
+root_match_spec(Label, Arity, Filter) ->
+    Actions = [
+        {set_seq_token, label, Label},
+        {set_seq_token, send, true},
+        {set_seq_token, 'receive', true},
+        {set_seq_token, print, true},
+        {set_seq_token, monotonic_timestamp, true},
+        {trace, [], [procs, set_on_spawn, monotonic_timestamp]},
+        {message, {const, {beamtrace_root, Label}}}
+    ],
+    Variables = argument_variables(Arity),
+    case root_filter_guard(Filter, Variables) of
+        true -> [{Variables, [], Actions}];
+        false -> [{Variables, [false], Actions}];
+        Guard -> [{Variables, [Guard], Actions}]
+    end.
+
+argument_variables(Arity) when is_integer(Arity), Arity >= 0, Arity =< 255 ->
+    [list_to_atom("$" ++ integer_to_list(Index)) || Index <- lists:seq(1, Arity)].
+
+root_filter_guard(all, _Variables) -> true;
+root_filter_guard(never, _Variables) -> false;
+root_filter_guard({arg_tag, Index, Comparator, TagBinary}, Variables) ->
+    case argument_variable(Index, Variables) of
+        {ok, Variable} ->
+            case existing_tag(TagBinary) of
+                {ok, Tag} ->
+                    Equal = {'orelse',
+                        {'=:=', Variable, Tag},
+                        {'andalso',
+                            {is_tuple, Variable},
+                            {'andalso',
+                                {'>', {tuple_size, Variable}, 0},
+                                {'=:=', {element, 1, Variable}, Tag}
+                            }
+                        }
+                    },
+                    compare_guard(Comparator, Equal);
+                error -> false
+            end;
+        error -> false
+    end;
+root_filter_guard({arg_type, Index, Comparator, Kind}, Variables) ->
+    case argument_variable(Index, Variables) of
+        {ok, Variable} ->
+            case type_guard(Kind, Variable) of
+                {ok, Guard} -> compare_guard(Comparator, Guard);
+                error -> false
+            end;
+        error -> false
+    end;
+root_filter_guard({'and', Left, Right}, Variables) ->
+    combine_guard('andalso', root_filter_guard(Left, Variables), root_filter_guard(Right, Variables));
+root_filter_guard({'or', Left, Right}, Variables) ->
+    combine_guard('orelse', root_filter_guard(Left, Variables), root_filter_guard(Right, Variables));
+root_filter_guard({'not', Predicate}, Variables) ->
+    case root_filter_guard(Predicate, Variables) of
+        true -> false;
+        false -> true;
+        Guard -> {'not', Guard}
+    end;
+root_filter_guard(_Invalid, _Variables) -> false.
+
+argument_variable(Index, Variables)
+        when is_integer(Index), Index >= 0, Index < length(Variables) ->
+    {ok, lists:nth(Index + 1, Variables)};
+argument_variable(_Index, _Variables) -> error.
+
+existing_tag(Tag) when is_binary(Tag), byte_size(Tag) > 0, byte_size(Tag) =< 255 ->
+    try {ok, binary_to_existing_atom(Tag, utf8)}
+    catch error:badarg -> error
+    end;
+existing_tag(Tag) when is_atom(Tag) -> {ok, Tag};
+existing_tag(_Tag) -> error.
+
+compare_guard(equal, Guard) -> Guard;
+compare_guard(not_equal, Guard) -> {'not', Guard};
+compare_guard(_Comparator, _Guard) -> false.
+
+combine_guard('andalso', false, _Right) -> false;
+combine_guard('andalso', _Left, false) -> false;
+combine_guard('andalso', true, Right) -> Right;
+combine_guard('andalso', Left, true) -> Left;
+combine_guard('orelse', true, _Right) -> true;
+combine_guard('orelse', _Left, true) -> true;
+combine_guard('orelse', false, Right) -> Right;
+combine_guard('orelse', Left, false) -> Left;
+combine_guard(Operator, Left, Right) -> {Operator, Left, Right}.
+
+type_guard(<<"atom">>, Variable) -> {ok, {is_atom, Variable}};
+type_guard(<<"tuple">>, Variable) -> {ok, {is_tuple, Variable}};
+type_guard(<<"list">>, Variable) -> {ok, {is_list, Variable}};
+type_guard(<<"map">>, Variable) -> {ok, {is_map, Variable}};
+type_guard(<<"binary">>, Variable) -> {ok, {is_binary, Variable}};
+type_guard(<<"integer">>, Variable) -> {ok, {is_integer, Variable}};
+type_guard(<<"float">>, Variable) -> {ok, {is_float, Variable}};
+type_guard(<<"pid">>, Variable) -> {ok, {is_pid, Variable}};
+type_guard(<<"reference">>, Variable) -> {ok, {is_reference, Variable}};
+type_guard(<<"port">>, Variable) -> {ok, {is_port, Variable}};
+type_guard(<<"function">>, Variable) -> {ok, {is_function, Variable}};
+type_guard(Kind, Variable) when is_atom(Kind) ->
+    type_guard(atom_to_binary(Kind, utf8), Variable);
+type_guard(_Kind, _Variable) -> error.
 
 record_root(_Pid, _Call, _Timestamp, State = #state{root_count = Count, max_roots = Max})
         when Count >= Max ->
@@ -449,7 +549,7 @@ seq_event(Kind, {Previous, Current}, From, To, Message, Timestamp, State) ->
         previous_serial => Previous,
         serial => Current,
         message => shape_term(Message, State#state.privacy),
-        semantic => classify_message(Message),
+        semantic => semantic(Message, State#state.preset),
         evidence => exact
     };
 seq_event(Kind, Serial, From, To, Message, Timestamp, State) ->
@@ -459,7 +559,7 @@ seq_event(Kind, Serial, From, To, Message, Timestamp, State) ->
         to => process_view(To),
         serial => shape_term(Serial, State#state.privacy),
         message => shape_term(Message, State#state.privacy),
-        semantic => classify_message(Message),
+        semantic => semantic(Message, State#state.preset),
         evidence => exact
     }.
 
@@ -863,6 +963,24 @@ classify_message(Message) when is_tuple(Message), tuple_size(Message) > 0 ->
         _ -> message
     end;
 classify_message(_Message) -> message.
+
+semantic({'$gen_call', _From, _Request}, gen_server) -> gen_server_call;
+semantic({'$gen_cast', _Request}, gen_server) -> gen_server_cast;
+semantic({Reference, _Reply}, gen_server) when is_reference(Reference) ->
+    gen_server_reply;
+semantic({call, _From, _Request}, gleam_actor) -> gleam_actor_call;
+semantic({cast, _Request}, gleam_actor) -> gleam_actor_cast;
+semantic({reply, _Reference, _Reply}, gleam_actor) -> gleam_actor_reply;
+semantic({request, _Method, _Target}, wisp_mist) -> http_request;
+semantic({response, _Status, _Body}, wisp_mist) -> http_response;
+semantic(#{'__struct__' := 'Elixir.Phoenix.Socket.Message'}, phoenix) ->
+    phoenix_socket_message;
+semantic(#{'__struct__' := 'Elixir.Phoenix.Socket.Broadcast'}, phoenix) ->
+    phoenix_broadcast;
+semantic({'EXIT', _Pid, _Reason}, erlang_supervisor) -> supervisor_exit;
+semantic({'DOWN', _Reference, process, _Pid, _Reason}, erlang_supervisor) ->
+    supervisor_down;
+semantic(Message, _Preset) -> classify_message(Message).
 
 timestamp_ns(Value) when is_integer(Value) -> Value;
 timestamp_ns({Monotonic, _Unique}) when is_integer(Monotonic) -> Monotonic;
