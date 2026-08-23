@@ -17,6 +17,7 @@ foreach ($relative in @(
     '.github/workflows/release-candidate.yml',
     '.github/workflows/release.yml',
     'scripts/project-version.ps1',
+    'scripts/compare-hex-metadata.escript',
     'scripts/publish-hex.ps1',
     'scripts/verify-published-release.ps1',
     'scripts/build-distribution-metadata.ps1',
@@ -346,6 +347,7 @@ if ($releaseWorkflow.Contains('runner: windows-11-arm')) {
 $hexPublisher = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'scripts/publish-hex.ps1')
 foreach ($marker in @(
     'metadata.config',
+    'compare-hex-metadata.escript',
     'contents.tar.gz',
     'Get-FileHash',
     '[string] $RepositoryRoot',
@@ -358,6 +360,73 @@ foreach ($marker in @(
 }
 if ($hexPublisher.Contains('--replace')) {
     throw 'Hex publication must never replace an existing package version.'
+}
+
+$metadataComparator = Join-Path $repoRoot 'scripts/compare-hex-metadata.escript'
+$metadataComparatorSource = Get-Content -Raw -LiteralPath $metadataComparator
+foreach ($marker in @(
+    'file:consult',
+    'io_lib:printable_unicode_list',
+    'lists:sort',
+    'normalize(Expected) =:= normalize(Actual)'
+)) {
+    if (-not $metadataComparatorSource.Contains($marker)) {
+        throw "Hex metadata semantic comparator is missing: $marker"
+    }
+}
+
+$escriptCommand = Get-Command escript -ErrorAction SilentlyContinue
+if ($null -eq $escriptCommand) {
+    Write-Host 'Skipping executable Hex metadata comparison because Erlang is not installed in this governance-only environment.'
+}
+else {
+    $metadataTestRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot ".build/hex-metadata-compare-test-$PID"))
+    if (-not $metadataTestRoot.StartsWith($resolvedBuild, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Unsafe Hex metadata test directory: $metadataTestRoot"
+    }
+    if (Test-Path -LiteralPath $metadataTestRoot) {
+        Remove-Item -LiteralPath $metadataTestRoot -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $metadataTestRoot -Force | Out-Null
+    try {
+        $expectedMetadata = Join-Path $metadataTestRoot 'expected.config'
+        $equivalentMetadata = Join-Path $metadataTestRoot 'equivalent.config'
+        $changedMetadata = Join-Path $metadataTestRoot 'changed.config'
+        @(
+            '{<<"name">>, <<"beamtrace_core">>}.'
+            '{<<"requirements">>, ['
+            '  {<<"gleam_stdlib">>, [{<<"app">>, <<"gleam_stdlib">>}, {<<"optional">>, false}, {<<"requirement">>, <<">= 0.70.0 and < 2.0.0">>}]},'
+            '  {<<"gleam_json">>, [{<<"app">>, <<"gleam_json">>}, {<<"optional">>, false}, {<<"requirement">>, <<">= 2.3.0 and < 4.0.0">>}]}'
+            ']}.'
+            '{<<"files">>, [<<"LICENSE">>, <<"README.md">>]}.'
+        ) -join "`n" | Set-Content -LiteralPath $expectedMetadata -Encoding utf8NoBOM
+        @(
+            '{<<"files">>, [<<"README.md">>, <<"LICENSE">>]}.'
+            '{<<"requirements">>, ['
+            '  {<<"gleam_json">>, [{<<"requirement">>, <<">= 2.3.0 and < 4.0.0">>}, {<<"app">>, <<"gleam_json">>}, {<<"optional">>, false}]},'
+            '  {<<"gleam_stdlib">>, [{<<"requirement">>, <<">= 0.70.0 and < 2.0.0">>}, {<<"optional">>, false}, {<<"app">>, <<"gleam_stdlib">>}]}'
+            ']}.'
+            '{<<"name">>, <<"beamtrace_core">>}.'
+        ) -join "`n" | Set-Content -LiteralPath $equivalentMetadata -Encoding utf8NoBOM
+        (Get-Content -Raw -LiteralPath $equivalentMetadata).Replace(
+            '>= 0.70.0 and < 2.0.0',
+            '>= 0.71.0 and < 2.0.0'
+        ) | Set-Content -LiteralPath $changedMetadata -Encoding utf8NoBOM
+
+        & escript $metadataComparator $expectedMetadata $equivalentMetadata
+        if ($LASTEXITCODE -ne 0) {
+            throw 'The Hex metadata comparator rejected reordered equivalent metadata.'
+        }
+        & escript $metadataComparator $expectedMetadata $changedMetadata *> $null
+        if ($LASTEXITCODE -eq 0) {
+            throw 'The Hex metadata comparator accepted a changed dependency requirement.'
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $metadataTestRoot) {
+            Remove-Item -LiteralPath $metadataTestRoot -Recurse -Force
+        }
+    }
 }
 
 foreach ($workflowPath in @(
