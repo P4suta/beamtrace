@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+name: Bug report
+description: Report a reproducible defect without production secrets or raw captures.
+title: "[Bug]: "
+labels: ["type: bug", "status: needs-reproduction"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug. Use a private security advisory instead if confidentiality or security may be involved.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Observed behavior
+      description: What happened, and what did you expect instead?
+      placeholder: Describe the smallest reproducible difference.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide a minimal fixture or commands. Redact cookies, tokens, node names, paths, and captured values.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: BeamTrace version or commit
+      placeholder: v0.1.0 or a full commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: otp
+    attributes:
+      label: Erlang/OTP version
+      options:
+        - "27"
+        - "28"
+        - "29"
+        - Other or unknown
+    validations:
+      required: true
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I removed distribution cookies, credentials, raw captures, customer data, and other secrets.
+          required: true
+        - label: I searched existing issues and discussions first.
+          required: true

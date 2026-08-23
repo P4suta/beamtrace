@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+* @P4suta
+/.github/ @P4suta
+/SECURITY.md @P4suta
+/docs/threat-model.md @P4suta
+/packages/beamtrace_agent/ @P4suta
+/scripts/configure-github.ps1 @P4suta

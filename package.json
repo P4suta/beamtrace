@@ -1,0 +1,11 @@
+{
+  "name": "beamtrace-acceptance",
+  "private": true,
+  "scripts": {
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.10.2",
+    "@playwright/test": "1.62.1"
+  }
+}

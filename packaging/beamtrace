@@ -1,0 +1,13 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+set -eu
+
+install_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+export BEAMTRACE_AGENT_BEAM="$install_root/lib/beamtrace_agent.beam"
+export BEAMTRACE_WEB_ROOT="$install_root/share/beamtrace/web"
+if [ -n "${ERL_LIBS:-}" ]; then
+  export ERL_LIBS="$install_root/lib/native:$ERL_LIBS"
+else
+  export ERL_LIBS="$install_root/lib/native"
+fi
+exec escript "$install_root/lib/beamtrace.escript" "$@"

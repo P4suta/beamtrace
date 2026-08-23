@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+name: Feature proposal
+description: Propose a focused capability that fits BeamTrace's safety boundaries.
+title: "[Feature]: "
+labels: ["type: feature"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What debugging or diagnostic problem cannot be solved today?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: Describe observable behavior, not only an implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: TDD acceptance example
+      description: Give one failing example that could become the first test.
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Project boundaries
+      options:
+        - label: This does not require arbitrary RPC, state mutation, process killing, or unrestricted raw capture.
+          required: true
+        - label: I searched existing issues, discussions, and the roadmap.
+          required: true

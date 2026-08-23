@@ -1,0 +1,11 @@
+BeamTrace is free and open-source software licensed, at your option, under
+either of the following licenses:
+
+- Apache License 2.0 (see LICENSES/Apache-2.0.txt)
+- MIT License (see LICENSES/MIT.txt)
+
+Unless you explicitly state otherwise, any contribution intentionally
+submitted for inclusion in BeamTrace is offered under the same dual-license
+terms, without additional conditions.
+
+SPDX-License-Identifier: Apache-2.0 OR MIT

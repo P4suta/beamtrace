@@ -1,0 +1,9 @@
+%% SPDX-License-Identifier: Apache-2.0 OR MIT
+{application, beamtrace_erlang_fixture, [
+    {description, "BeamTrace Erlang capture fixture"},
+    {vsn, "0.1.0"},
+    {modules, []},
+    {registered, [beamtrace_fixture_sup, beamtrace_fixture_leaf, beamtrace_fixture_worker]},
+    {applications, [kernel, stdlib]},
+    {mod, {beamtrace_fixture_app, []}}
+]}.

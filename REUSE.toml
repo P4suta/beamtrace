@@ -1,0 +1,10 @@
+version = 1
+SPDX-PackageName = "BeamTrace"
+SPDX-PackageSupplier = "BeamTrace contributors"
+SPDX-PackageDownloadLocation = "NOASSERTION"
+
+[[annotations]]
+path = ["**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 BeamTrace contributors"
+SPDX-License-Identifier = "Apache-2.0 OR MIT"

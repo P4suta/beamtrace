@@ -1,0 +1,85 @@
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+import beamtrace_tui/model
+import gleam/option.{Some}
+import gleeunit/should
+
+fn events() {
+  [
+    model.Event("root", "checkout", "call", "Exact", 0, False),
+    model.Event("send", "checkout", "send", "Exact", 120, False),
+    model.Event("receive", "worker", "receive", "Exact", 360, True),
+  ]
+}
+
+pub fn attach_transitions_to_capture_without_losing_node_test() {
+  let state = model.init(events())
+  let state = model.update(state, model.AttachSubmitted("app@localhost"))
+
+  state.node |> should.equal(Some("app@localhost"))
+  state.screen |> should.equal(model.CaptureScreen)
+  state.connected |> should.be_true()
+}
+
+pub fn arm_and_save_are_explicit_operations_test() {
+  let state = model.init(events())
+  let state = model.update(state, model.ArmRequested("checkout:handle/1"))
+  state.armed_trigger |> should.equal(Some("checkout:handle/1"))
+
+  let state = model.update(state, model.SaveRequested("capture.beamtrace"))
+  state.save_path |> should.equal(Some("capture.beamtrace"))
+  state.notice |> should.equal("Saved capture.beamtrace")
+}
+
+pub fn vertical_chain_search_preserves_causal_order_test() {
+  let state = model.init(events())
+  let state = model.update(state, model.SearchChanged("CHECKOUT"))
+
+  model.visible_events(state)
+  |> should.equal([
+    model.Event("root", "checkout", "call", "Exact", 0, False),
+    model.Event("send", "checkout", "send", "Exact", 120, False),
+  ])
+}
+
+pub fn shortcuts_cover_attach_arm_anomalies_search_save_and_web_test() {
+  model.key_to_message("a") |> should.equal(Some(model.OpenAttach))
+  model.key_to_message("r") |> should.equal(Some(model.FocusArm))
+  model.key_to_message("!") |> should.equal(Some(model.OpenAnomalies))
+  model.key_to_message("/") |> should.equal(Some(model.FocusSearch))
+  model.key_to_message("s") |> should.equal(Some(model.FocusSave))
+  model.key_to_message("w") |> should.equal(Some(model.OpenWeb))
+}
+
+pub fn anomaly_view_only_contains_flagged_events_test() {
+  model.init(events())
+  |> model.anomalies
+  |> should.equal([
+    model.Event("receive", "worker", "receive", "Exact", 360, True),
+  ])
+}
+
+pub fn focused_attach_field_accepts_unicode_backspace_and_enter_test() {
+  let state = model.init([])
+  let state = model.handle_key(state, "n")
+  let state = model.handle_key(state, "ø")
+  let state = model.handle_key(state, "backspace")
+  let state = model.handle_key(state, "d")
+  let state = model.handle_key(state, "e")
+  let state = model.handle_key(state, "enter")
+
+  state.node |> should.equal(Some("nde"))
+  state.connected |> should.be_true()
+}
+
+pub fn quit_is_explicit_and_never_bound_to_process_mutation_test() {
+  let state = model.init([]) |> model.handle_key("ctrl+c")
+  state.quit |> should.be_true()
+}
+
+pub fn offline_archive_is_not_misrepresented_as_a_live_connection_test() {
+  let state = model.open_archive(events(), Some("app@localhost"))
+  state.node |> should.equal(Some("app@localhost"))
+  state.connected |> should.be_false()
+  state.screen |> should.equal(model.CaptureScreen)
+  state.notice |> should.equal("Opened offline trace")
+}

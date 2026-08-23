@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+.git
+.build
+.cache
+.tools
+dist
+node_modules
+test-results
+playwright-report
+**/build
+**/dist
+**/erl_crash.dump
+**/*.beam

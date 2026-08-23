@@ -1,0 +1,16 @@
+* text=auto eol=lf
+
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+*.beam binary
+*.beamtrace binary
+*.dll binary
+*.exe binary
+*.gz binary
+*.ico binary
+*.jpg binary
+*.jpeg binary
+*.png binary
+*.tar binary
+*.zip binary

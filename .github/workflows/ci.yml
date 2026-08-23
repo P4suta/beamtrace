@@ -1,0 +1,145 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+name: TDD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  merge_group:
+  workflow_dispatch:
+
+concurrency:
+  group: tdd-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  compatibility:
+    name: ${{ matrix.os }} / OTP ${{ matrix.otp }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        otp: ['27', '28', '29']
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: ${{ matrix.otp }}
+          gleam-version: '1.18.1'
+          rebar3-version: '3.27.0'
+      - name: TDD gate
+        shell: pwsh
+        run: ./scripts/test-all.ps1 -SkipBrowserE2E
+
+  distribution:
+    name: OTP ${{ matrix.otp }} / ${{ matrix.distribution }} distribution
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        otp: ['27', '28', '29']
+        distribution: [short, long, tls]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: ${{ matrix.otp }}
+          gleam-version: '1.18.1'
+          rebar3-version: '3.27.0'
+      - name: Distribution capture tests
+        shell: pwsh
+        run: ./scripts/test-agent.ps1 -Distribution '${{ matrix.distribution }}'
+
+  language-fixtures:
+    name: Gleam / Elixir / Erlang fixtures
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: '27'
+          elixir-version: '1.18'
+          gleam-version: '1.18.1'
+          rebar3-version: '3.27.0'
+      - name: Fixture acceptance tests
+        shell: pwsh
+        run: ./scripts/test-fixtures.ps1
+        env:
+          BEAMTRACE_REQUIRE_ELIXIR: '1'
+
+  browser-e2e:
+    name: Chromium workspace acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: '29'
+          gleam-version: '1.18.1'
+          rebar3-version: '3.27.0'
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install locked browser tooling
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Browser acceptance tests
+        shell: pwsh
+        run: ./scripts/test-web-e2e.ps1
+
+  oci:
+    name: OCI image boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Build and smoke-test OCI image
+        shell: pwsh
+        run: ./scripts/test-oci.ps1 -Build
+
+  repository-governance:
+    name: Repository governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Verify repository policy as code
+        shell: pwsh
+        run: ./scripts/test-repository-governance.ps1
+
+  tdd-gate:
+    name: TDD Gate
+    if: ${{ always() }}
+    needs: [compatibility, distribution, language-fixtures, browser-e2e, oci, repository-governance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every TDD job to succeed
+        shell: bash
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$NEEDS_JSON" | jq --exit-status 'all(.[]; .result == "success")'
