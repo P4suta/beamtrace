@@ -50,9 +50,20 @@ $tuiConfig = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtr
 if ($tuiConfig -notmatch 'etui\s*=\s*\{[\s\S]*?ref\s*=\s*"[0-9a-f]{40}"[\s\S]*?\}') {
     throw 'The unreleased etui fix must be pinned to a full commit SHA.'
 }
+$expectedEtuiRepo = 'https://github.com/P4suta/etui.git'
+$expectedEtuiCommit = '99886c6a280281c6a4b80d0d354e979eb60590e5'
+if (-not $tuiConfig.Contains("git = `"$expectedEtuiRepo`"") -or -not $tuiConfig.Contains("ref = `"$expectedEtuiCommit`"")) {
+    throw 'The TUI dependency does not pin the reviewed OTP 27 etui fork commit.'
+}
 $tuiLock = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_tui/manifest.toml')
 if ($tuiLock -notmatch 'name\s*=\s*"etui"[\s\S]*?source\s*=\s*"git"[\s\S]*?commit\s*=\s*"[0-9a-f]{40}"') {
     throw 'The TUI lockfile does not preserve the pinned etui git commit.'
+}
+foreach ($lockPath in @('packages/beamtrace_tui/manifest.toml', 'packages/beamtrace_runtime/manifest.toml')) {
+    $lock = Get-Content -Raw -LiteralPath (Join-Path $repoRoot $lockPath)
+    if (-not $lock.Contains("repo = `"$expectedEtuiRepo`"") -or -not $lock.Contains("commit = `"$expectedEtuiCommit`"")) {
+        throw "The lockfile does not preserve the reviewed etui source: $lockPath"
+    }
 }
 
 $license = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'LICENSE')
