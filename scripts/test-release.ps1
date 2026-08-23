@@ -230,7 +230,6 @@ foreach ($marker in @(
     'runner: ubuntu-latest',
     'runner: ubuntu-24.04-arm',
     'runner: windows-latest',
-    'runner: windows-11-arm',
     'runner: macos-15-intel',
     'runner: macos-15',
     './scripts/package.ps1 -SkipTests',
@@ -244,10 +243,17 @@ foreach ($marker in @(
 if ($candidate.Contains('types: [opened, synchronize, reopened, labeled]')) {
     throw 'Release candidate workflow must not rerun when release-please adds its label.'
 }
+if ($candidate.Contains('runner: windows-11-arm')) {
+    throw 'Release candidate workflow must not label an x64 Erlang runtime as native Windows ARM64.'
+}
 
 $releaseWorkflow = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/workflows/release.yml')
 foreach ($marker in @(
     "tags: ['v*']",
+    'runner: ubuntu-24.04-arm',
+    'runner: windows-latest',
+    'runner: macos-15-intel',
+    'runner: macos-15',
     'name: Require release-please draft',
     '.draft == true and .prerelease == true',
     './scripts/assert-release-version.ps1 -Tag',
@@ -276,6 +282,9 @@ foreach ($marker in @(
 }
 if ($releaseWorkflow.Contains('gh release create') -or $releaseWorkflow.Contains(':latest')) {
     throw 'The tag workflow must use the existing draft and must not publish a mutable latest image.'
+}
+if ($releaseWorkflow.Contains('runner: windows-11-arm')) {
+    throw 'Release workflow must not label an x64 Erlang runtime as native Windows ARM64.'
 }
 $hexPublisher = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'scripts/publish-hex.ps1')
 foreach ($marker in @('metadata.config', 'contents.tar.gz', 'Get-FileHash', 'gleam publish --yes', 'already exists', 'repo.hex.pm/tarballs')) {

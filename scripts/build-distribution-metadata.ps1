@@ -20,8 +20,8 @@ $output = [IO.Path]::GetFullPath($OutputDirectory)
 New-Item -ItemType Directory -Path $output -Force | Out-Null
 
 $archives = @(Get-ChildItem -LiteralPath $output -Filter "beamtrace-$version-*.zip" -File)
-if ($archives.Count -ne 6) {
-    throw "Expected six native archives for $version, found $($archives.Count)."
+if ($archives.Count -ne 5) {
+    throw "Expected five native archives for $version, found $($archives.Count)."
 }
 
 $checksums = [ordered]@{}

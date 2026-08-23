@@ -26,6 +26,7 @@
 
 - publish source-repository-specific Homebrew tap and Scoop bucket metadata when those repositories exist
 - configure the repository-scoped release App and short-lived Hex credential before approving the first release PR
-- review all six native archive candidates on the release PR; merging that PR is the sole publication approval
+- review all five supported native archive candidates on the release PR; merging that PR is the sole publication approval
+- add Windows ARM64 packaging once CI can build or provision a reproducible native Erlang/OTP runtime without relabeling an x64 runtime
 
 Runtime features stay listed as implemented only after an acceptance test exercises the real boundary. A type or pure policy module alone does not mark an integration complete.

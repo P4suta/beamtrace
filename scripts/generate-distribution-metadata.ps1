@@ -50,7 +50,6 @@ $macArm = Artifact 'macos' 'arm64'
 $macX64 = Artifact 'macos' 'x64'
 $linuxArm = Artifact 'linux' 'arm64'
 $linuxX64 = Artifact 'linux' 'x64'
-$windowsArm = Artifact 'windows' 'arm64'
 $windowsX64 = Artifact 'windows' 'x64'
 
 $formula = @"
@@ -102,10 +101,6 @@ $scoop = [ordered]@{
         '64bit' = [ordered]@{
             url = "$base/$windowsX64"
             hash = Digest $windowsX64
-        }
-        arm64 = [ordered]@{
-            url = "$base/$windowsArm"
-            hash = Digest $windowsArm
         }
     }
     bin = @(, @('bin/beamtrace.ps1', 'beamtrace'))

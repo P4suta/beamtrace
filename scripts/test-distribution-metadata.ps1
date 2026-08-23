@@ -16,7 +16,6 @@ try {
         'macos-x64',
         'linux-arm64',
         'linux-x64',
-        'windows-arm64',
         'windows-x64'
     )) {
         $name = "beamtrace-$version-$target.zip"
@@ -59,17 +58,19 @@ try {
     if (
         $scoop.version -ne $version -or
         $scoop.homepage -ne 'https://source.example.test/beamtrace' -or
-        $scoop.architecture.'64bit'.hash -ne $expectedChecksums["beamtrace-$version-windows-x64.zip"] -or
-        $scoop.architecture.arm64.hash -ne $expectedChecksums["beamtrace-$version-windows-arm64.zip"]
+        $scoop.architecture.'64bit'.hash -ne $expectedChecksums["beamtrace-$version-windows-x64.zip"]
     ) {
         throw 'Scoop manifest has incorrect version or hashes.'
+    }
+    if ($scoop.architecture.PSObject.Properties.Name -contains 'arm64') {
+        throw 'Scoop manifest must not claim an unavailable native Windows ARM64 archive.'
     }
     if ($scoop.architecture.'64bit'.url -notmatch '^https://' -or $scoop.bin[0][1] -ne 'beamtrace') {
         throw 'Scoop manifest must use HTTPS and install the beamtrace shim.'
     }
 
     $inventory = Get-Content -Raw -LiteralPath $checksums | ConvertFrom-Json -AsHashtable
-    if ($inventory.Count -ne 6) { throw 'Checksum inventory must contain exactly six native archives.' }
+    if ($inventory.Count -ne 5) { throw 'Checksum inventory must contain exactly five native archives.' }
     foreach ($entry in $expectedChecksums.GetEnumerator()) {
         if ($inventory[$entry.Key] -ne $entry.Value) {
             throw "Checksum inventory differs from the built archive: $($entry.Key)"

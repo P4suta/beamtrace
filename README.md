@@ -111,7 +111,7 @@ CI runs OTP 27–29 on Windows, Linux, and macOS, plus shortname, longname, TLS 
 
 Questions belong in [GitHub Discussions](https://github.com/P4suta/beamtrace/discussions/categories/q-a), confirmed defects use the structured issue forms, and suspected vulnerabilities use a private security advisory. See [SUPPORT.md](SUPPORT.md), [SECURITY.md](SECURITY.md), and [GOVERNANCE.md](GOVERNANCE.md).
 
-Release Please proposes alpha releases from Conventional Commits. Merging its release PR is the publication approval; the resulting protected tag builds six self-contained native OS/architecture archives, publishes `beamtrace_core` to Hex, publishes immutable version and commit tags to GHCR, and attaches Homebrew/Scoop metadata to a GitHub prerelease. Archives contain ERTS, checksums, and SPDX SBOM data; GitHub OIDC artifact attestations record build provenance. See [releasing.md](docs/releasing.md).
+Release Please proposes alpha releases from Conventional Commits. Merging its release PR is the publication approval; the resulting protected tag builds five self-contained native OS/architecture archives, publishes `beamtrace_core` to Hex, publishes immutable version and commit tags to GHCR, and attaches Homebrew/Scoop metadata to a GitHub prerelease. Archives contain ERTS, checksums, and SPDX SBOM data; GitHub OIDC artifact attestations record build provenance. Windows ARM64 is deferred until a reproducible native Erlang/OTP runtime can be provisioned; an x64 runtime is never relabeled as ARM64. See [releasing.md](docs/releasing.md).
 
 ## License
 
