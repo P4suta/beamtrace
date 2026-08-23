@@ -73,8 +73,18 @@ foreach ($rulesetName in @('Protect main', 'Protect release tags')) {
         foreach ($type in @('deletion', 'non_fast_forward', 'required_linear_history', 'required_signatures', 'pull_request', 'required_status_checks')) {
             Assert-Policy ($ruleTypes -contains $type) "Protect main is missing rule: $type"
         }
+        Assert-Policy (@($ruleset.bypass_actors).Count -eq 0) 'Protect main permits a ruleset bypass.'
+        $pullRequestRule = $ruleset.rules | Where-Object { $_.type -eq 'pull_request' } | Select-Object -First 1
+        Assert-Policy (@($pullRequestRule.parameters.allowed_merge_methods).Count -eq 1 -and @($pullRequestRule.parameters.allowed_merge_methods) -contains 'squash') 'Protect main permits a non-squash merge method.'
+        Assert-Policy ($pullRequestRule.parameters.required_approving_review_count -eq 0) 'Protect main requires an unavailable independent reviewer.'
+        Assert-Policy (-not $pullRequestRule.parameters.require_code_owner_review) 'Protect main requires code-owner approval in a solo-maintainer repository.'
+        Assert-Policy (-not $pullRequestRule.parameters.require_last_push_approval) 'Protect main requires a second maintainer after the last push.'
+        Assert-Policy $pullRequestRule.parameters.required_review_thread_resolution 'Protect main permits unresolved review threads.'
         $statusRule = $ruleset.rules | Where-Object { $_.type -eq 'required_status_checks' } | Select-Object -First 1
-        Assert-Policy (@($statusRule.parameters.required_status_checks.context) -contains 'TDD Gate') 'Protect main does not require TDD Gate.'
+        foreach ($requiredCheck in @('TDD Gate', 'Dependency review', 'CodeQL / JavaScript')) {
+            Assert-Policy (@($statusRule.parameters.required_status_checks.context) -contains $requiredCheck) "Protect main does not require check: $requiredCheck"
+        }
+        Assert-Policy $statusRule.parameters.strict_required_status_checks_policy 'Protect main does not require current-base checks.'
     } else {
         foreach ($type in @('deletion', 'non_fast_forward')) {
             Assert-Policy ($ruleTypes -contains $type) "Protect release tags is missing rule: $type"

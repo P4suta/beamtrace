@@ -9,4 +9,4 @@ Decisions favor evidence, bounded impact on observed nodes, explicit uncertainty
 
 Additional maintainers may be invited after sustained, constructive contributions and demonstrated care for the security boundaries. No contribution volume automatically grants access. Repository and release permissions follow least privilege and can be removed when they are no longer needed.
 
-Security reports follow [SECURITY.md](SECURITY.md). Conduct follows [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). The maintainer may use the documented, auditable ruleset bypass only for recovery or when a solo-maintainer review cannot be satisfied; required tests and a pull request still apply.
+Security reports follow [SECURITY.md](SECURITY.md). Conduct follows [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). While BeamTrace has one maintainer, changes still require a pull request, signed commits, resolved review threads, and all required test and security checks, but not an impossible self-approval. The main-branch ruleset has no bypass actor. The approval policy should be raised through a reviewed policy change when a second active maintainer joins.

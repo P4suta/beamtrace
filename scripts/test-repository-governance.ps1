@@ -144,15 +144,39 @@ foreach ($marker in @('package-ecosystem: "github-actions"', 'package-ecosystem:
 $mainRuleset = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/rulesets/main.json') | ConvertFrom-Json
 if ($mainRuleset.name -ne 'Protect main') { throw 'The main ruleset has an unexpected name.' }
 if ($mainRuleset.enforcement -ne 'active') { throw 'The main ruleset is not active.' }
+if (@($mainRuleset.bypass_actors).Count -ne 0) {
+    throw 'The main ruleset must not rely on an administrator bypass.'
+}
 $mainRuleTypes = @($mainRuleset.rules | ForEach-Object { $_.type })
 foreach ($ruleType in @('deletion', 'non_fast_forward', 'required_linear_history', 'required_signatures', 'pull_request', 'required_status_checks')) {
     if ($mainRuleTypes -notcontains $ruleType) {
         throw "The main ruleset is missing rule: $ruleType"
     }
 }
+$pullRequestRule = $mainRuleset.rules | Where-Object { $_.type -eq 'pull_request' } | Select-Object -First 1
+if (@($pullRequestRule.parameters.allowed_merge_methods).Count -ne 1 -or @($pullRequestRule.parameters.allowed_merge_methods) -notcontains 'squash') {
+    throw 'The main ruleset must allow only squash merges.'
+}
+if ($pullRequestRule.parameters.required_approving_review_count -ne 0) {
+    throw 'The solo-maintainer policy must not require an impossible independent approval.'
+}
+if ($pullRequestRule.parameters.require_code_owner_review) {
+    throw 'The solo-maintainer policy must not require the pull request author to approve their own change.'
+}
+if ($pullRequestRule.parameters.require_last_push_approval) {
+    throw 'The solo-maintainer policy must not require a second maintainer after the last push.'
+}
+if (-not $pullRequestRule.parameters.required_review_thread_resolution) {
+    throw 'The main ruleset must require every review thread to be resolved.'
+}
 $statusRule = $mainRuleset.rules | Where-Object { $_.type -eq 'required_status_checks' } | Select-Object -First 1
-if (@($statusRule.parameters.required_status_checks.context) -notcontains 'TDD Gate') {
-    throw 'The main ruleset does not require TDD Gate.'
+foreach ($requiredCheck in @('TDD Gate', 'Dependency review', 'CodeQL / JavaScript')) {
+    if (@($statusRule.parameters.required_status_checks.context) -notcontains $requiredCheck) {
+        throw "The main ruleset does not require security and TDD check: $requiredCheck"
+    }
+}
+if (-not $statusRule.parameters.strict_required_status_checks_policy) {
+    throw 'The main ruleset must test the current base before merge.'
 }
 
 $tagRuleset = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/rulesets/release-tags.json') | ConvertFrom-Json
