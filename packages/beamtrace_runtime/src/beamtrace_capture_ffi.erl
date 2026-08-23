@@ -372,13 +372,13 @@ collect_batches_multi(
                     Raw = raw_events(Batch),
                     HasRoot = lists:any(fun is_root/1, Raw),
                     Seen = SeenRoot orelse HasRoot,
-                    NewIdle = case Seen of
-                        true -> erlang:monotonic_time(millisecond)
-                            + ?DISTRIBUTED_IDLE_AFTER_ROOT_MS;
-                        false -> undefined
-                    end,
                     case replenish_multi_credit(Batch, Prepared, CreditDebt) of
                         {ok, NextDebt} ->
+                            NewIdle = case Seen of
+                                true -> erlang:monotonic_time(millisecond)
+                                    + ?DISTRIBUTED_IDLE_AFTER_ROOT_MS;
+                                false -> undefined
+                            end,
                             collect_batches_multi(
                                 Nodes,
                                 Prepared,
@@ -677,12 +677,13 @@ collect_batches(Node, Agent, CaptureId, Deadline, IdleDeadline, SeenRoot, Acc, C
                     Raw = raw_events(Batch),
                     HasRoot = lists:any(fun is_root/1, Raw),
                     Seen = SeenRoot orelse HasRoot,
-                    NewIdle = case Seen of
-                        true -> erlang:monotonic_time(millisecond) + ?IDLE_AFTER_ROOT_MS;
-                        false -> undefined
-                    end,
                     case replenish_credit(Node, Agent, CreditDebt + 1) of
                         {ok, NextDebt} ->
+                            NewIdle = case Seen of
+                                true -> erlang:monotonic_time(millisecond)
+                                    + ?IDLE_AFTER_ROOT_MS;
+                                false -> undefined
+                            end,
                             collect_batches(
                                 Node,
                                 Agent,
