@@ -161,11 +161,11 @@ start_gated_command([Program | Arguments], Node, Cookie)
                         stderr_to_stdout,
                         use_stdio,
                         {args, [binary_to_list(Arg) || Arg <- GatedArguments]},
-                        {env, [
+                        {env, record_child_environment([
                             {"ERL_AFLAGS", CombinedFlags},
                             {"BEAMTRACE_RECORD_GATE", Gate},
                             {"BEAMTRACE_RECORD_FINISH_GATE", FinishGate}
-                        ]}
+                        ])}
                     ]
                 ),
                 {ok, {gated_command, Port,
@@ -183,6 +183,48 @@ start_gated_command([], _Node, _Cookie) ->
     {error, <<"record command is empty">>};
 start_gated_command(_Command, _Node, _Cookie) ->
     {error, <<"invalid gated command">>}.
+
+record_child_environment(Base) ->
+    case os:getenv("BEAMTRACE_BUNDLED_RUNTIME") of
+        "1" ->
+            Base ++ [
+                restored_parent_environment(
+                    "ERL_ROOTDIR",
+                    "BEAMTRACE_PARENT_ERL_ROOTDIR_SET",
+                    "BEAMTRACE_PARENT_ERL_ROOTDIR"
+                ),
+                restored_parent_environment(
+                    "ROOTDIR",
+                    "BEAMTRACE_PARENT_ROOTDIR_SET",
+                    "BEAMTRACE_PARENT_ROOTDIR"
+                ),
+                restored_parent_environment(
+                    "ERL_LIBS",
+                    "BEAMTRACE_PARENT_ERL_LIBS_SET",
+                    "BEAMTRACE_PARENT_ERL_LIBS"
+                ),
+                {"BEAMTRACE_AGENT_BEAM", false},
+                {"BEAMTRACE_WEB_ROOT", false},
+                {"BEAMTRACE_BUNDLED_RUNTIME", false},
+                {"BEAMTRACE_PARENT_ERL_ROOTDIR_SET", false},
+                {"BEAMTRACE_PARENT_ERL_ROOTDIR", false},
+                {"BEAMTRACE_PARENT_ROOTDIR_SET", false},
+                {"BEAMTRACE_PARENT_ROOTDIR", false},
+                {"BEAMTRACE_PARENT_ERL_LIBS_SET", false},
+                {"BEAMTRACE_PARENT_ERL_LIBS", false}
+            ];
+        _ -> Base
+    end.
+
+restored_parent_environment(Target, SetMarker, ValueMarker) ->
+    case os:getenv(SetMarker) of
+        "1" ->
+            case os:getenv(ValueMarker) of
+                false -> {Target, false};
+                Value -> {Target, Value}
+            end;
+        _ -> {Target, false}
+    end.
 
 release_gated_command({gated_command, Port, Gate, _FinishGate, _HasFinishGate})
         when is_port(Port), is_binary(Gate) ->

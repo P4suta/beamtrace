@@ -163,10 +163,15 @@ try {
         $portProbe.Stop()
         $teamOrigin = "https://127.0.0.1:$teamPort"
         $startInfo = [Diagnostics.ProcessStartInfo]::new()
-        $startInfo.FileName = (Get-Command pwsh).Source
-        $startInfo.ArgumentList.Add('-NoProfile')
-        $startInfo.ArgumentList.Add('-File')
-        $startInfo.ArgumentList.Add((Join-Path $root.FullName 'bin/beamtrace.ps1'))
+        if ($IsWindows) {
+            $startInfo.FileName = (Get-Command pwsh).Source
+            $startInfo.ArgumentList.Add('-NoProfile')
+            $startInfo.ArgumentList.Add('-File')
+            $startInfo.ArgumentList.Add($launcher)
+        }
+        else {
+            $startInfo.FileName = $launcher
+        }
         $startInfo.ArgumentList.Add('serve')
         $startInfo.UseShellExecute = $false
         $startInfo.RedirectStandardOutput = $true

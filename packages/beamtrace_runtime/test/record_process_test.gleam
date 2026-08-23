@@ -4,6 +4,9 @@ import gleam/erlang/process
 import gleam/string
 import gleeunit/should
 
+@external(erlang, "beamtrace_record_process_test_ffi", "packaged_environment_isolated")
+fn packaged_environment_isolated() -> Result(String, String)
+
 pub fn child_beam_is_held_until_the_one_time_gate_is_released_test() {
   let assert Ok(handle) =
     record_process.start(
@@ -46,4 +49,9 @@ pub fn generated_record_cookie_is_bounded_and_flag_safe_test() {
   let assert Ok(cookie) = record_process.ephemeral_cookie()
   string.length(cookie) |> should.equal(48)
   cookie |> string.contains(" ") |> should.be_false()
+}
+
+pub fn packaged_runtime_variables_never_leak_into_record_child_test() {
+  packaged_environment_isolated()
+  |> should.equal(Ok("false|false|false"))
 }

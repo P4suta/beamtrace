@@ -22,6 +22,30 @@ if [ "$runtime_count" -ne 1 ]; then
 fi
 export BEAMTRACE_AGENT_BEAM="$install_root/lib/beamtrace_agent.beam"
 export BEAMTRACE_WEB_ROOT="$install_root/share/beamtrace/web"
+
+export BEAMTRACE_BUNDLED_RUNTIME=1
+if [ "${ERL_ROOTDIR+x}" = x ]; then
+  export BEAMTRACE_PARENT_ERL_ROOTDIR_SET=1
+  export BEAMTRACE_PARENT_ERL_ROOTDIR="$ERL_ROOTDIR"
+else
+  export BEAMTRACE_PARENT_ERL_ROOTDIR_SET=0
+  unset BEAMTRACE_PARENT_ERL_ROOTDIR
+fi
+if [ "${ROOTDIR+x}" = x ]; then
+  export BEAMTRACE_PARENT_ROOTDIR_SET=1
+  export BEAMTRACE_PARENT_ROOTDIR="$ROOTDIR"
+else
+  export BEAMTRACE_PARENT_ROOTDIR_SET=0
+  unset BEAMTRACE_PARENT_ROOTDIR
+fi
+if [ "${ERL_LIBS+x}" = x ]; then
+  export BEAMTRACE_PARENT_ERL_LIBS_SET=1
+  export BEAMTRACE_PARENT_ERL_LIBS="$ERL_LIBS"
+else
+  export BEAMTRACE_PARENT_ERL_LIBS_SET=0
+  unset BEAMTRACE_PARENT_ERL_LIBS
+fi
+
 export ERL_ROOTDIR="$runtime_root"
 export ROOTDIR="$runtime_root"
 if [ -n "${ERL_LIBS:-}" ]; then
