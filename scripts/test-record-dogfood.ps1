@@ -32,8 +32,8 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not compile the record dogfood fixture.' }
 
     $hostName = [Net.Dns]::GetHostName()
-    if ($hostName -notmatch '^[A-Za-z0-9_-]+$') {
-        throw "The local short node hostname is unsafe: $hostName"
+    if ($hostName -notmatch '^[A-Za-z0-9_.-]+$') {
+        throw "The local node hostname is unsafe: $hostName"
     }
     $node = "beamtrace_record_$PID@$hostName"
     $expression = "P=spawn(fun()->beamtrace_agent_fixture:filtered_trigger({allowed,2}) end),R=erlang:monitor(process,P),receive {'DOWN',R,process,P,_}->ok end."

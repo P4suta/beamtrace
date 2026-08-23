@@ -72,5 +72,10 @@ foreach ($marker in @('docker network create', '--network $networkName', 'docker
     }
 }
 
+$recordDogfood = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'test-record-dogfood.ps1')
+if (-not $recordDogfood.Contains("'^[A-Za-z0-9_.-]+$'")) {
+    throw 'Record dogfood must accept a safe fully-qualified macOS runner hostname.'
+}
+
 Write-Host 'Release acceptance passed.'
 exit 0
