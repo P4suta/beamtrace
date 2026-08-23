@@ -6,7 +6,7 @@
     "test:property": "node --test tests/property/*.test.js"
   },
   "devDependencies": {
-    "@axe-core/playwright": "4.10.2",
+    "@axe-core/playwright": "4.13.0",
     "@playwright/test": "1.62.1",
     "fast-check": "4.9.0"
   }
