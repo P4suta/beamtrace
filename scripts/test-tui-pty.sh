@@ -6,21 +6,23 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 temp_dir="$(mktemp -d)"
 transcript="$temp_dir/transcript"
 input="$temp_dir/input"
+output="$temp_dir/output"
 cleanup() {
-  rm -f -- "$transcript" "$input"
+  rm -f -- "$transcript" "$input" "$output"
   rmdir -- "$temp_dir"
 }
 trap cleanup EXIT
 
 mkfifo "$input"
 cd "$repo_root/packages/beamtrace_tui"
-timeout 30s script --quiet --return --command 'gleam run' "$transcript" <"$input" &
+timeout 30s script --quiet --return --command 'gleam run' "$transcript" <"$input" \
+  | tee "$output" &
 script_pid=$!
 exec 3>"$input"
 
 ready=false
 for _ in $(seq 1 300); do
-  if LC_ALL=C grep -a -q 'q quit' "$transcript" 2>/dev/null; then
+  if LC_ALL=C grep -a -q 'q quit' "$output" 2>/dev/null; then
     ready=true
     break
   fi
