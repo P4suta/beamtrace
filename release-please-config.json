@@ -1,0 +1,51 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/v17.6.0/schemas/config.json",
+  "release-type": "simple",
+  "version-file": "version.txt",
+  "initial-version": "0.1.0",
+  "include-v-in-tag": true,
+  "include-component-in-tag": false,
+  "draft": true,
+  "prerelease": true,
+  "force-tag-creation": true,
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": false,
+  "pull-request-title-pattern": "chore${scope}: release${component} ${version}",
+  "changelog-sections": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug Fixes" },
+    { "type": "security", "section": "Security" },
+    { "type": "perf", "section": "Performance" }
+  ],
+  "packages": {
+    ".": {
+      "component": "beamtrace",
+      "package-name": "beamtrace",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "packages/beamtrace_runtime/src/beamtrace_runtime/internal/version.gleam"
+        },
+        { "type": "toml", "path": "packages/beamtrace_core/gleam.toml", "jsonpath": "$.version" },
+        { "type": "toml", "path": "packages/beamtrace_runtime/gleam.toml", "jsonpath": "$.version" },
+        { "type": "toml", "path": "packages/beamtrace_tui/gleam.toml", "jsonpath": "$.version" },
+        { "type": "toml", "path": "packages/beamtrace_web/gleam.toml", "jsonpath": "$.version" },
+        {
+          "type": "toml",
+          "path": "packages/beamtrace_runtime/manifest.toml",
+          "jsonpath": "$.packages[?(@.source.value==\"local\")].version"
+        },
+        {
+          "type": "toml",
+          "path": "packages/beamtrace_tui/manifest.toml",
+          "jsonpath": "$.packages[?(@.source.value==\"local\")].version"
+        },
+        {
+          "type": "toml",
+          "path": "packages/beamtrace_web/manifest.toml",
+          "jsonpath": "$.packages[?(@.source.value==\"local\")].version"
+        }
+      ]
+    }
+  }
+}

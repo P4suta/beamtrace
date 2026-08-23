@@ -6,16 +6,24 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'project-version.ps1')
+$projectVersion = Get-BeamTraceVersion -RepositoryRoot $repoRoot
 $coreRoot = Join-Path $repoRoot 'packages/beamtrace_core'
 $manifest = Join-Path $coreRoot 'gleam.toml'
 $readme = Join-Path $coreRoot 'README.md'
+$license = Join-Path $coreRoot 'LICENSE'
 
 $manifestText = Get-Content -Raw -LiteralPath $manifest
 foreach ($marker in @(
     'name = "beamtrace_core"',
-    'version = "0.1.0"',
+    "version = `"$projectVersion`"",
     'licences = ["Apache-2.0", "MIT"]',
-    'description = "Target-independent causal trace contracts and analysis for BeamTrace"'
+    'description = "Target-independent causal trace contracts and analysis for BeamTrace"',
+    '[repository]',
+    'type = "github"',
+    'user = "P4suta"',
+    'repo = "beamtrace"',
+    'path = "packages/beamtrace_core"'
 )) {
     if (-not $manifestText.Contains($marker)) {
         throw "Hex package metadata is missing: $marker"
@@ -24,8 +32,29 @@ foreach ($marker in @(
 if (-not (Test-Path -LiteralPath $readme -PathType Leaf)) {
     throw 'The Hex package must include a package README.'
 }
+if (-not (Test-Path -LiteralPath $license -PathType Leaf)) {
+    throw 'The Hex package must include its complete dual-licence text.'
+}
+$readmeText = Get-Content -Raw -LiteralPath $readme
+foreach ($marker in @('gleam add beamtrace_core', 'https://hexdocs.pm/beamtrace_core/')) {
+    if (-not $readmeText.Contains($marker)) {
+        throw "The Hex README is missing: $marker"
+    }
+}
+$licenseText = Get-Content -Raw -LiteralPath $license
+foreach ($marker in @('Apache License', 'TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION', 'MIT License', 'Permission is hereby granted')) {
+    if (-not $licenseText.Contains($marker)) {
+        throw "The Hex package licence file is incomplete: $marker"
+    }
+}
+foreach ($relative in @('LICENSES/Apache-2.0.txt', 'LICENSES/MIT.txt')) {
+    $canonical = (Get-Content -Raw -LiteralPath (Join-Path $repoRoot $relative)).Trim()
+    if (-not $licenseText.Contains($canonical)) {
+        throw "The Hex package does not include the complete canonical licence: $relative"
+    }
+}
 
-$tarball = Join-Path $coreRoot 'build/beamtrace_core-0.1.0.tar'
+$tarball = Join-Path $coreRoot "build/beamtrace_core-$projectVersion.tar"
 if ($ContainerBoundary) {
     $mount = "${repoRoot}:/src"
     & docker run --rm --volume $mount --workdir /src/packages/beamtrace_core `
@@ -67,11 +96,19 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not extract the Hex package contents archive.' }
     $contents = @(& tar -tzf (Join-Path $resolvedTemp 'contents.tar.gz'))
     if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the Hex package contents.' }
-    foreach ($required in @('gleam.toml', 'README.md', 'src/beamtrace/types.gleam')) {
+    foreach ($required in @('gleam.toml', 'README.md', 'LICENSE', 'src/beamtrace/types.gleam')) {
         if ($required -notin $contents) { throw "Hex package is missing: $required" }
     }
-    if ($contents | Where-Object { $_ -match '(^|/)test/' -or $_ -match '(^|/)build/' }) {
-        throw 'Hex package includes test or build files.'
+    if ($contents | Where-Object { $_ -match '(^|/)(test|build)/' -or $_ -match '(^|/)(manifest\.toml|\.github)(/|$)' }) {
+        throw 'Hex package includes test, build, lockfile, or repository-automation files.'
+    }
+    & tar -xf $tarball -C $resolvedTemp metadata.config
+    if ($LASTEXITCODE -ne 0) { throw 'Could not extract Hex package metadata.' }
+    $metadata = Get-Content -Raw -LiteralPath (Join-Path $resolvedTemp 'metadata.config')
+    foreach ($marker in @('https://github.com/P4suta/beamtrace', 'Apache-2.0', 'MIT')) {
+        if (-not $metadata.Contains($marker)) {
+            throw "Hex tarball metadata is missing: $marker"
+        }
     }
 }
 finally {

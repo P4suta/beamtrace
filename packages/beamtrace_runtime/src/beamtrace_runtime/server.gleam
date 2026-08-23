@@ -5,6 +5,7 @@ import beamtrace_runtime/audit_store
 import beamtrace_runtime/blob_store
 import beamtrace_runtime/capture_session
 import beamtrace_runtime/enrollment_store
+import beamtrace_runtime/internal/version as runtime_version
 import beamtrace_runtime/local_auth
 import beamtrace_runtime/oidc_flow
 import beamtrace_runtime/relay_archive
@@ -98,7 +99,7 @@ pub fn new_local(
   let #(auth_store, bootstrap_token) = local_auth.new(60_000)
   let context =
     api.Context(
-      tool_version: "0.1.0",
+      tool_version: runtime_version.current,
       mode: api.Local,
       static_root: static_root,
       local_auth: Some(auth_store),
@@ -229,7 +230,7 @@ pub fn new_team(
     )
   let context =
     api.Context(
-      tool_version: "0.1.0",
+      tool_version: runtime_version.current,
       mode: api.Team,
       static_root: static_root,
       local_auth: None,

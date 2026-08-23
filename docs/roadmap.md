@@ -25,7 +25,7 @@
 ## Post-alpha release operations
 
 - publish source-repository-specific Homebrew tap and Scoop bucket metadata when those repositories exist
-- opt in to Hex registry publication for `beamtrace_core` after reserving release credentials
-- run the protected tag workflow and review all six native archive attestations before publishing `v0.1.0`
+- configure the repository-scoped release App and short-lived Hex credential before approving the first release PR
+- review all six native archive candidates on the release PR; merging that PR is the sole publication approval
 
 Runtime features stay listed as implemented only after an acceptance test exercises the real boundary. A type or pure policy module alone does not mark an integration complete.

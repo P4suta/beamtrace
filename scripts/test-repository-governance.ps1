@@ -15,15 +15,22 @@ $requiredFiles = @(
     '.github/pull_request_template.md',
     '.github/dependabot.yml',
     '.github/workflows/security.yml',
+    '.github/workflows/release-please.yml',
+    '.github/workflows/release-candidate.yml',
     '.github/rulesets/main.json',
     '.github/rulesets/release-tags.json',
     'docs/github-governance.md',
+    'docs/releasing.md',
     'GOVERNANCE.md',
     'package.json',
     'package-lock.json',
     'SUPPORT.md',
     'scripts/audit-github.ps1',
     'scripts/configure-github.ps1',
+    'release-please-config.json',
+    '.release-please-manifest.json',
+    'version.txt',
+    'packages/beamtrace_core/LICENSE',
     'packages/beamtrace_core/test/dag_property_test.gleam',
     'tests/property/page_loader.test.js'
 )
@@ -77,6 +84,23 @@ if (-not $webAcceptance.Contains('npm run test:property')) {
 $coreConfig = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_core/gleam.toml')
 if (-not $coreConfig.Contains('qcheck = "1.0.4"')) {
     throw 'qcheck must be an exact core dev dependency for reproducible property tests.'
+}
+foreach ($marker in @('[repository]', 'type = "github"', 'user = "P4suta"', 'repo = "beamtrace"', 'path = "packages/beamtrace_core"')) {
+    if (-not $coreConfig.Contains($marker)) {
+        throw "The publishable core metadata is missing: $marker"
+    }
+}
+$coreLicense = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_core/LICENSE')
+foreach ($marker in @('Apache License', 'TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION', 'MIT License', 'Permission is hereby granted')) {
+    if (-not $coreLicense.Contains($marker)) {
+        throw "The publishable core licence file is incomplete: $marker"
+    }
+}
+foreach ($relative in @('LICENSES/Apache-2.0.txt', 'LICENSES/MIT.txt')) {
+    $canonical = (Get-Content -Raw -LiteralPath (Join-Path $repoRoot $relative)).Trim()
+    if (-not $coreLicense.Contains($canonical)) {
+        throw "The publishable core package does not contain the canonical licence: $relative"
+    }
 }
 $coreLock = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_core/manifest.toml')
 if (-not $coreLock.Contains('name = "qcheck", version = "1.0.4"')) {
@@ -165,9 +189,12 @@ foreach ($marker in @('* @P4suta', '/.github/ @P4suta', '/SECURITY.md @P4suta'))
 $ci = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/workflows/ci.yml')
 foreach ($marker in @(
     'name: TDD Gate',
+    'name: Conventional pull request title',
+    'Pull request title must use type(scope): subject',
     'if: ${{ always() }}',
-    'needs: [compatibility, distribution, language-fixtures, browser-e2e, oci, s3-compatible, repository-governance]',
+    'needs: [pull-request-title, compatibility, distribution, language-fixtures, browser-e2e, oci, s3-compatible, repository-governance]',
     './scripts/test-s3-dogfood.ps1',
+    './scripts/test-release.ps1 -ValidateUpstreamSchema',
     './scripts/test-repository-governance.ps1'
 )) {
     if (-not $ci.Contains($marker)) {
@@ -191,6 +218,24 @@ foreach ($marker in @(
 $release = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/workflows/release.yml')
 if (-not $release.Contains('environment: release')) {
     throw 'The publishing job is not protected by the release environment.'
+}
+$releasePlease = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/workflows/release-please.yml')
+if (-not $releasePlease.Contains('environment: release-automation')) {
+    throw 'Release Please is not protected by the main-only automation environment.'
+}
+$candidate = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/workflows/release-candidate.yml')
+if (
+    -not $candidate.Contains('name: Release Candidate Gate') -or
+    -not $candidate.Contains("'autorelease: pending'") -or
+    -not $candidate.Contains("'release-please--branches--'")
+) {
+    throw 'Release PR artifact generation is not guarded by its candidate gate.'
+}
+$configure = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'scripts/configure-github.ps1')
+foreach ($marker in @('googleapis/release-please-action@*', 'environments/release-automation/variables', 'RELEASE_PLEASE_APP_CLIENT_ID')) {
+    if (-not $configure.Contains($marker)) {
+        throw "Remote release governance configuration is missing: $marker"
+    }
 }
 
 $dependabot = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/dependabot.yml')
@@ -229,7 +274,7 @@ if (-not $pullRequestRule.parameters.required_review_thread_resolution) {
     throw 'The main ruleset must require every review thread to be resolved.'
 }
 $statusRule = $mainRuleset.rules | Where-Object { $_.type -eq 'required_status_checks' } | Select-Object -First 1
-foreach ($requiredCheck in @('TDD Gate', 'Dependency review', 'CodeQL / JavaScript')) {
+foreach ($requiredCheck in @('TDD Gate', 'Release Candidate Gate', 'Dependency review', 'CodeQL / JavaScript')) {
     if (@($statusRule.parameters.required_status_checks.context) -notcontains $requiredCheck) {
         throw "The main ruleset does not require security and TDD check: $requiredCheck"
     }

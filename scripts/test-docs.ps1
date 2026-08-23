@@ -11,7 +11,8 @@ $expectations = [ordered]@{
         'Admin-only `/api/v1/audit`',
         'outbound relay WebSocket',
         'separately authorized bounded raw capture',
-        'Native release archives include ERTS'
+        'Native release archives include ERTS',
+        'Merging its release PR is the publication approval'
     )
     'docs/roadmap.md' = @(
         '## Post-alpha release operations',
@@ -34,9 +35,12 @@ $expectations = [ordered]@{
         './scripts/test-oci.ps1 -Build',
         './scripts/test-release.ps1'
     )
-    'CHANGELOG.md' = @(
-        'PID-independent multi-run statistics',
-        'GitHub OIDC artifact attestations'
+    'docs/releasing.md' = @(
+        'release-automation',
+        'RELEASE_PLEASE_APP_CLIENT_ID',
+        'HEXPM_API_KEY',
+        'Merging a release pull request is the sole human approval',
+        'The workflow never uses Hex `--replace`'
     )
 }
 
@@ -47,6 +51,12 @@ foreach ($entry in $expectations.GetEnumerator()) {
             throw "$($entry.Key) is missing documentation marker: $marker"
         }
     }
+}
+
+$releaseManifest = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.release-please-manifest.json') | ConvertFrom-Json
+$changelog = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'CHANGELOG.md')
+if (@($releaseManifest.PSObject.Properties).Count -eq 0 -and $changelog.Length -ne 0) {
+    throw 'The changelog must remain empty in the release-please bootstrap state.'
 }
 
 $readme = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'README.md')

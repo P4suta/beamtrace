@@ -3,6 +3,15 @@ version = "0.1.0"
 gleam = ">= 1.18.0 and < 2.0.0"
 licences = ["Apache-2.0", "MIT"]
 description = "Target-independent causal trace contracts and analysis for BeamTrace"
+links = [
+  { title = "Generated documentation", href = "https://hexdocs.pm/beamtrace_core/" },
+]
+
+[repository]
+type = "github"
+user = "P4suta"
+repo = "beamtrace"
+path = "packages/beamtrace_core"
 
 [dependencies]
 gleam_stdlib = ">= 0.70.0 and < 2.0.0"

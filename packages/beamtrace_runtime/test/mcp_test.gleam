@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace/codec
 import beamtrace/types
+import beamtrace_runtime
 import beamtrace_runtime/mcp
 import beamtrace_runtime/storage
 import gleam/option.{None, Some}
@@ -18,6 +19,9 @@ pub fn legacy_initialize_and_modern_discover_are_both_supported_test() {
   |> string.contains("\"protocolVersion\":\"2025-11-25\"")
   |> should.be_true()
   legacy |> string.contains("\"tools\":{}") |> should.be_true()
+  legacy
+  |> string.contains("\"version\":\"" <> beamtrace_runtime.version <> "\"")
+  |> should.be_true()
 
   let assert Some(modern) =
     mcp.handle(

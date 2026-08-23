@@ -4,6 +4,8 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'project-version.ps1')
+$projectVersion = Get-BeamTraceVersion -RepositoryRoot $repoRoot
 
 function Remove-PackageTestDirectory {
     param([Parameter(Mandatory)][string]$Path)
@@ -140,7 +142,7 @@ try {
             Join-Path $root.FullName 'bin/beamtrace'
         }
         $version = (& $launcher version | Out-String)
-        if ($LASTEXITCODE -ne 0 -or $version -notmatch 'beamtrace 0\.1\.0') {
+        if ($LASTEXITCODE -ne 0 -or $version -notmatch ([regex]::Escape("beamtrace $projectVersion"))) {
             throw 'Self-contained package version smoke test failed without a host Erlang runtime.'
         }
         $doctor = (& $launcher doctor | Out-String)

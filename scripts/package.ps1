@@ -30,10 +30,8 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $agentBeam = & (Join-Path $PSScriptRoot 'build-agent.ps1')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-$runtimeToml = Join-Path $repoRoot 'packages/beamtrace_runtime/gleam.toml'
-$versionMatch = Select-String -LiteralPath $runtimeToml -Pattern '^version = "([^"]+)"$' | Select-Object -First 1
-if ($null -eq $versionMatch) { throw 'Could not determine the BeamTrace version.' }
-$version = $versionMatch.Matches[0].Groups[1].Value
+. (Join-Path $PSScriptRoot 'project-version.ps1')
+$version = Get-BeamTraceVersion -RepositoryRoot $repoRoot
 
 if ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop') { $platform = 'windows' }
 elseif ($IsMacOS) { $platform = 'macos' }

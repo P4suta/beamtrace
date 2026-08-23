@@ -2,7 +2,7 @@
 -module(beamtrace_websocket_client_ffi).
 
 -export([
-    connect/2,
+    connect/3,
     send_text/2,
     receive_text/2,
     close/1,
@@ -17,16 +17,22 @@
 -define(MAX_HEADER_BYTES, 16384).
 -define(WEBSOCKET_GUID, <<"258EAFA5-E914-47DA-95CA-C5AB0DC85B11">>).
 
-connect(Url, Hello) when is_binary(Url), is_binary(Hello),
-                         byte_size(Hello) =< ?MAX_HEADER_BYTES ->
-    case parse_wss_url(Url) of
-        {ok, {Host, Port, Path, HostHeader}} ->
-            connect_wss(Host, Port, Path, HostHeader, Hello);
-        Error -> Error
+connect(Url, Hello, UserAgent)
+        when is_binary(Url), is_binary(Hello), is_binary(UserAgent),
+             byte_size(Hello) =< ?MAX_HEADER_BYTES,
+             byte_size(UserAgent) > 0, byte_size(UserAgent) =< 256 ->
+    case valid_user_agent(UserAgent) of
+        true ->
+            case parse_wss_url(Url) of
+                {ok, {Host, Port, Path, HostHeader}} ->
+                    connect_wss(Host, Port, Path, HostHeader, Hello, UserAgent);
+                Error -> Error
+            end;
+        false -> {error, <<"invalid_user_agent">>}
     end;
-connect(_Url, _Hello) -> {error, <<"invalid_channel_arguments">>}.
+connect(_Url, _Hello, _UserAgent) -> {error, <<"invalid_channel_arguments">>}.
 
-connect_wss(Host, Port, Path, HostHeader, Hello) ->
+connect_wss(Host, Port, Path, HostHeader, Hello, UserAgent) ->
     try
         {ok, _} = application:ensure_all_started(ssl),
         Options = [
@@ -43,21 +49,22 @@ connect_wss(Host, Port, Path, HostHeader, Hello) ->
             {mode, binary}
         ],
         case ssl:connect(binary_to_list(Host), Port, Options, 10000) of
-            {ok, Socket} -> websocket_upgrade(Socket, Path, HostHeader, Hello);
+            {ok, Socket} ->
+                websocket_upgrade(Socket, Path, HostHeader, Hello, UserAgent);
             {error, Reason} -> {error, reason_binary(Reason)}
         end
     catch
         _Class:CatchReason -> {error, reason_binary(CatchReason)}
     end.
 
-websocket_upgrade(Socket, Path, HostHeader, Hello) ->
+websocket_upgrade(Socket, Path, HostHeader, Hello, UserAgent) ->
     Key = base64:encode(crypto:strong_rand_bytes(16)),
     Request = [
         <<"GET ">>, Path, <<" HTTP/1.1\r\nHost: ">>, HostHeader,
         <<"\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n">>,
         <<"Sec-WebSocket-Key: ">>, Key,
-        <<"\r\nSec-WebSocket-Version: 13\r\n">>,
-        <<"User-Agent: beamtrace-relay/0.1.0\r\n\r\n">>
+        <<"\r\nSec-WebSocket-Version: 13\r\nUser-Agent: ">>, UserAgent,
+        <<"\r\n\r\n">>
     ],
     case ssl:send(Socket, Request) of
         ok ->
@@ -83,6 +90,10 @@ websocket_upgrade(Socket, Path, HostHeader, Hello) ->
             _ = ssl:close(Socket),
             {error, reason_binary(Reason)}
     end.
+
+valid_user_agent(UserAgent) ->
+    binary:match(UserAgent, <<"\r">>) =:= nomatch andalso
+        binary:match(UserAgent, <<"\n">>) =:= nomatch.
 
 read_upgrade(Socket, Key) ->
     case ssl:recv(Socket, 0, 10000) of

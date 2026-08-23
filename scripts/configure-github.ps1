@@ -3,7 +3,9 @@
 param(
     [Parameter(Mandatory)]
     [ValidatePattern('^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')]
-    [string] $Repository
+    [string] $Repository,
+    [ValidatePattern('^[A-Za-z0-9_-]+$')]
+    [string] $ReleasePleaseAppClientId
 )
 
 $ErrorActionPreference = 'Stop'
@@ -99,7 +101,7 @@ Invoke-GitHubApi -Method PUT -Endpoint "repos/$Repository/actions/permissions" -
 Invoke-GitHubApi -Method PUT -Endpoint "repos/$Repository/actions/permissions/selected-actions" -Body @{
     github_owned_allowed = $true
     verified_allowed = $false
-    patterns_allowed = @('erlef/setup-beam@*', 'ossf/scorecard-action@*')
+    patterns_allowed = @('erlef/setup-beam@*', 'googleapis/release-please-action@*', 'ossf/scorecard-action@*')
 } | Out-Null
 Invoke-GitHubApi -Method PUT -Endpoint "repos/$Repository/actions/permissions/workflow" -Body @{
     default_workflow_permissions = 'read'
@@ -112,8 +114,6 @@ Invoke-GitHubApi -Method PUT -Endpoint "repos/$Repository/private-vulnerability-
 
 $releaseEnvironment = [ordered]@{
     wait_timer = 0
-    prevent_self_review = $false
-    reviewers = @()
     deployment_branch_policy = [ordered]@{
         protected_branches = $false
         custom_branch_policies = $true
@@ -127,6 +127,40 @@ if ($null -eq $releaseTagPolicy) {
         name = 'v*'
         type = 'tag'
     } | Out-Null
+}
+
+$automationEnvironment = [ordered]@{
+    wait_timer = 0
+    deployment_branch_policy = [ordered]@{
+        protected_branches = $false
+        custom_branch_policies = $true
+    }
+}
+Invoke-GitHubApi -Method PUT -Endpoint "repos/$Repository/environments/release-automation" -Body $automationEnvironment | Out-Null
+$automationPolicies = Invoke-GitHubApi -Method GET -Endpoint "repos/$Repository/environments/release-automation/deployment-branch-policies"
+$mainBranchPolicy = @($automationPolicies.branch_policies) | Where-Object { $_.name -eq 'main' -and $_.type -eq 'branch' } | Select-Object -First 1
+if ($null -eq $mainBranchPolicy) {
+    Invoke-GitHubApi -Method POST -Endpoint "repos/$Repository/environments/release-automation/deployment-branch-policies" -Body @{
+        name = 'main'
+        type = 'branch'
+    } | Out-Null
+}
+
+if (-not [string]::IsNullOrWhiteSpace($ReleasePleaseAppClientId)) {
+    $variables = Invoke-GitHubApi -Method GET -Endpoint "repos/$Repository/environments/release-automation/variables?per_page=100"
+    $existingVariable = @($variables.variables) | Where-Object { $_.name -eq 'RELEASE_PLEASE_APP_CLIENT_ID' } | Select-Object -First 1
+    if ($null -eq $existingVariable) {
+        Invoke-GitHubApi -Method POST -Endpoint "repos/$Repository/environments/release-automation/variables" -Body @{
+            name = 'RELEASE_PLEASE_APP_CLIENT_ID'
+            value = $ReleasePleaseAppClientId
+        } | Out-Null
+    }
+    else {
+        Invoke-GitHubApi -Method PATCH -Endpoint "repos/$Repository/environments/release-automation/variables/RELEASE_PLEASE_APP_CLIENT_ID" -Body @{
+            name = 'RELEASE_PLEASE_APP_CLIENT_ID'
+            value = $ReleasePleaseAppClientId
+        } | Out-Null
+    }
 }
 
 $labels = @(
@@ -147,6 +181,8 @@ $labels = @(
     @{ name = 'priority: low'; color = 'c5def5'; description = 'Useful but not time-sensitive' },
     @{ name = 'status: blocked'; color = '000000'; description = 'Waiting on an external decision or dependency' },
     @{ name = 'status: needs-reproduction'; color = 'e4e669'; description = 'Needs a minimal sanitized reproduction' },
+    @{ name = 'autorelease: pending'; color = 'ededed'; description = 'Release Please pull request awaiting merge' },
+    @{ name = 'autorelease: tagged'; color = 'ededed'; description = 'Release Please pull request has created its tag' },
     @{ name = 'help wanted'; color = '008672'; description = 'Maintainer welcomes a focused contribution' },
     @{ name = 'good first issue'; color = '7057ff'; description = 'Scoped for a first contribution' }
 )

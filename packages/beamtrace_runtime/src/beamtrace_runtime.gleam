@@ -10,6 +10,7 @@ import beamtrace_runtime/capture_session
 import beamtrace_runtime/cli
 import beamtrace_runtime/command
 import beamtrace_runtime/export
+import beamtrace_runtime/internal/version as runtime_version
 import beamtrace_runtime/local_auth
 import beamtrace_runtime/mcp
 import beamtrace_runtime/raw_grant_file
@@ -27,7 +28,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 
-pub const version = "0.1.0"
+pub const version = runtime_version.current
 
 pub fn main() {
   let arguments = argv.load().arguments
