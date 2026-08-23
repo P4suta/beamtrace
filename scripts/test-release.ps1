@@ -260,6 +260,9 @@ foreach ($marker in @(
     'runner: macos-15-intel',
     'runner: macos-15',
     'name: Require release-please draft',
+    'gh api --paginate --slurp',
+    'releases?per_page=100',
+    'if length == 1 then .[0]',
     '.draft == true and .prerelease == true',
     './scripts/assert-release-version.ps1 -Tag',
     './scripts/package.ps1 -SkipTests',
@@ -284,6 +287,16 @@ foreach ($marker in @(
     'actions/attest@'
 )) {
     if (-not $releaseWorkflow.Contains($marker)) { throw "Release workflow is missing: $marker" }
+}
+if ($releaseWorkflow.Contains('releases/tags/')) {
+    throw 'The release workflow must list releases because GitHub excludes drafts from the published-release tag endpoint.'
+}
+$draftReleaseListCount = [regex]::Matches(
+    $releaseWorkflow,
+    [regex]::Escape('gh api --paginate --slurp')
+).Count
+if ($draftReleaseListCount -ne 2) {
+    throw "Expected both the draft guard and final publisher to list draft releases; found $draftReleaseListCount lookups."
 }
 if ($releaseWorkflow -notmatch '(?ms)^  draft-release:.*?^    permissions:\s*\r?\n(?:\s*#.*\r?\n)?      contents: write\s*$') {
     throw 'The draft release guard needs push-equivalent Contents access to see GitHub draft releases.'

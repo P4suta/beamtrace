@@ -49,11 +49,13 @@ jobs:
             exit 1
           fi
           for _attempt in {1..12}; do
-            if release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" 2>/dev/null)" && \
-              jq --exit-status \
-                --arg tag "$RELEASE_TAG" \
-                '.tag_name == $tag and .draft == true and .prerelease == true' \
-                <<<"$release"; then
+            if gh api --paginate --slurp \
+              "repos/$GITHUB_REPOSITORY/releases?per_page=100" 2>/dev/null |
+              jq --exit-status --arg tag "$RELEASE_TAG" '
+                flatten
+                | map(select(.tag_name == $tag and .draft == true and .prerelease == true))
+                | if length == 1 then .[0] else empty end
+              ' >/dev/null; then
               exit 0
             fi
             sleep 5
@@ -445,8 +447,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          release="$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG")"
-          release_id="$(jq --exit-status --raw-output 'select(.draft == true and .prerelease == true) | .id' <<<"$release")"
+          release_id="$(
+            gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
+              jq --exit-status --raw-output --arg tag "$RELEASE_TAG" '
+                flatten
+                | map(select(.tag_name == $tag and .draft == true and .prerelease == true))
+                | if length == 1 then .[0].id else empty end
+              '
+          )"
           [[ "$(find dist -maxdepth 1 -type f -name 'beamtrace-*.zip' | wc -l)" -eq 5 ]]
           [[ "$(find dist -maxdepth 1 -type f -name 'beamtrace-*.zip.sha256' | wc -l)" -eq 5 ]]
           [[ "$(find dist -maxdepth 1 -type f -name 'beamtrace_core-*.tar' | wc -l)" -eq 1 ]]
