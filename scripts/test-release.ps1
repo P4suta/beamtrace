@@ -375,51 +375,57 @@ foreach ($marker in @(
     }
 }
 
-$metadataTestRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot ".build/hex-metadata-compare-test-$PID"))
-if (-not $metadataTestRoot.StartsWith($resolvedBuild, [StringComparison]::OrdinalIgnoreCase)) {
-    throw "Unsafe Hex metadata test directory: $metadataTestRoot"
+$escriptCommand = Get-Command escript -ErrorAction SilentlyContinue
+if ($null -eq $escriptCommand) {
+    Write-Host 'Skipping executable Hex metadata comparison because Erlang is not installed in this governance-only environment.'
 }
-if (Test-Path -LiteralPath $metadataTestRoot) {
-    Remove-Item -LiteralPath $metadataTestRoot -Recurse -Force
-}
-New-Item -ItemType Directory -Path $metadataTestRoot -Force | Out-Null
-try {
-    $expectedMetadata = Join-Path $metadataTestRoot 'expected.config'
-    $equivalentMetadata = Join-Path $metadataTestRoot 'equivalent.config'
-    $changedMetadata = Join-Path $metadataTestRoot 'changed.config'
-    @(
-        '{<<"name">>, <<"beamtrace_core">>}.'
-        '{<<"requirements">>, ['
-        '  {<<"gleam_stdlib">>, [{<<"app">>, <<"gleam_stdlib">>}, {<<"optional">>, false}, {<<"requirement">>, <<">= 0.70.0 and < 2.0.0">>}]},'
-        '  {<<"gleam_json">>, [{<<"app">>, <<"gleam_json">>}, {<<"optional">>, false}, {<<"requirement">>, <<">= 2.3.0 and < 4.0.0">>}]}'
-        ']}.'
-        '{<<"files">>, [<<"LICENSE">>, <<"README.md">>]}.'
-    ) -join "`n" | Set-Content -LiteralPath $expectedMetadata -Encoding utf8NoBOM
-    @(
-        '{<<"files">>, [<<"README.md">>, <<"LICENSE">>]}.'
-        '{<<"requirements">>, ['
-        '  {<<"gleam_json">>, [{<<"requirement">>, <<">= 2.3.0 and < 4.0.0">>}, {<<"app">>, <<"gleam_json">>}, {<<"optional">>, false}]},'
-        '  {<<"gleam_stdlib">>, [{<<"requirement">>, <<">= 0.70.0 and < 2.0.0">>}, {<<"optional">>, false}, {<<"app">>, <<"gleam_stdlib">>}]}'
-        ']}.'
-        '{<<"name">>, <<"beamtrace_core">>}.'
-    ) -join "`n" | Set-Content -LiteralPath $equivalentMetadata -Encoding utf8NoBOM
-    (Get-Content -Raw -LiteralPath $equivalentMetadata).Replace(
-        '>= 0.70.0 and < 2.0.0',
-        '>= 0.71.0 and < 2.0.0'
-    ) | Set-Content -LiteralPath $changedMetadata -Encoding utf8NoBOM
-
-    & escript $metadataComparator $expectedMetadata $equivalentMetadata
-    if ($LASTEXITCODE -ne 0) {
-        throw 'The Hex metadata comparator rejected reordered equivalent metadata.'
+else {
+    $metadataTestRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot ".build/hex-metadata-compare-test-$PID"))
+    if (-not $metadataTestRoot.StartsWith($resolvedBuild, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Unsafe Hex metadata test directory: $metadataTestRoot"
     }
-    & escript $metadataComparator $expectedMetadata $changedMetadata *> $null
-    if ($LASTEXITCODE -eq 0) {
-        throw 'The Hex metadata comparator accepted a changed dependency requirement.'
-    }
-}
-finally {
     if (Test-Path -LiteralPath $metadataTestRoot) {
         Remove-Item -LiteralPath $metadataTestRoot -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $metadataTestRoot -Force | Out-Null
+    try {
+        $expectedMetadata = Join-Path $metadataTestRoot 'expected.config'
+        $equivalentMetadata = Join-Path $metadataTestRoot 'equivalent.config'
+        $changedMetadata = Join-Path $metadataTestRoot 'changed.config'
+        @(
+            '{<<"name">>, <<"beamtrace_core">>}.'
+            '{<<"requirements">>, ['
+            '  {<<"gleam_stdlib">>, [{<<"app">>, <<"gleam_stdlib">>}, {<<"optional">>, false}, {<<"requirement">>, <<">= 0.70.0 and < 2.0.0">>}]},'
+            '  {<<"gleam_json">>, [{<<"app">>, <<"gleam_json">>}, {<<"optional">>, false}, {<<"requirement">>, <<">= 2.3.0 and < 4.0.0">>}]}'
+            ']}.'
+            '{<<"files">>, [<<"LICENSE">>, <<"README.md">>]}.'
+        ) -join "`n" | Set-Content -LiteralPath $expectedMetadata -Encoding utf8NoBOM
+        @(
+            '{<<"files">>, [<<"README.md">>, <<"LICENSE">>]}.'
+            '{<<"requirements">>, ['
+            '  {<<"gleam_json">>, [{<<"requirement">>, <<">= 2.3.0 and < 4.0.0">>}, {<<"app">>, <<"gleam_json">>}, {<<"optional">>, false}]},'
+            '  {<<"gleam_stdlib">>, [{<<"requirement">>, <<">= 0.70.0 and < 2.0.0">>}, {<<"optional">>, false}, {<<"app">>, <<"gleam_stdlib">>}]}'
+            ']}.'
+            '{<<"name">>, <<"beamtrace_core">>}.'
+        ) -join "`n" | Set-Content -LiteralPath $equivalentMetadata -Encoding utf8NoBOM
+        (Get-Content -Raw -LiteralPath $equivalentMetadata).Replace(
+            '>= 0.70.0 and < 2.0.0',
+            '>= 0.71.0 and < 2.0.0'
+        ) | Set-Content -LiteralPath $changedMetadata -Encoding utf8NoBOM
+
+        & escript $metadataComparator $expectedMetadata $equivalentMetadata
+        if ($LASTEXITCODE -ne 0) {
+            throw 'The Hex metadata comparator rejected reordered equivalent metadata.'
+        }
+        & escript $metadataComparator $expectedMetadata $changedMetadata *> $null
+        if ($LASTEXITCODE -eq 0) {
+            throw 'The Hex metadata comparator accepted a changed dependency requirement.'
+        }
+    }
+    finally {
+        if (Test-Path -LiteralPath $metadataTestRoot) {
+            Remove-Item -LiteralPath $metadataTestRoot -Recurse -Force
+        }
     }
 }
 
