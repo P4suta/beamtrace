@@ -103,7 +103,10 @@ def main() -> int:
         if not wait_for_marker(process, master, output, READY_MARKER, 30):
             return fail("TUI did not become ready within 30 seconds.", output)
 
-        os.write(master, b"q")
+        # The initial screen intentionally focuses the node-name field, where
+        # printable "q" is valid input. Alt-q is the global quit chord and is
+        # sent as one terminal sequence so its decoder cannot split the keys.
+        os.write(master, b"\x1bq")
         deadline = time.monotonic() + 10
         while process.poll() is None and time.monotonic() < deadline:
             pump(master, output, 0.2)

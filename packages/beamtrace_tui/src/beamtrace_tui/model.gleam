@@ -300,12 +300,16 @@ pub fn key_to_message(key: String) -> Option(Msg) {
 /// key handling; those operations are emitted as explicit model messages.
 pub fn handle_key(model: Model, raw_key: String) -> Model {
   let key = keys.match(raw_key)
-  case model.focus {
-    AttachFocus -> handle_attach_key(model, key)
-    ArmFocus -> handle_arm_key(model, key)
-    SearchFocus -> handle_search_key(model, key)
-    SaveFocus -> handle_save_key(model, key)
-    NormalFocus -> handle_normal_key(model, key)
+  case key {
+    keys.Alt("q") -> Model(..model, quit: True)
+    _ ->
+      case model.focus {
+        AttachFocus -> handle_attach_key(model, key)
+        ArmFocus -> handle_arm_key(model, key)
+        SearchFocus -> handle_search_key(model, key)
+        SaveFocus -> handle_save_key(model, key)
+        NormalFocus -> handle_normal_key(model, key)
+      }
   }
 }
 

@@ -84,6 +84,15 @@ pub fn quit_is_explicit_and_never_bound_to_process_mutation_test() {
   state.quit |> should.be_true()
 }
 
+pub fn alt_q_is_global_but_plain_q_remains_valid_focused_input_test() {
+  let focused = model.init([]) |> model.handle_key("q")
+  focused.node_input |> should.equal("q")
+  focused.quit |> should.be_false()
+
+  let quitting = model.init([]) |> model.handle_key("alt+q")
+  quitting.quit |> should.be_true()
+}
+
 pub fn offline_archive_is_not_misrepresented_as_a_live_connection_test() {
   let state = model.open_archive(events(), Some("app@localhost"))
   state.node |> should.equal(Some("app@localhost"))
