@@ -470,7 +470,7 @@ jobs:
           [[ "$(find dist -maxdepth 1 -type f -name 'beamtrace-*.zip' | wc -l)" -eq 5 ]]
           [[ "$(find dist -maxdepth 1 -type f -name 'beamtrace-*.zip.sha256' | wc -l)" -eq 5 ]]
           [[ "$(find dist -maxdepth 1 -type f -name 'beamtrace_core-*.tar' | wc -l)" -eq 1 ]]
-          gh release upload "$RELEASE_TAG" dist/* --clobber
+          gh release upload "$RELEASE_TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
             -F draft=false \
             -F prerelease=true \

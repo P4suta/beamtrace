@@ -282,7 +282,7 @@ foreach ($marker in @(
     'Could not safely determine whether immutable image tag exists',
     'version_digest',
     './scripts/verify-published-release.ps1',
-    'gh release upload "$RELEASE_TAG" dist/* --clobber',
+    'gh release upload "$RELEASE_TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"',
     '-F draft=false',
     '-F prerelease=true',
     '-f name="BeamTrace $RELEASE_TAG"',
