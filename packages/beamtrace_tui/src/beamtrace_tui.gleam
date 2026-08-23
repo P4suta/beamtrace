@@ -34,6 +34,7 @@ pub fn run_remote(server_url: String) {
 }
 
 fn run_model(initial: model.Model) {
+  install_otp27_input_reader()
   let _ =
     app.run_buffered(
       default.new(),
@@ -45,6 +46,9 @@ fn run_model(initial: model.Model) {
     )
   Nil
 }
+
+@external(erlang, "beamtrace_tui_input_ffi", "install")
+fn install_otp27_input_reader() -> Nil
 
 fn on_input(event: backend.InputEvent, state: model.Model) -> model.Model {
   case event {
