@@ -10,6 +10,5 @@
 **/.lustre/
 **/erl_crash.dump
 **/*.beam
-**/manifest.toml
 /packages/beamtrace_runtime/beamtrace_runtime
 /packages/beamtrace_runtime/beamtrace_runtime.cmd

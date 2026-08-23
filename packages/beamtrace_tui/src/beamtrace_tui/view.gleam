@@ -58,11 +58,7 @@ fn render_header(
   let tabs =
     tabs.tabs_new(["CAPTURE", "LIVE", "COMPARE → Web"])
     |> tabs.with_active(active)
-    |> tabs.with_active_style(style.Style(
-      fg: background,
-      bg: amber,
-      modifier: style.bold(),
-    ))
+    |> tabs.with_active_style(style.new(background, amber, style.bold()))
     |> tabs.with_colors(muted, background)
 
   target
@@ -103,11 +99,7 @@ fn render_sidebar(
   |> paragraph.render(
     block.inner(area, frame),
     paragraph.paragraph_new(content)
-      |> paragraph.with_style(style.Style(
-        fg: muted,
-        bg: background,
-        modifier: style.none(),
-      )),
+      |> paragraph.with_style(style.new(muted, background, style.none())),
   )
 }
 
@@ -135,11 +127,7 @@ fn render_timeline(
   |> paragraph.render(
     block.inner(area, frame),
     paragraph.paragraph_new(content)
-      |> paragraph.with_style(style.Style(
-        fg: style.Default,
-        bg: background,
-        modifier: style.none(),
-      )),
+      |> paragraph.with_style(style.new(style.Default, background, style.none())),
   )
 }
 
@@ -169,11 +157,7 @@ fn render_inspector(
   |> paragraph.render(
     block.inner(area, frame),
     paragraph.paragraph_new(content)
-      |> paragraph.with_style(style.Style(
-        fg: muted,
-        bg: background,
-        modifier: style.none(),
-      )),
+      |> paragraph.with_style(style.new(muted, background, style.none())),
   )
 }
 
@@ -193,11 +177,7 @@ fn render_footer(
       " a attach   r arm   ! anomalies   / search   s save   w Web   q quit  │  "
       <> status,
     )
-      |> paragraph.with_style(style.Style(
-        fg: background,
-        bg: amber,
-        modifier: style.bold(),
-      )),
+      |> paragraph.with_style(style.new(background, amber, style.bold())),
   )
 }
 

@@ -4,7 +4,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 if (-not $IsLinux) {
-    Write-Host 'TUI PTY acceptance: skipped (Linux CI owns the util-linux PTY boundary)'
+    Write-Host 'TUI PTY acceptance: skipped (Linux CI owns the controlling-PTY boundary)'
     exit 0
 }
 

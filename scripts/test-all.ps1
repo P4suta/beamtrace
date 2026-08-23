@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 $steps = @(
     'check-format.ps1',
     'test-brand.ps1',
+    'test-brand-portability.ps1',
     'test-core.ps1',
     'test-runtime.ps1',
     'test-mcp.ps1',

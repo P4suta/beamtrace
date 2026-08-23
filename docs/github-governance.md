@@ -5,9 +5,9 @@ Repository settings are treated as versioned policy. The canonical branch and ta
 
 ## Required change path
 
-The default branch rejects deletion, force-pushes, unsigned commits, merge commits, and direct routine changes. Pull requests require a code-owner approval, approval after the last push, resolved review threads, current-base testing, and the aggregate `TDD Gate` check. Only squash merges are enabled.
+The default branch rejects deletion, force-pushes, unsigned commits, merge commits, and direct routine changes. Pull requests require resolved review threads plus current-base `TDD Gate`, `Dependency review`, and `CodeQL / JavaScript` checks. Only squash merges are enabled.
 
-The repository administrator has a `pull_request`-only bypass. This exists so a sole maintainer is not permanently locked out by the independent-review rule. It does not permit a direct push, is visible in ruleset insights, and is reserved for recovery or the documented solo-maintainer case.
+BeamTrace currently has one maintainer, so the ruleset requires zero approving reviews and has no branch bypass actor. GitHub does not allow a pull request author to approve their own change; requiring an independent approval before a second maintainer exists would make the normal merge path impossible. CODEOWNERS still documents responsibility, and review-thread resolution remains mandatory whenever review occurs. Once at least two active maintainers exist, increasing the approval count and enabling code-owner and last-push approval should be proposed as a reviewed policy change.
 
 Release tags matching `v*` cannot be rewritten or deleted without an explicit administrator bypass. Publishing jobs use the `release` environment, which accepts only matching tags.
 

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 FROM ghcr.io/gleam-lang/gleam:v1.18.1-erlang-alpine AS builder
 
-RUN apk add --no-cache build-base
+RUN apk add --no-cache build-base git
 WORKDIR /src
 COPY packages/beamtrace_core packages/beamtrace_core
 COPY packages/beamtrace_tui packages/beamtrace_tui

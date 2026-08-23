@@ -13,6 +13,7 @@ if (-not (Test-Path -LiteralPath $dockerfile -PathType Leaf)) {
 $source = Get-Content -Raw -LiteralPath $dockerfile
 foreach ($marker in @(
     'ghcr.io/gleam-lang/gleam:v1.18.1-erlang-alpine',
+    'RUN apk add --no-cache build-base git',
     'FROM erlang:29-alpine',
     'gleam export erlang-shipment',
     'USER beamtrace',

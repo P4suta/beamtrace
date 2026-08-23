@@ -31,6 +31,58 @@ foreach ($relativePath in $requiredFiles) {
     }
 }
 
+$requiredLockfiles = @(
+    'fixtures/gleam/manifest.toml',
+    'packages/beamtrace_core/manifest.toml',
+    'packages/beamtrace_runtime/manifest.toml',
+    'packages/beamtrace_tui/manifest.toml',
+    'packages/beamtrace_web/manifest.toml'
+)
+
+foreach ($relativePath in $requiredLockfiles) {
+    & git -C $repoRoot ls-files --error-unmatch -- $relativePath 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Reproducible-build lockfile is not tracked: $relativePath"
+    }
+}
+
+$tuiConfig = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_tui/gleam.toml')
+if ($tuiConfig -notmatch 'etui\s*=\s*\{[\s\S]*?ref\s*=\s*"[0-9a-f]{40}"[\s\S]*?\}') {
+    throw 'The unreleased etui fix must be pinned to a full commit SHA.'
+}
+$expectedEtuiRepo = 'https://github.com/P4suta/etui.git'
+$expectedEtuiCommit = '99886c6a280281c6a4b80d0d354e979eb60590e5'
+if (-not $tuiConfig.Contains("git = `"$expectedEtuiRepo`"") -or -not $tuiConfig.Contains("ref = `"$expectedEtuiCommit`"")) {
+    throw 'The TUI dependency does not pin the reviewed OTP 27 etui fork commit.'
+}
+$tuiLock = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_tui/manifest.toml')
+if ($tuiLock -notmatch 'name\s*=\s*"etui"[\s\S]*?source\s*=\s*"git"[\s\S]*?commit\s*=\s*"[0-9a-f]{40}"') {
+    throw 'The TUI lockfile does not preserve the pinned etui git commit.'
+}
+foreach ($lockPath in @('packages/beamtrace_tui/manifest.toml', 'packages/beamtrace_runtime/manifest.toml')) {
+    $lock = Get-Content -Raw -LiteralPath (Join-Path $repoRoot $lockPath)
+    if (-not $lock.Contains("repo = `"$expectedEtuiRepo`"") -or -not $lock.Contains("commit = `"$expectedEtuiCommit`"")) {
+        throw "The lockfile does not preserve the reviewed etui source: $lockPath"
+    }
+}
+
+$webConfig = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_web/gleam.toml')
+if ($webConfig -notmatch 'lustre\s*=\s*\{[\s\S]*?ref\s*=\s*"[0-9a-f]{40}"[\s\S]*?\}') {
+    throw 'The patched Lustre dependency must be pinned to a full commit SHA.'
+}
+$expectedLustreRepo = 'https://github.com/P4suta/lustre.git'
+$expectedLustreCommit = '2d0b444a52bab6da8637c7f3a5f6c26399eb200f'
+if (-not $webConfig.Contains("git = `"$expectedLustreRepo`"") -or -not $webConfig.Contains("ref = `"$expectedLustreCommit`"")) {
+    throw 'The web dependency does not pin the reviewed single-pass Lustre commit.'
+}
+$webLock = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_web/manifest.toml')
+if ($webLock -notmatch 'name\s*=\s*"lustre"[\s\S]*?source\s*=\s*"git"[\s\S]*?commit\s*=\s*"[0-9a-f]{40}"') {
+    throw 'The web lockfile does not preserve the pinned Lustre git commit.'
+}
+if (-not $webLock.Contains("repo = `"$expectedLustreRepo`"") -or -not $webLock.Contains("commit = `"$expectedLustreCommit`"")) {
+    throw 'The web lockfile does not preserve the reviewed Lustre source.'
+}
+
 $license = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'LICENSE')
 foreach ($marker in @('Apache License 2.0', 'MIT License', 'LICENSES/Apache-2.0.txt', 'LICENSES/MIT.txt')) {
     if (-not $license.Contains($marker)) {
@@ -92,15 +144,39 @@ foreach ($marker in @('package-ecosystem: "github-actions"', 'package-ecosystem:
 $mainRuleset = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/rulesets/main.json') | ConvertFrom-Json
 if ($mainRuleset.name -ne 'Protect main') { throw 'The main ruleset has an unexpected name.' }
 if ($mainRuleset.enforcement -ne 'active') { throw 'The main ruleset is not active.' }
+if (@($mainRuleset.bypass_actors).Count -ne 0) {
+    throw 'The main ruleset must not rely on an administrator bypass.'
+}
 $mainRuleTypes = @($mainRuleset.rules | ForEach-Object { $_.type })
 foreach ($ruleType in @('deletion', 'non_fast_forward', 'required_linear_history', 'required_signatures', 'pull_request', 'required_status_checks')) {
     if ($mainRuleTypes -notcontains $ruleType) {
         throw "The main ruleset is missing rule: $ruleType"
     }
 }
+$pullRequestRule = $mainRuleset.rules | Where-Object { $_.type -eq 'pull_request' } | Select-Object -First 1
+if (@($pullRequestRule.parameters.allowed_merge_methods).Count -ne 1 -or @($pullRequestRule.parameters.allowed_merge_methods) -notcontains 'squash') {
+    throw 'The main ruleset must allow only squash merges.'
+}
+if ($pullRequestRule.parameters.required_approving_review_count -ne 0) {
+    throw 'The solo-maintainer policy must not require an impossible independent approval.'
+}
+if ($pullRequestRule.parameters.require_code_owner_review) {
+    throw 'The solo-maintainer policy must not require the pull request author to approve their own change.'
+}
+if ($pullRequestRule.parameters.require_last_push_approval) {
+    throw 'The solo-maintainer policy must not require a second maintainer after the last push.'
+}
+if (-not $pullRequestRule.parameters.required_review_thread_resolution) {
+    throw 'The main ruleset must require every review thread to be resolved.'
+}
 $statusRule = $mainRuleset.rules | Where-Object { $_.type -eq 'required_status_checks' } | Select-Object -First 1
-if (@($statusRule.parameters.required_status_checks.context) -notcontains 'TDD Gate') {
-    throw 'The main ruleset does not require TDD Gate.'
+foreach ($requiredCheck in @('TDD Gate', 'Dependency review', 'CodeQL / JavaScript')) {
+    if (@($statusRule.parameters.required_status_checks.context) -notcontains $requiredCheck) {
+        throw "The main ruleset does not require security and TDD check: $requiredCheck"
+    }
+}
+if (-not $statusRule.parameters.strict_required_status_checks_policy) {
+    throw 'The main ruleset must test the current base before merge.'
 }
 
 $tagRuleset = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/rulesets/release-tags.json') | ConvertFrom-Json

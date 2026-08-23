@@ -8,7 +8,11 @@ description = "Canonical terminal client for the BeamTrace BEAM causal workbench
 [dependencies]
 beamtrace_core = { path = "../beamtrace_core" }
 gleam_stdlib = ">= 0.70.0 and < 2.0.0"
-etui = ">= 1.0.1 and < 2.0.0"
+# etui 2.0 plus the reviewed OTP 27 terminal fix is pinned until it reaches Hex.
+etui = {
+  git = "https://github.com/P4suta/etui.git",
+  ref = "99886c6a280281c6a4b80d0d354e979eb60590e5",
+}
 
 [dev-dependencies]
 gleeunit = ">= 1.9.0 and < 2.0.0"
