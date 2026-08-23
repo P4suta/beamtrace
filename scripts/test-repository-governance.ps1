@@ -66,6 +66,23 @@ foreach ($lockPath in @('packages/beamtrace_tui/manifest.toml', 'packages/beamtr
     }
 }
 
+$webConfig = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_web/gleam.toml')
+if ($webConfig -notmatch 'lustre\s*=\s*\{[\s\S]*?ref\s*=\s*"[0-9a-f]{40}"[\s\S]*?\}') {
+    throw 'The patched Lustre dependency must be pinned to a full commit SHA.'
+}
+$expectedLustreRepo = 'https://github.com/P4suta/lustre.git'
+$expectedLustreCommit = '2d0b444a52bab6da8637c7f3a5f6c26399eb200f'
+if (-not $webConfig.Contains("git = `"$expectedLustreRepo`"") -or -not $webConfig.Contains("ref = `"$expectedLustreCommit`"")) {
+    throw 'The web dependency does not pin the reviewed single-pass Lustre commit.'
+}
+$webLock = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_web/manifest.toml')
+if ($webLock -notmatch 'name\s*=\s*"lustre"[\s\S]*?source\s*=\s*"git"[\s\S]*?commit\s*=\s*"[0-9a-f]{40}"') {
+    throw 'The web lockfile does not preserve the pinned Lustre git commit.'
+}
+if (-not $webLock.Contains("repo = `"$expectedLustreRepo`"") -or -not $webLock.Contains("commit = `"$expectedLustreCommit`"")) {
+    throw 'The web lockfile does not preserve the reviewed Lustre source.'
+}
+
 $license = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'LICENSE')
 foreach ($marker in @('Apache License 2.0', 'MIT License', 'LICENSES/Apache-2.0.txt', 'LICENSES/MIT.txt')) {
     if (-not $license.Contains($marker)) {

@@ -5427,7 +5427,22 @@ var parseKey = (data) => {
   return unescapeKey(keyMatch[1]);
 };
 var unescapeKey = (key) => {
-  return key.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&amp;/g, "&").replace(/&#39;/g, "'");
+  return key.replace(/&(?:lt|gt|quot|amp|#39);/g, (entity) => {
+    switch (entity) {
+      case "&lt;":
+        return "<";
+      case "&gt;":
+        return ">";
+      case "&quot;":
+        return '"';
+      case "&amp;":
+        return "&";
+      case "&#39;":
+        return "'";
+      default:
+        return entity;
+    }
+  });
 };
 var toList3 = (arr) => arr.reduceRight((xs, x) => List$NonEmpty(x, xs), empty_list);
 

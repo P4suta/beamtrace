@@ -9,7 +9,7 @@ description = "Lustre and Canvas causal workspace for BeamTrace"
 beamtrace_core = { path = "../beamtrace_core" }
 gleam_stdlib = ">= 0.70.0 and < 2.0.0"
 gleam_json = ">= 2.3.0 and < 4.0.0"
-lustre = ">= 5.7.0 and < 6.0.0"
+lustre = { git = "https://github.com/P4suta/lustre.git", ref = "2d0b444a52bab6da8637c7f3a5f6c26399eb200f" }
 
 [dev-dependencies]
 gleeunit = ">= 1.9.0 and < 2.0.0"
