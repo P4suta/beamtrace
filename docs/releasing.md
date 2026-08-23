@@ -44,7 +44,7 @@ All later pull request titles must use `type(scope): subject`. Squash merging pr
 6. A clean exact-version Hex consumer build, HexDocs request, and registry-pulled OCI `version`, `doctor`, and non-root checks must pass.
 7. Only then are the release assets uploaded with replacement enabled and the existing draft published as `BeamTrace vX.Y.Z`.
 
-If any step fails, the GitHub Release remains a draft. A rerun may skip an existing Hex version only when its metadata and all expanded file hashes match. It may reuse GHCR tags only when the source revision, image identity, and final digest match. The workflow never uses Hex `--replace` and never creates `latest`.
+If any step fails, the GitHub Release remains a draft. A rerun may skip an existing Hex version only when its parsed metadata values match after normalizing unordered metadata collections and all expanded file names and hashes match exactly. It may reuse GHCR tags only when the source revision, image identity, and final digest match. The workflow never uses Hex `--replace` and never creates `latest`.
 
 If an existing registry object differs, stop. Do not rewrite the tag or package; repair the automation and issue a patch release.
 

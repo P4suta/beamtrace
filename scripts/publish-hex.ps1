@@ -21,6 +21,10 @@ $versionReader = Join-Path $repoRoot 'scripts/project-version.ps1'
 if (-not (Test-Path -LiteralPath $versionReader -PathType Leaf)) {
     throw "Release source version reader is missing: $versionReader"
 }
+$metadataComparator = Join-Path $PSScriptRoot 'compare-hex-metadata.escript'
+if (-not (Test-Path -LiteralPath $metadataComparator -PathType Leaf)) {
+    throw "Hex metadata comparator is missing: $metadataComparator"
+}
 . $versionReader
 $projectVersion = Get-BeamTraceVersion -RepositoryRoot $repoRoot
 if ($Version -ne $projectVersion) {
@@ -63,7 +67,7 @@ function Get-HexContentsFingerprint {
         $files[$relative] = (Get-FileHash -Algorithm SHA256 -LiteralPath $file.FullName).Hash.ToLowerInvariant()
     }
     return [pscustomobject]@{
-        metadata = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $Directory 'metadata.config')).Hash.ToLowerInvariant()
+        metadataPath = (Join-Path $Directory 'metadata.config')
         files = $files
     }
 }
@@ -76,7 +80,8 @@ function Assert-SameHexPackage {
 
     $expectedFingerprint = Get-HexContentsFingerprint -Package $Expected -Directory (Join-Path $tempRoot 'expected')
     $actualFingerprint = Get-HexContentsFingerprint -Package $Actual -Directory (Join-Path $tempRoot 'actual')
-    if ($expectedFingerprint.metadata -ne $actualFingerprint.metadata) {
+    & escript $metadataComparator $expectedFingerprint.metadataPath $actualFingerprint.metadataPath
+    if ($LASTEXITCODE -ne 0) {
         throw 'Published Hex metadata differs from the release artifact.'
     }
     $expectedJson = $expectedFingerprint.files | ConvertTo-Json -Compress
@@ -103,7 +108,7 @@ try {
     $status = Get-RemoteHexPackage -Destination $remoteTarball
     if ($status -eq 200) {
         Assert-SameHexPackage -Expected $localTarball -Actual $remoteTarball
-        Write-Host "Hex beamtrace_core $Version already exists and is byte-for-byte equivalent after expansion; skipping publish."
+        Write-Host "Hex beamtrace_core $Version already exists with equivalent metadata and identical expanded files; skipping publish."
         exit 0
     }
     if ($status -ne 404) {
