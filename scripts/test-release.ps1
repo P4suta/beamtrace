@@ -224,6 +224,7 @@ foreach ($marker in @(
 
 $candidate = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/workflows/release-candidate.yml')
 foreach ($marker in @(
+    'types: [opened, synchronize, reopened]',
     "'autorelease: pending'",
     "'release-please--branches--'",
     'runner: ubuntu-latest',
@@ -239,6 +240,9 @@ foreach ($marker in @(
     'name: Release Candidate Gate'
 )) {
     if (-not $candidate.Contains($marker)) { throw "Release candidate workflow is missing: $marker" }
+}
+if ($candidate.Contains('types: [opened, synchronize, reopened, labeled]')) {
+    throw 'Release candidate workflow must not rerun when release-please adds its label.'
 }
 
 $releaseWorkflow = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/workflows/release.yml')

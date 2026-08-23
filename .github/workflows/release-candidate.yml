@@ -3,7 +3,7 @@ name: Release Candidate
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    types: [opened, synchronize, reopened]
 
 concurrency:
   group: release-candidate-${{ github.event.pull_request.number }}
