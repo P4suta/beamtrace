@@ -8,7 +8,11 @@ description = "Canonical terminal client for the BeamTrace BEAM causal workbench
 [dependencies]
 beamtrace_core = { path = "../beamtrace_core" }
 gleam_stdlib = ">= 0.70.0 and < 2.0.0"
-etui = ">= 1.0.1 and < 2.0.0"
+# etui 2.0 is pinned until its queued-input and PTY cleanup fixes reach Hex.
+etui = {
+  git = "https://github.com/lupodevelop/etui.git",
+  ref = "699d2c0a1e7f5d2ae109b00927bd5484a056517a",
+}
 
 [dev-dependencies]
 gleeunit = ">= 1.9.0 and < 2.0.0"

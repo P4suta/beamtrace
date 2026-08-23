@@ -31,6 +31,30 @@ foreach ($relativePath in $requiredFiles) {
     }
 }
 
+$requiredLockfiles = @(
+    'fixtures/gleam/manifest.toml',
+    'packages/beamtrace_core/manifest.toml',
+    'packages/beamtrace_runtime/manifest.toml',
+    'packages/beamtrace_tui/manifest.toml',
+    'packages/beamtrace_web/manifest.toml'
+)
+
+foreach ($relativePath in $requiredLockfiles) {
+    & git -C $repoRoot ls-files --error-unmatch -- $relativePath 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Reproducible-build lockfile is not tracked: $relativePath"
+    }
+}
+
+$tuiConfig = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_tui/gleam.toml')
+if ($tuiConfig -notmatch 'etui\s*=\s*\{[\s\S]*?ref\s*=\s*"[0-9a-f]{40}"[\s\S]*?\}') {
+    throw 'The unreleased etui fix must be pinned to a full commit SHA.'
+}
+$tuiLock = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_tui/manifest.toml')
+if ($tuiLock -notmatch 'name\s*=\s*"etui"[\s\S]*?source\s*=\s*"git"[\s\S]*?commit\s*=\s*"[0-9a-f]{40}"') {
+    throw 'The TUI lockfile does not preserve the pinned etui git commit.'
+}
+
 $license = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'LICENSE')
 foreach ($marker in @('Apache License 2.0', 'MIT License', 'LICENSES/Apache-2.0.txt', 'LICENSES/MIT.txt')) {
     if (-not $license.Contains($marker)) {
