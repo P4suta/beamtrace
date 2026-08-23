@@ -19,9 +19,12 @@ $requiredFiles = @(
     '.github/rulesets/release-tags.json',
     'docs/github-governance.md',
     'GOVERNANCE.md',
+    'package.json',
+    'package-lock.json',
     'SUPPORT.md',
     'scripts/audit-github.ps1',
-    'scripts/configure-github.ps1'
+    'scripts/configure-github.ps1',
+    'tests/property/page_loader.test.mjs'
 )
 
 foreach ($relativePath in $requiredFiles) {
@@ -29,6 +32,45 @@ foreach ($relativePath in $requiredFiles) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
         throw "Repository governance file is missing: $relativePath"
     }
+}
+
+$securityPolicy = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'SECURITY.md')
+foreach ($marker in @(
+    'https://github.com/P4suta/beamtrace/security/advisories/new',
+    'within 7 days',
+    'within 90 days'
+)) {
+    if (-not $securityPolicy.Contains($marker)) {
+        throw "The security policy is missing a private reporting or disclosure commitment: $marker"
+    }
+}
+
+$rootPackage = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'package.json') | ConvertFrom-Json
+$fastCheckVersion = $rootPackage.devDependencies.'fast-check'
+if ($fastCheckVersion -notmatch '^\d+\.\d+\.\d+$') {
+    throw 'fast-check must be an exact dependency for reproducible property tests.'
+}
+if ($rootPackage.scripts.'test:property' -ne 'node --test tests/property/*.test.mjs') {
+    throw 'The root package does not expose the property-test suite.'
+}
+$rootLock = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'package-lock.json') | ConvertFrom-Json -AsHashtable
+$lockedRoot = $rootLock['packages']['']
+$lockedFastCheck = $rootLock['packages']['node_modules/fast-check']
+if ($lockedRoot['devDependencies']['fast-check'] -ne $fastCheckVersion -or $lockedFastCheck['version'] -ne $fastCheckVersion) {
+    throw 'The npm lockfile does not preserve the exact fast-check version.'
+}
+if ($lockedFastCheck['integrity'] -notmatch '^sha512-[A-Za-z0-9+/]+={0,2}$') {
+    throw 'The npm lockfile does not preserve fast-check integrity metadata.'
+}
+$propertyTest = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'tests/property/page_loader.test.mjs')
+foreach ($marker in @('from "fast-check"', 'fc.assert', 'fc.property')) {
+    if (-not $propertyTest.Contains($marker)) {
+        throw "The URL boundary property test is missing: $marker"
+    }
+}
+$webAcceptance = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'scripts/test-web-e2e.ps1')
+if (-not $webAcceptance.Contains('npm run test:property')) {
+    throw 'The Chromium acceptance gate does not run property tests.'
 }
 
 $requiredLockfiles = @(

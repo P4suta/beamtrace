@@ -2,10 +2,12 @@
   "name": "beamtrace-acceptance",
   "private": true,
   "scripts": {
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:property": "node --test tests/property/*.test.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.10.2",
-    "@playwright/test": "1.62.1"
+    "@playwright/test": "1.62.1",
+    "fast-check": "4.9.0"
   }
 }

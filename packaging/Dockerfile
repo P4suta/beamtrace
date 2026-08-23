@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-FROM ghcr.io/gleam-lang/gleam:v1.18.1-erlang-alpine AS builder
+FROM ghcr.io/gleam-lang/gleam:v1.18.1-erlang-alpine@sha256:7c82e4a284b7c05c26eac34db497ea0e63ce7cb04bd019d966d70338eb172b68 AS builder
 
 RUN apk add --no-cache build-base git
 WORKDIR /src
@@ -18,7 +18,7 @@ RUN cd packages/beamtrace_runtime \
     && gleam deps download \
     && gleam export erlang-shipment
 
-FROM erlang:29-alpine
+FROM erlang:29-alpine@sha256:77074ad338ad7303c2f127eb686759721dffbff952f7c8db162bb4adac1e1e1c
 
 LABEL org.opencontainers.image.title="BeamTrace" \
       org.opencontainers.image.description="BEAM causal workbench" \
