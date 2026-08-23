@@ -159,7 +159,8 @@ jobs:
       - name: Create Hex checksum
         shell: pwsh
         run: |
-          $tarball = Get-Item -LiteralPath packages/beamtrace_core/build/beamtrace_core-*.tar
+          $version = $env:RELEASE_TAG.Substring(1)
+          $tarball = Get-Item -LiteralPath "packages/beamtrace_core/build/beamtrace_core-$version.tar"
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $tarball.FullName).Hash.ToLowerInvariant()
           "$hash  $($tarball.Name)" | Set-Content -LiteralPath "$($tarball.FullName).sha256" -Encoding ascii
       - name: Attest Hex package
