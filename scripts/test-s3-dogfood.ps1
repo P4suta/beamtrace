@@ -11,12 +11,14 @@ if (-not $dogfoodRoot.StartsWith($buildRoot, [StringComparison]::OrdinalIgnoreCa
 }
 $certRoot = Join-Path $dogfoodRoot 'certs'
 $containerName = "beamtrace-s3-dogfood-$PID"
+$networkName = "beamtrace-s3-dogfood-network-$PID"
 $opensslImage = 'alpine/openssl@sha256:19f8eb9004a1dbaec323eed6094e9b6bcc1dbf2697ecb5fb8d2fad4e3336a8f7'
 $minioImage = 'minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e'
 $clientImage = 'minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727'
 $accessKey = 'beamtrace-dogfood'
 $secretKey = 'beamtrace-dogfood-only-2026'
 $containerStarted = $false
+$networkCreated = $false
 $passed = $false
 
 New-Item -ItemType Directory -Path $certRoot -Force | Out-Null
@@ -47,7 +49,12 @@ try {
     $portProbe.Stop()
     $endpoint = "https://127.0.0.1:$port"
 
+    & docker network create $networkName | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not create the S3 dogfood container network.' }
+    $networkCreated = $true
+
     & docker run --detach --rm --name $containerName `
+        --network $networkName `
         --publish "127.0.0.1:${port}:9000" `
         --env "MINIO_ROOT_USER=$accessKey" `
         --env "MINIO_ROOT_PASSWORD=$secretKey" `
@@ -72,7 +79,8 @@ try {
     if (-not $healthy) { throw 'S3-compatible TLS server did not become healthy.' }
 
     & docker run --rm --entrypoint /bin/sh `
-        --env "DOGFOOD_ENDPOINT=https://host.docker.internal:$port" `
+        --network $networkName `
+        --env "DOGFOOD_ENDPOINT=https://${containerName}:9000" `
         --env "DOGFOOD_ACCESS_KEY=$accessKey" `
         --env "DOGFOOD_SECRET_KEY=$secretKey" `
         $clientImage -c 'mc alias set dogfood "$DOGFOOD_ENDPOINT" "$DOGFOOD_ACCESS_KEY" "$DOGFOOD_SECRET_KEY" --insecure && mc mb dogfood/beamtrace-dogfood --insecure'
@@ -112,6 +120,9 @@ finally {
     if ($containerStarted) {
         if (-not $passed) { & docker logs $containerName 2>&1 | Write-Warning }
         & docker rm --force $containerName | Out-Null
+    }
+    if ($networkCreated) {
+        & docker network rm $networkName | Out-Null
     }
     if (Test-Path -LiteralPath $dogfoodRoot -PathType Container) {
         Remove-Item -LiteralPath $dogfoodRoot -Recurse -Force
