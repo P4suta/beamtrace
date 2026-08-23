@@ -24,6 +24,7 @@ $requiredFiles = @(
     'SUPPORT.md',
     'scripts/audit-github.ps1',
     'scripts/configure-github.ps1',
+    'packages/beamtrace_core/test/dag_property_test.gleam',
     'tests/property/page_loader.test.js'
 )
 
@@ -71,6 +72,21 @@ foreach ($marker in @('require("fast-check")', 'fc.assert', 'fc.property')) {
 $webAcceptance = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'scripts/test-web-e2e.ps1')
 if (-not $webAcceptance.Contains('npm run test:property')) {
     throw 'The Chromium acceptance gate does not run property tests.'
+}
+
+$coreConfig = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_core/gleam.toml')
+if (-not $coreConfig.Contains('qcheck = "1.0.4"')) {
+    throw 'qcheck must be an exact core dev dependency for reproducible property tests.'
+}
+$coreLock = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_core/manifest.toml')
+if (-not $coreLock.Contains('name = "qcheck", version = "1.0.4"')) {
+    throw 'The core lockfile does not preserve the exact qcheck version.'
+}
+$corePropertyTest = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_core/test/dag_property_test.gleam')
+foreach ($marker in @('import qcheck', 'qcheck.run', 'test_count: 2000', 'dag.is_acyclic')) {
+    if (-not $corePropertyTest.Contains($marker)) {
+        throw "The causal DAG property test is missing: $marker"
+    }
 }
 
 $requiredLockfiles = @(
