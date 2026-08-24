@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.1.1](https://github.com/P4suta/beamtrace/compare/v0.1.0...v0.1.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* **ci:** acknowledge pre-1.0 Hex releases ([#16](https://github.com/P4suta/beamtrace/issues/16)) ([94c9792](https://github.com/P4suta/beamtrace/commit/94c9792517d8f05167d1bbbdd4b194551b47a630))
+* **ci:** list draft releases explicitly ([#14](https://github.com/P4suta/beamtrace/issues/14)) ([63b4965](https://github.com/P4suta/beamtrace/commit/63b4965c4afdec9a2861d56e7b35e0d4c926a07f))
+* **ci:** normalize Hex metadata ordering ([#19](https://github.com/P4suta/beamtrace/issues/19)) ([bfef1cb](https://github.com/P4suta/beamtrace/commit/bfef1cb80a6aada4951e9ef651423a2cb1f77d97))
+* **ci:** recover immutable draft releases ([459cd47](https://github.com/P4suta/beamtrace/commit/459cd47c558e541fcaf61275808acb8793f27cd1))
+* **ci:** resolve release upload repository ([#18](https://github.com/P4suta/beamtrace/issues/18)) ([55867a2](https://github.com/P4suta/beamtrace/commit/55867a24987459d8c420d305a2b87ab5bfbb571c))
+* **ci:** resolve the Hex tarball exactly ([#15](https://github.com/P4suta/beamtrace/issues/15)) ([d6c20e2](https://github.com/P4suta/beamtrace/commit/d6c20e288c979476e87915fd4fd11fa5770cf7e7))
+* **ci:** reuse matching GHCR release tags ([#20](https://github.com/P4suta/beamtrace/issues/20)) ([945705c](https://github.com/P4suta/beamtrace/commit/945705c12cad2625b9794c886317c9c7ac611aa4))
+* **ci:** separate release source from tooling ([#17](https://github.com/P4suta/beamtrace/issues/17)) ([646fa3f](https://github.com/P4suta/beamtrace/commit/646fa3ff158d058324e4666fb700ca372595cafa))
+* **runtime:** enforce relay frame read authorization ([#21](https://github.com/P4suta/beamtrace/issues/21)) ([b2e77f6](https://github.com/P4suta/beamtrace/commit/b2e77f6ed86988a562bf015844e513f1be6a661a))
+
 ## 0.1.0 (2026-08-23)
 
 
