@@ -378,7 +378,18 @@ fn relay_frames_from_sources(
         now_ms,
       )
     Some(inbox) ->
-      case relay_inbox.window(inbox, relay_id, start:, limit:) {
+      case
+        relay_inbox.authorized_window(
+          inbox,
+          relay_id,
+          start:,
+          limit:,
+          authorize_raw: fn() {
+            authorize_relay_contents(security, session, relay_id, True, now_ms)
+          },
+        )
+      {
+        Error("raw_trace_forbidden") -> wisp.response(403)
         Error(_) -> wisp.response(503)
         Ok(window) ->
           case window.total == 0, security.relay_archive {
@@ -391,14 +402,7 @@ fn relay_frames_from_sources(
                 limit,
                 now_ms,
               )
-            _, _ ->
-              relay_window_for_session(
-                security,
-                session,
-                relay_id,
-                window,
-                now_ms,
-              )
+            _, _ -> relay_window_response(window)
           }
       }
   }
@@ -498,27 +502,6 @@ fn relay_window_response(window: relay_inbox.Window) -> wisp.Response {
   )
 }
 
-fn relay_window_for_session(
-  security: TeamSecurity,
-  session: team_auth.Session,
-  relay_id: String,
-  window: relay_inbox.Window,
-  now_ms: Int,
-) -> wisp.Response {
-  case
-    authorize_relay_contents(
-      security,
-      session,
-      relay_id,
-      relay_entries_require_raw(window.entries),
-      now_ms,
-    )
-  {
-    False -> wisp.response(403)
-    True -> relay_window_response(window)
-  }
-}
-
 fn authorize_relay_contents(
   security: TeamSecurity,
   session: team_auth.Session,
@@ -544,16 +527,6 @@ fn authorize_relay_contents(
       allowed
     }
   }
-}
-
-fn relay_entries_require_raw(entries: List(relay_inbox.Entry)) -> Bool {
-  list.any(entries, fn(entry) {
-    case entry {
-      relay_inbox.Payload(_, relay_inbox.Metadata, _, _) -> False
-      relay_inbox.Payload(_, _, _, _) -> True
-      relay_inbox.Gap(_, _, _) -> False
-    }
-  })
 }
 
 fn relay_frames_require_raw(frames: List(team_store.RelayFrameIndex)) -> Bool {

@@ -1,7 +1,7 @@
 %% SPDX-License-Identifier: Apache-2.0 OR MIT
 -module(beamtrace_relay_inbox_ffi).
 
--export([new/2, append/7, snapshot/2, window/4, close/1]).
+-export([new/2, append/7, snapshot/2, window/4, authorized_window/5, close/1]).
 
 -define(MAX_FRAME_BYTES, 1048576).
 -define(CALL_TIMEOUT, 5000).
@@ -38,6 +38,15 @@ window(Store, RelayId, Start, Limit)
 window(_Store, _RelayId, _Start, _Limit) ->
     {error, <<"invalid_window">>}.
 
+authorized_window(Store, RelayId, Start, Limit, AuthorizeRaw)
+        when is_binary(RelayId), byte_size(RelayId) > 0, byte_size(RelayId) =< 128,
+             is_integer(Start), Start >= 0,
+             is_integer(Limit), Limit > 0, Limit =< 1000,
+             is_function(AuthorizeRaw, 0) ->
+    call(Store, {authorized_window, RelayId, Start, Limit, AuthorizeRaw});
+authorized_window(_Store, _RelayId, _Start, _Limit, _AuthorizeRaw) ->
+    {error, <<"invalid_window">>}.
+
 close(Store) when is_pid(Store) ->
     case is_process_alive(Store) of
         true ->
@@ -71,6 +80,14 @@ loop(State = #{owner := Owner, monitor := Monitor}) ->
             Total = length(Entries),
             Page = lists:sublist(drop_safe(Start, Entries), Limit),
             From ! {Reference, {ok, {window, Page, Total, Start, Limit}}},
+            loop(State);
+        {call, From, Reference,
+                {authorized_window, RelayId, Start, Limit, AuthorizeRaw}} ->
+            Entries = snapshot_relay(RelayId, State),
+            Total = length(Entries),
+            Page = lists:sublist(drop_safe(Start, Entries), Limit),
+            Reply = authorized_page(Page, Total, Start, Limit, AuthorizeRaw),
+            From ! {Reference, Reply},
             loop(State);
         {call, From, Reference,
                 {append, RelayId, Sequence, Mode, Privacy, Payload, ReceivedAtMs}} ->
@@ -191,6 +208,33 @@ snapshot_relay(RelayId, State) ->
                     | Payloads
                 ]
             end
+    end.
+
+authorized_page(Page, Total, Start, Limit, AuthorizeRaw) ->
+    case page_requires_raw(Page) of
+        false -> {ok, {window, Page, Total, Start, Limit}};
+        true ->
+            case authorize_raw(AuthorizeRaw) of
+                true -> {ok, {window, Page, Total, Start, Limit}};
+                false -> {error, <<"raw_trace_forbidden">>};
+                error -> {error, <<"authorization_failed">>}
+            end
+    end.
+
+page_requires_raw([]) -> false;
+page_requires_raw([{payload, _Sequence, metadata, _Payload, _At} | Rest]) ->
+    page_requires_raw(Rest);
+page_requires_raw([{payload, _Sequence, _Privacy, _Payload, _At} | _Rest]) -> true;
+page_requires_raw([{gap, _Dropped, _Reason, _At} | Rest]) ->
+    page_requires_raw(Rest).
+
+authorize_raw(AuthorizeRaw) ->
+    try AuthorizeRaw() of
+        true -> true;
+        false -> false;
+        _Other -> error
+    catch
+        _Class:_Reason -> error
     end.
 
 drop_safe(0, Entries) -> Entries;

@@ -168,3 +168,90 @@ pub fn inbox_window_is_ordered_bounded_and_reports_the_total_test() {
   |> should.equal(Error("invalid_window"))
   relay_inbox.close(store)
 }
+
+pub fn authorized_window_releases_payloads_only_after_raw_approval_test() {
+  let store = relay_inbox.new(max_frames: 4, max_bytes: 128)
+  relay_inbox.append(
+    store,
+    "relay-authorized-page",
+    1,
+    relay_inbox.Exact,
+    relay_inbox.Metadata,
+    "metadata-payload",
+    1000,
+  )
+  |> should.equal(Ok(relay_inbox.Accepted))
+  relay_inbox.append(
+    store,
+    "relay-authorized-page",
+    2,
+    relay_inbox.Exact,
+    relay_inbox.Raw,
+    "raw-secret",
+    1001,
+  )
+  |> should.equal(Ok(relay_inbox.Accepted))
+  relay_inbox.append(
+    store,
+    "relay-authorized-page",
+    3,
+    relay_inbox.Exact,
+    relay_inbox.Unknown,
+    "legacy-secret",
+    1002,
+  )
+  |> should.equal(Ok(relay_inbox.Accepted))
+
+  relay_inbox.authorized_window(
+    store,
+    "relay-authorized-page",
+    start: 0,
+    limit: 1,
+    authorize_raw: fn() { False },
+  )
+  |> should.equal(
+    Ok(relay_inbox.Window(
+      entries: [
+        relay_inbox.Payload(1, relay_inbox.Metadata, "metadata-payload", 1000),
+      ],
+      total: 3,
+      start: 0,
+      limit: 1,
+    )),
+  )
+  relay_inbox.authorized_window(
+    store,
+    "relay-authorized-page",
+    start: 1,
+    limit: 1,
+    authorize_raw: fn() { False },
+  )
+  |> should.equal(Error("raw_trace_forbidden"))
+  relay_inbox.authorized_window(
+    store,
+    "relay-authorized-page",
+    start: 2,
+    limit: 1,
+    authorize_raw: fn() { False },
+  )
+  |> should.equal(Error("raw_trace_forbidden"))
+  relay_inbox.authorized_window(
+    store,
+    "relay-authorized-page",
+    start: 1,
+    limit: 2,
+    authorize_raw: fn() { True },
+  )
+  |> should.equal(
+    Ok(relay_inbox.Window(
+      entries: [
+        relay_inbox.Payload(2, relay_inbox.Raw, "raw-secret", 1001),
+        relay_inbox.Payload(3, relay_inbox.Unknown, "legacy-secret", 1002),
+      ],
+      total: 3,
+      start: 1,
+      limit: 2,
+    )),
+  )
+  relay_inbox.close(store)
+}

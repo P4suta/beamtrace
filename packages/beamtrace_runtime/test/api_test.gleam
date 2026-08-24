@@ -855,6 +855,67 @@ pub fn raw_and_unknown_inbox_frames_require_combined_role_and_audit_test() {
   team_auth.close(sessions)
 }
 
+pub fn raw_inbox_read_fails_closed_when_audit_persistence_is_unavailable_test() {
+  let assert Ok(database) = team_store.open(":memory:")
+  let assert Ok(audit_log) = audit_store.persistent(database)
+  team_store.close(database) |> should.equal(Ok(Nil))
+  let sessions = team_auth.new()
+  let annotation_store = annotations.new()
+  let inbox = relay_inbox.new(max_frames: 2, max_bytes: 256)
+  let relay_id = "relay-acde00000000fade00000000"
+  relay_inbox.append(
+    inbox,
+    relay_id,
+    1,
+    relay_inbox.Exact,
+    relay_inbox.Raw,
+    "{\"private\":\"must-not-escape\"}",
+    3500,
+  )
+  |> should.equal(Ok(relay_inbox.Accepted))
+  let authorized =
+    team_session(sessions, "raw-read-audit-failure", [
+      rbac.Investigator,
+      rbac.RawCaptureRole,
+    ])
+  let context =
+    api.Context(
+      "0.1.1",
+      api.Team,
+      None,
+      None,
+      None,
+      None,
+      Some(api.TeamSecurity(
+        sessions,
+        annotation_store,
+        audit_log,
+        "https://hub.example",
+        None,
+        Some(inbox),
+        None,
+      )),
+      None,
+    )
+
+  let response =
+    simulate.request(
+      http.Get,
+      "/api/v1/relays/" <> relay_id <> "/frames?start=0&limit=10",
+    )
+    |> request.set_header("cookie", "beamtrace_session=" <> authorized.id)
+    |> api.handle_at(context, 3501)
+  response.status |> should.equal(503)
+  simulate.read_body(response)
+  |> string.contains("must-not-escape")
+  |> should.be_false()
+
+  relay_inbox.close(inbox)
+  audit_store.close(audit_log)
+  annotations.close(annotation_store)
+  team_auth.close(sessions)
+}
+
 pub fn archive_privacy_is_checked_before_filesystem_or_s3_blob_fetch_test() {
   let relay_id = "relay-abcdef000000abcdef000000"
   let frame =
