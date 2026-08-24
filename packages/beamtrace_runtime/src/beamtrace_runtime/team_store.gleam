@@ -42,6 +42,7 @@ pub type RelayFrameIndex {
     sequence: Int,
     received_at_ms: Int,
     mode: String,
+    privacy: String,
     blob_key: String,
     event_count: Int,
     bytes: Int,
@@ -114,6 +115,8 @@ CREATE TABLE IF NOT EXISTS relay_frames (
   sequence INTEGER NOT NULL CHECK (sequence > 0),
   received_at_ms INTEGER NOT NULL CHECK (received_at_ms >= 0),
   mode TEXT NOT NULL CHECK (mode IN ('exact', 'live')),
+  privacy TEXT NOT NULL DEFAULT 'unknown'
+    CHECK (privacy IN ('metadata', 'raw', 'unknown')),
   blob_key TEXT NOT NULL,
   event_count INTEGER NOT NULL DEFAULT 1 CHECK (event_count >= 0),
   bytes INTEGER NOT NULL CHECK (bytes > 0 AND bytes <= 1048576),
@@ -190,6 +193,20 @@ pub fn open(path: String) -> Result(Store, String) {
 }
 
 fn migrate(connection: sqlight.Connection) -> Result(Nil, String) {
+  case ensure_relay_event_count(connection) {
+    Error(error) -> Error(error)
+    Ok(Nil) ->
+      case ensure_relay_privacy(connection) {
+        Error(error) -> Error(error)
+        Ok(Nil) ->
+          sqlight.exec("PRAGMA user_version = 7;", connection) |> map_sql_error
+      }
+  }
+}
+
+fn ensure_relay_event_count(
+  connection: sqlight.Connection,
+) -> Result(Nil, String) {
   case
     sqlight.query(
       "SELECT COUNT(*) FROM pragma_table_info('relay_frames')
@@ -201,19 +218,37 @@ fn migrate(connection: sqlight.Connection) -> Result(Nil, String) {
   {
     Error(error) -> Error(sql_error(error))
     Ok([0]) ->
-      case
-        sqlight.exec(
-          "ALTER TABLE relay_frames ADD COLUMN event_count INTEGER NOT NULL
-           DEFAULT 1 CHECK (event_count >= 0);
-           PRAGMA user_version = 6;",
-          connection,
-        )
-      {
-        Ok(Nil) -> Ok(Nil)
-        Error(error) -> Error(sql_error(error))
-      }
-    Ok([1]) ->
-      sqlight.exec("PRAGMA user_version = 6;", connection) |> map_sql_error
+      sqlight.exec(
+        "ALTER TABLE relay_frames ADD COLUMN event_count INTEGER NOT NULL
+         DEFAULT 1 CHECK (event_count >= 0);",
+        connection,
+      )
+      |> map_sql_error
+    Ok([1]) -> Ok(Nil)
+    Ok(_) -> Error("invalid_relay_schema")
+  }
+}
+
+fn ensure_relay_privacy(connection: sqlight.Connection) -> Result(Nil, String) {
+  case
+    sqlight.query(
+      "SELECT COUNT(*) FROM pragma_table_info('relay_frames')
+       WHERE name = 'privacy';",
+      on: connection,
+      with: [],
+      expecting: count_decoder(),
+    )
+  {
+    Error(error) -> Error(sql_error(error))
+    Ok([0]) ->
+      sqlight.exec(
+        "ALTER TABLE relay_frames ADD COLUMN privacy TEXT NOT NULL
+         DEFAULT 'unknown'
+         CHECK (privacy IN ('metadata', 'raw', 'unknown'));",
+        connection,
+      )
+      |> map_sql_error
+    Ok([1]) -> Ok(Nil)
     Ok(_) -> Error("invalid_relay_schema")
   }
 }
@@ -369,15 +404,16 @@ pub fn put_relay_frame(
         execute(
           connection,
           "INSERT INTO relay_frames (
-            relay_id, sequence, received_at_ms, mode, blob_key,
+            relay_id, sequence, received_at_ms, mode, privacy, blob_key,
             event_count, bytes, sha256
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(relay_id, sequence) DO NOTHING;",
           [
             sqlight.text(frame.relay_id),
             sqlight.int(frame.sequence),
             sqlight.int(frame.received_at_ms),
             sqlight.text(frame.mode),
+            sqlight.text(frame.privacy),
             sqlight.text(frame.blob_key),
             sqlight.int(frame.event_count),
             sqlight.int(frame.bytes),
@@ -409,7 +445,7 @@ pub fn relay_frame(
       let Store(connection) = store
       case
         sqlight.query(
-          "SELECT relay_id, sequence, received_at_ms, mode, blob_key,
+          "SELECT relay_id, sequence, received_at_ms, mode, privacy, blob_key,
                   event_count, bytes, sha256
            FROM relay_frames WHERE relay_id = ? AND sequence = ?;",
           on: connection,
@@ -437,7 +473,7 @@ pub fn relay_frames(
     True -> {
       let Store(connection) = store
       sqlight.query(
-        "SELECT relay_id, sequence, received_at_ms, mode, blob_key,
+        "SELECT relay_id, sequence, received_at_ms, mode, privacy, blob_key,
                 event_count, bytes, sha256
          FROM relay_frames
          WHERE relay_id = ? ORDER BY sequence ASC LIMIT ? OFFSET ?;",
@@ -509,7 +545,7 @@ pub fn relay_frames_before(
     True -> {
       let Store(connection) = store
       sqlight.query(
-        "SELECT relay_id, sequence, received_at_ms, mode, blob_key,
+        "SELECT relay_id, sequence, received_at_ms, mode, privacy, blob_key,
                 event_count, bytes, sha256
          FROM relay_frames
          WHERE received_at_ms < ?
@@ -944,15 +980,17 @@ fn relay_frame_decoder() -> decode.Decoder(RelayFrameIndex) {
   use sequence <- decode.field(1, decode.int)
   use received_at_ms <- decode.field(2, decode.int)
   use mode <- decode.field(3, decode.string)
-  use blob_key <- decode.field(4, decode.string)
-  use event_count <- decode.field(5, decode.int)
-  use bytes <- decode.field(6, decode.int)
-  use sha256 <- decode.field(7, decode.string)
+  use privacy <- decode.field(4, decode.string)
+  use blob_key <- decode.field(5, decode.string)
+  use event_count <- decode.field(6, decode.int)
+  use bytes <- decode.field(7, decode.int)
+  use sha256 <- decode.field(8, decode.string)
   decode.success(RelayFrameIndex(
     relay_id,
     sequence,
     received_at_ms,
     mode,
+    privacy,
     blob_key,
     event_count,
     bytes,
@@ -1075,6 +1113,7 @@ fn valid_relay_frame(frame: RelayFrameIndex) -> Bool {
   && frame.sequence > 0
   && frame.received_at_ms >= 0
   && list.contains(["exact", "live"], frame.mode)
+  && list.contains(["metadata", "raw", "unknown"], frame.privacy)
   && valid_blob_key(frame.blob_key)
   && frame.event_count >= 0
   && frame.bytes > 0

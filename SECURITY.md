@@ -13,7 +13,7 @@ Supported security updates currently target the latest `0.x` release on OTP 27â€
 
 - Distribution cookies remain in the relay/local process and are never accepted as plaintext CLI arguments.
 - The team hub has no arbitrary RPC or code-loading capability on target nodes.
-- Raw capture is not a safe default. Team relay ingestion currently rejects it; any future enablement must be short-lived, permission-gated, audited, bounded, and redacted.
+- Raw capture is not a safe default. Team relay ingestion accepts it only with a short-lived relay-bound grant, mandatory redaction policy, atomic event/byte limits, and audit records. Reading `raw` or conservatively migrated `unknown` content requires Admin or the combined Investigator and Raw Capture roles, and authorization precedes every blob fetch.
 - `.beamtrace` files are untrusted input. Import performs path, duplicate-entry, size, ratio, structure, and checksum validation.
 - Self-contained HTML export has no network access and removes raw display values by default.
 
