@@ -22,7 +22,7 @@ $expectations = [ordered]@{
     )
     'docs/architecture.md' = @(
         'relay_frames.event_count',
-        'SQLite WAL schema version 6',
+        'SQLite WAL schema version 7',
         'Audit chains are verified when the team runtime opens',
         'Registered relay public keys are restored after a hub restart',
         'Credit is replenished only after durable acceptance',
