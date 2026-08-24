@@ -22,6 +22,7 @@ pub fn accepted_frame_is_durable_and_readable_after_reopen_test() {
       payload,
       1234,
     )
+  frame.privacy |> should.equal("unknown")
   team_store.close(store) |> should.equal(Ok(Nil))
 
   let assert Ok(reopened) = team_store.open(database)

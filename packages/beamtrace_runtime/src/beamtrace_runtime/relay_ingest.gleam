@@ -128,6 +128,7 @@ fn accept_validated(
                 relay_id,
                 sequence,
                 mode,
+                batch_privacy(batch),
                 batch.canonical,
                 batch.event_count,
                 received_at_ms,
@@ -174,6 +175,7 @@ fn persist_and_publish(
   relay_id: String,
   sequence: Int,
   mode: relay_inbox.Mode,
+  privacy: relay_inbox.Privacy,
   payload: String,
   event_count: Int,
   received_at_ms: Int,
@@ -183,12 +185,13 @@ fn persist_and_publish(
     relay_inbox.Live -> relay_archive.Live
   }
   case
-    relay_archive.persist_events_with(
+    relay_archive.persist_events_classified_with(
       metadata,
       backend,
       relay_id,
       sequence,
       archive_mode,
+      privacy,
       payload,
       received_at_ms,
       event_count: event_count,
@@ -201,9 +204,17 @@ fn persist_and_publish(
         relay_id,
         sequence,
         mode,
+        privacy,
         payload,
         received_at_ms,
       )
+  }
+}
+
+fn batch_privacy(batch: relay_payload.Batch) -> relay_inbox.Privacy {
+  case batch.privacy {
+    relay_payload.MetadataBatch -> relay_inbox.Metadata
+    relay_payload.RawBatch(_, _) -> relay_inbox.Raw
   }
 }
 

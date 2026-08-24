@@ -12,8 +12,17 @@ pub type AppendStatus {
   Truncated(reason: String)
 }
 
+/// Privacy is stored beside each payload so authorization can be decided
+/// without decoding or returning the payload. Unknown is the conservative
+/// classification for frames written before this field existed.
+pub type Privacy {
+  Metadata
+  Raw
+  Unknown
+}
+
 pub type Entry {
-  Payload(sequence: Int, payload: String, received_at_ms: Int)
+  Payload(sequence: Int, privacy: Privacy, payload: String, received_at_ms: Int)
   Gap(dropped_frames: Int, reason: String, received_at_ms: Int)
 }
 
@@ -30,6 +39,7 @@ pub fn append(
   relay_id: String,
   sequence: Int,
   mode: Mode,
+  privacy: Privacy,
   payload: String,
   received_at_ms: Int,
 ) -> Result(AppendStatus, String)

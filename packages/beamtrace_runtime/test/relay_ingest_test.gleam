@@ -7,7 +7,7 @@ import beamtrace_runtime/relay_payload
 import beamtrace_runtime/team_store
 import gleam/int
 import gleam/list
-import gleam/option.{None}
+import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
 
@@ -62,7 +62,11 @@ pub fn durable_commit_precedes_live_inbox_visibility_test() {
   )
   |> should.equal(Ok(relay_inbox.Accepted))
   relay_inbox.snapshot(inbox, relay_id)
-  |> should.equal([relay_inbox.Payload(1, payload, 3000)])
+  |> should.equal([
+    relay_inbox.Payload(1, relay_inbox.Metadata, payload, 3000),
+  ])
+  let assert Ok(Some(index)) = team_store.relay_frame(metadata, relay_id, 1)
+  index.privacy |> should.equal("metadata")
 
   // The immutable blob rejects a conflicting replay before inbox publication.
   relay_ingest.accept(
@@ -77,7 +81,9 @@ pub fn durable_commit_precedes_live_inbox_visibility_test() {
   )
   |> should.equal(Error("blob_conflict"))
   relay_inbox.snapshot(inbox, relay_id)
-  |> should.equal([relay_inbox.Payload(1, payload, 3000)])
+  |> should.equal([
+    relay_inbox.Payload(1, relay_inbox.Metadata, payload, 3000),
+  ])
 
   relay_inbox.close(inbox)
   team_store.close(metadata) |> should.equal(Ok(Nil))
@@ -122,7 +128,7 @@ pub fn durable_quota_rejects_before_blob_or_inbox_publication_test() {
   blob_store.read(blobs, "relays/relay-876543210fedcba987654321/frames/2.json")
   |> should.equal(Error("blob_not_found"))
   relay_inbox.snapshot(inbox, relay_id)
-  |> should.equal([relay_inbox.Payload(1, first, 4000)])
+  |> should.equal([relay_inbox.Payload(1, relay_inbox.Metadata, first, 4000)])
 
   relay_inbox.close(inbox)
   team_store.close(metadata) |> should.equal(Ok(Nil))
@@ -160,10 +166,12 @@ pub fn raw_ingest_requires_matching_grant_and_never_persists_the_token_test() {
     5500,
   )
   |> should.equal(Ok(relay_inbox.Accepted))
-  let assert [relay_inbox.Payload(1, persisted, 5500)] =
+  let assert [relay_inbox.Payload(1, relay_inbox.Raw, persisted, 5500)] =
     relay_inbox.snapshot(inbox, relay_id)
   persisted |> should.equal(decoded.canonical)
   persisted |> string.contains(issued.token) |> should.be_false()
+  let assert Ok(Some(index)) = team_store.relay_frame(metadata, relay_id, 1)
+  index.privacy |> should.equal("raw")
 
   relay_ingest.accept(
     metadata,

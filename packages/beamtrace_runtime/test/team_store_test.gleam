@@ -72,6 +72,7 @@ pub fn sqlite_wal_store_persists_relay_frame_indexes_test() {
       sequence: 7,
       received_at_ms: 2000,
       mode: "exact",
+      privacy: "raw",
       blob_key: "relays/relay-aabbccddeeff001122334455/frames/7.json",
       event_count: 3,
       bytes: 25,
@@ -100,6 +101,7 @@ pub fn schema_v2_relay_frames_migrate_with_conservative_event_counts_test() {
   team_store.relay_usage(store, relay_id) |> should.equal(Ok(#(1, 5)))
   let assert Ok(Some(frame)) = team_store.relay_frame(store, relay_id, 1)
   frame.event_count |> should.equal(1)
+  frame.privacy |> should.equal("unknown")
   team_store.close(store) |> should.equal(Ok(Nil))
 }
 

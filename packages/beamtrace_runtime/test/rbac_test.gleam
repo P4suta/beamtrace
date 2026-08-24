@@ -21,7 +21,17 @@ pub fn raw_capture_requires_separate_permission_test() {
   rbac.authorize([rbac.Admin], rbac.RawCapture) |> should.be_true()
 }
 
+pub fn raw_trace_reads_require_investigator_and_raw_roles_or_admin_test() {
+  rbac.authorize([rbac.Viewer], rbac.ViewRawTrace) |> should.be_false()
+  rbac.authorize([rbac.Investigator], rbac.ViewRawTrace) |> should.be_false()
+  rbac.authorize([rbac.RawCaptureRole], rbac.ViewRawTrace) |> should.be_false()
+  rbac.authorize([rbac.Investigator, rbac.RawCaptureRole], rbac.ViewRawTrace)
+  |> should.be_true()
+  rbac.authorize([rbac.Admin], rbac.ViewRawTrace) |> should.be_true()
+}
+
 pub fn audit_classifies_sensitive_actions_test() {
   rbac.audit_class(rbac.RawCapture) |> should.equal(rbac.Sensitive)
+  rbac.audit_class(rbac.ViewRawTrace) |> should.equal(rbac.Sensitive)
   rbac.audit_class(rbac.ViewSession) |> should.equal(rbac.ReadOnly)
 }

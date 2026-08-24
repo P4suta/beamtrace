@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace_runtime/blob_store
+import beamtrace_runtime/relay_inbox
 import beamtrace_runtime/team_store
 import gleam/bit_array
 import gleam/int
@@ -88,6 +89,30 @@ pub fn persist_events_with(
   received_at_ms: Int,
   event_count event_count: Int,
 ) -> Result(team_store.RelayFrameIndex, String) {
+  persist_events_classified_with(
+    store,
+    backend,
+    relay_id,
+    sequence,
+    mode,
+    relay_inbox.Unknown,
+    payload,
+    received_at_ms,
+    event_count: event_count,
+  )
+}
+
+pub fn persist_events_classified_with(
+  store: team_store.Store,
+  backend: blob_store.Backend,
+  relay_id: String,
+  sequence: Int,
+  mode: Mode,
+  privacy: relay_inbox.Privacy,
+  payload: String,
+  received_at_ms: Int,
+  event_count event_count: Int,
+) -> Result(team_store.RelayFrameIndex, String) {
   case valid_input(relay_id, sequence, event_count, received_at_ms) {
     False -> Error("invalid_relay_frame")
     True -> {
@@ -106,6 +131,7 @@ pub fn persist_events_with(
               sequence: sequence,
               received_at_ms: received_at_ms,
               mode: mode_name(mode),
+              privacy: privacy_name(privacy),
               blob_key: blob.key,
               event_count: event_count,
               bytes: blob.bytes,
@@ -206,6 +232,14 @@ fn mode_name(mode: Mode) -> String {
   case mode {
     Exact -> "exact"
     Live -> "live"
+  }
+}
+
+fn privacy_name(privacy: relay_inbox.Privacy) -> String {
+  case privacy {
+    relay_inbox.Metadata -> "metadata"
+    relay_inbox.Raw -> "raw"
+    relay_inbox.Unknown -> "unknown"
   }
 }
 

@@ -1,7 +1,7 @@
 %% SPDX-License-Identifier: Apache-2.0 OR MIT
 -module(beamtrace_relay_inbox_ffi).
 
--export([new/2, append/6, snapshot/2, window/4, close/1]).
+-export([new/2, append/7, snapshot/2, window/4, close/1]).
 
 -define(MAX_FRAME_BYTES, 1048576).
 -define(CALL_TIMEOUT, 5000).
@@ -19,8 +19,10 @@ new(MaxFrames, MaxBytes) when is_integer(MaxFrames), is_integer(MaxBytes) ->
         })
     end).
 
-append(Store, RelayId, Sequence, Mode, Payload, ReceivedAtMs) ->
-    call(Store, {append, RelayId, Sequence, Mode, Payload, ReceivedAtMs}).
+append(Store, RelayId, Sequence, Mode, Privacy, Payload, ReceivedAtMs) ->
+    call(Store, {
+        append, RelayId, Sequence, Mode, Privacy, Payload, ReceivedAtMs
+    }).
 
 snapshot(Store, RelayId) ->
     case call(Store, {snapshot, RelayId}) of
@@ -71,9 +73,9 @@ loop(State = #{owner := Owner, monitor := Monitor}) ->
             From ! {Reference, {ok, {window, Page, Total, Start, Limit}}},
             loop(State);
         {call, From, Reference,
-                {append, RelayId, Sequence, Mode, Payload, ReceivedAtMs}} ->
+                {append, RelayId, Sequence, Mode, Privacy, Payload, ReceivedAtMs}} ->
             {Reply, Next} = append_frame(
-                RelayId, Sequence, Mode, Payload, ReceivedAtMs, State
+                RelayId, Sequence, Mode, Privacy, Payload, ReceivedAtMs, State
             ),
             From ! {Reference, Reply},
             loop(Next);
@@ -83,50 +85,51 @@ loop(State = #{owner := Owner, monitor := Monitor}) ->
             loop(State)
     end.
 
-append_frame(RelayId, Sequence, Mode, Payload, ReceivedAtMs, State)
+append_frame(RelayId, Sequence, Mode, Privacy, Payload, ReceivedAtMs, State)
         when is_binary(RelayId), byte_size(RelayId) > 0, byte_size(RelayId) =< 128,
              is_integer(Sequence), Sequence > 0,
              (Mode =:= exact orelse Mode =:= live),
+             (Privacy =:= metadata orelse Privacy =:= raw orelse Privacy =:= unknown),
              is_binary(Payload), is_integer(ReceivedAtMs) ->
     MaxBytes = maps:get(max_bytes, State),
     Size = byte_size(Payload),
     case Size =< ?MAX_FRAME_BYTES andalso Size =< MaxBytes of
         false -> {{error, <<"frame_too_large">>}, State};
         true -> append_valid(
-            RelayId, Sequence, Mode, Payload, Size, ReceivedAtMs, State
+            RelayId, Sequence, Mode, Privacy, Payload, Size, ReceivedAtMs, State
         )
     end;
-append_frame(_RelayId, _Sequence, _Mode, _Payload, _ReceivedAtMs, State) ->
+append_frame(_RelayId, _Sequence, _Mode, _Privacy, _Payload, _ReceivedAtMs, State) ->
     {{error, <<"invalid_frame">>}, State}.
 
-append_valid(RelayId, Sequence, Mode, Payload, Size, ReceivedAtMs, State) ->
+append_valid(RelayId, Sequence, Mode, Privacy, Payload, Size, ReceivedAtMs, State) ->
     Relays = maps:get(relays, State),
     Relay = maps:get(RelayId, Relays, new_relay(Mode)),
     case maps:get(mode, Relay) =:= Mode of
         false -> {{error, <<"mode_mismatch">>}, State};
         true -> append_for_mode(
-            RelayId, Sequence, Payload, Size, ReceivedAtMs, Relay, State
+            RelayId, Sequence, Privacy, Payload, Size, ReceivedAtMs, Relay, State
         )
     end.
 
-append_for_mode(_RelayId, _Sequence, _Payload, _Size, _ReceivedAtMs,
+append_for_mode(_RelayId, _Sequence, _Privacy, _Payload, _Size, _ReceivedAtMs,
                 #{mode := exact, truncated := true}, State) ->
     {{ok, {truncated, <<"hub_inbox_budget">>}}, State};
-append_for_mode(RelayId, Sequence, Payload, Size, ReceivedAtMs,
+append_for_mode(RelayId, Sequence, Privacy, Payload, Size, ReceivedAtMs,
                 Relay = #{mode := exact}, State) ->
     case fits(Relay, Size, State) of
         true ->
-            NextRelay = enqueue(Sequence, Payload, Size, ReceivedAtMs, Relay),
+            NextRelay = enqueue(Sequence, Privacy, Payload, Size, ReceivedAtMs, Relay),
             {{ok, accepted}, put_relay(RelayId, NextRelay, State)};
         false ->
             Truncated = Relay#{truncated => true},
             {{ok, {truncated, <<"hub_inbox_budget">>}},
              put_relay(RelayId, Truncated, State)}
     end;
-append_for_mode(RelayId, Sequence, Payload, Size, ReceivedAtMs,
+append_for_mode(RelayId, Sequence, Privacy, Payload, Size, ReceivedAtMs,
                 Relay = #{mode := live}, State) ->
     Room = make_room(Relay, Size, State),
-    NextRelay = enqueue(Sequence, Payload, Size, ReceivedAtMs, Room),
+    NextRelay = enqueue(Sequence, Privacy, Payload, Size, ReceivedAtMs, Room),
     {{ok, accepted}, put_relay(RelayId, NextRelay, State)}.
 
 new_relay(Mode) ->
@@ -149,7 +152,7 @@ make_room(Relay, Size, State) ->
         true -> Relay;
         false ->
             case queue:out(maps:get(queue, Relay)) of
-                {{value, {payload, _Sequence, DroppedPayload, _At}}, Rest} ->
+                {{value, {payload, _Sequence, _Privacy, DroppedPayload, _At}}, Rest} ->
                     Reduced = Relay#{
                         queue => Rest,
                         count => maps:get(count, Relay) - 1,
@@ -161,10 +164,11 @@ make_room(Relay, Size, State) ->
             end
     end.
 
-enqueue(Sequence, Payload, Size, ReceivedAtMs, Relay) ->
+enqueue(Sequence, Privacy, Payload, Size, ReceivedAtMs, Relay) ->
     Relay#{
         queue => queue:in(
-            {payload, Sequence, Payload, ReceivedAtMs}, maps:get(queue, Relay)
+            {payload, Sequence, Privacy, Payload, ReceivedAtMs},
+            maps:get(queue, Relay)
         ),
         count => maps:get(count, Relay) + 1,
         bytes => maps:get(bytes, Relay) + Size,

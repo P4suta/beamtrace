@@ -321,7 +321,14 @@ fn relay_frames_response(
         Ok(session) ->
           case rbac.authorize(session.roles, rbac.ViewSession) {
             False -> wisp.response(403)
-            True -> relay_frames_for_authorized(incoming, security, relay_id)
+            True ->
+              relay_frames_for_authorized(
+                incoming,
+                security,
+                session,
+                relay_id,
+                now_ms,
+              )
           }
       }
     _, _ -> wisp.not_found()
@@ -331,47 +338,81 @@ fn relay_frames_response(
 fn relay_frames_for_authorized(
   incoming: wisp.Request,
   security: TeamSecurity,
+  session: team_auth.Session,
   relay_id: String,
+  now_ms: Int,
 ) -> wisp.Response {
   case valid_relay_id(relay_id), relay_pagination(incoming) {
     False, _ -> wisp.not_found()
     _, Error(_) -> wisp.json_response("{\"error\":\"invalid_window\"}", 400)
     True, Ok(page) -> {
       let #(start, limit) = page
-      relay_frames_from_sources(security, relay_id, start, limit)
+      relay_frames_from_sources(
+        security,
+        session,
+        relay_id,
+        start,
+        limit,
+        now_ms,
+      )
     }
   }
 }
 
 fn relay_frames_from_sources(
   security: TeamSecurity,
+  session: team_auth.Session,
   relay_id: String,
   start: Int,
   limit: Int,
+  now_ms: Int,
 ) -> wisp.Response {
   case security.relay_inbox {
     None ->
-      relay_frames_from_archive(security.relay_archive, relay_id, start, limit)
+      relay_frames_from_archive(
+        security,
+        session,
+        relay_id,
+        start,
+        limit,
+        now_ms,
+      )
     Some(inbox) ->
       case relay_inbox.window(inbox, relay_id, start:, limit:) {
         Error(_) -> wisp.response(503)
         Ok(window) ->
           case window.total == 0, security.relay_archive {
-            True, Some(archive) ->
-              relay_frames_from_archive(Some(archive), relay_id, start, limit)
-            _, _ -> relay_window_response(window)
+            True, Some(_) ->
+              relay_frames_from_archive(
+                security,
+                session,
+                relay_id,
+                start,
+                limit,
+                now_ms,
+              )
+            _, _ ->
+              relay_window_for_session(
+                security,
+                session,
+                relay_id,
+                window,
+                now_ms,
+              )
           }
       }
   }
 }
 
 fn relay_frames_from_archive(
-  archive: Option(RelayArchive),
+  security: TeamSecurity,
+  session: team_auth.Session,
   relay_id: String,
   start: Int,
   limit: Int,
+  now_ms: Int,
 ) -> wisp.Response {
-  case archive {
+  case security.relay_archive {
     None -> wisp.not_found()
     Some(archive) -> {
       let #(store, backend) = relay_archive_parts(archive)
@@ -380,15 +421,27 @@ fn relay_frames_from_archive(
         team_store.relay_frames(store, relay_id, start:, limit:)
       {
         Ok(total), Ok(frames) ->
-          case durable_relay_entries(backend, frames) {
-            Error(_) -> wisp.response(503)
-            Ok(entries) ->
-              relay_window_response(relay_inbox.Window(
-                entries,
-                total,
-                start,
-                limit,
-              ))
+          case
+            authorize_relay_contents(
+              security,
+              session,
+              relay_id,
+              relay_frames_require_raw(frames),
+              now_ms,
+            )
+          {
+            False -> wisp.response(403)
+            True ->
+              case durable_relay_entries(backend, frames) {
+                Error(_) -> wisp.response(503)
+                Ok(entries) ->
+                  relay_window_response(relay_inbox.Window(
+                    entries,
+                    total,
+                    start,
+                    limit,
+                  ))
+              }
           }
         _, _ -> wisp.response(503)
       }
@@ -421,6 +474,7 @@ fn durable_relay_entries(
               Ok([
                 relay_inbox.Payload(
                   frame.sequence,
+                  privacy_from_name(frame.privacy),
                   payload,
                   frame.received_at_ms,
                 ),
@@ -444,12 +498,75 @@ fn relay_window_response(window: relay_inbox.Window) -> wisp.Response {
   )
 }
 
+fn relay_window_for_session(
+  security: TeamSecurity,
+  session: team_auth.Session,
+  relay_id: String,
+  window: relay_inbox.Window,
+  now_ms: Int,
+) -> wisp.Response {
+  case
+    authorize_relay_contents(
+      security,
+      session,
+      relay_id,
+      relay_entries_require_raw(window.entries),
+      now_ms,
+    )
+  {
+    False -> wisp.response(403)
+    True -> relay_window_response(window)
+  }
+}
+
+fn authorize_relay_contents(
+  security: TeamSecurity,
+  session: team_auth.Session,
+  relay_id: String,
+  requires_raw: Bool,
+  now_ms: Int,
+) -> Bool {
+  case requires_raw {
+    False -> True
+    True -> {
+      let allowed = rbac.authorize(session.roles, rbac.ViewRawTrace)
+      audit_store.append(
+        security.audit,
+        now_ms,
+        session.subject,
+        "raw_trace.read",
+        "relay:" <> relay_id,
+        case allowed {
+          True -> "allowed"
+          False -> "denied_rbac"
+        },
+      )
+      allowed
+    }
+  }
+}
+
+fn relay_entries_require_raw(entries: List(relay_inbox.Entry)) -> Bool {
+  list.any(entries, fn(entry) {
+    case entry {
+      relay_inbox.Payload(_, relay_inbox.Metadata, _, _) -> False
+      relay_inbox.Payload(_, _, _, _) -> True
+      relay_inbox.Gap(_, _, _) -> False
+    }
+  })
+}
+
+fn relay_frames_require_raw(frames: List(team_store.RelayFrameIndex)) -> Bool {
+  list.any(frames, fn(frame) { frame.privacy != "metadata" })
+}
+
 fn relay_entry_json(entry: relay_inbox.Entry) -> json.Json {
   case entry {
-    relay_inbox.Payload(sequence, payload, received_at_ms) ->
+    relay_inbox.Payload(sequence, privacy, payload, received_at_ms) ->
       json.object([
         #("kind", json.string("payload")),
         #("sequence", json.int(sequence)),
+        #("privacy", json.string(privacy_name(privacy))),
         #("payload", json.string(payload)),
         #("received_at_ms", json.int(received_at_ms)),
       ])
@@ -460,6 +577,22 @@ fn relay_entry_json(entry: relay_inbox.Entry) -> json.Json {
         #("reason", json.string(reason)),
         #("received_at_ms", json.int(received_at_ms)),
       ])
+  }
+}
+
+fn privacy_from_name(name: String) -> relay_inbox.Privacy {
+  case name {
+    "metadata" -> relay_inbox.Metadata
+    "raw" -> relay_inbox.Raw
+    _ -> relay_inbox.Unknown
+  }
+}
+
+fn privacy_name(privacy: relay_inbox.Privacy) -> String {
+  case privacy {
+    relay_inbox.Metadata -> "metadata"
+    relay_inbox.Raw -> "raw"
+    relay_inbox.Unknown -> "unknown"
   }
 }
 
