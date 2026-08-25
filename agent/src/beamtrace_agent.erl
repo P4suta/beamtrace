@@ -985,7 +985,13 @@ semantic(Message, _Preset) -> classify_message(Message).
 timestamp_ns(Value) when is_integer(Value) -> Value;
 timestamp_ns({Monotonic, _Unique}) when is_integer(Monotonic) -> Monotonic;
 timestamp_ns({MegaSeconds, Seconds, MicroSeconds}) ->
-    ((MegaSeconds * 1000000 + Seconds) * 1000000000) + MicroSeconds * 1000;
+    %% Meta call tracing can emit the legacy wall-clock tuple even when the
+    %% process and sequential trace flags request monotonic timestamps. Map
+    %% that observation into the node's monotonic domain before it enters the
+    %% capture. Unix time is introduced only by exporters that require it.
+    SystemNanoseconds =
+        ((MegaSeconds * 1000000 + Seconds) * 1000000000) + MicroSeconds * 1000,
+    SystemNanoseconds - erlang:time_offset(nanosecond);
 timestamp_ns(_Other) -> erlang:monotonic_time(nanosecond).
 
 new_capture_id() ->
