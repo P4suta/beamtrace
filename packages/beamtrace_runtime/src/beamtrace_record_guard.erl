@@ -190,8 +190,12 @@ ensure_native_epmd() ->
     end.
 
 start_epmd_daemon() ->
-    case epmd_executable() of
-        false -> {error, epmd_executable_not_found};
+    %% Let the platform's standard erl launcher bootstrap EPMD. In particular,
+    %% erlexec uses a detached CreateProcess with handle inheritance disabled
+    %% on Windows; spawning `epmd -daemon` as a port bypasses that boundary and
+    %% leaves the daemon holding a caller's redirected stdout/stderr handles.
+    case erl_executable_from_runtime() of
+        false -> {error, erl_executable_not_found};
         Executable ->
             try
                 Port = open_port(
@@ -201,7 +205,8 @@ start_epmd_daemon() ->
                         exit_status,
                         stderr_to_stdout,
                         use_stdio,
-                        {args, epmd_arguments()}
+                        {args, epmd_bootstrap_arguments()},
+                        {env, epmd_bootstrap_environment()}
                     ]
                 ),
                 collect_epmd_start(
@@ -215,29 +220,32 @@ start_epmd_daemon() ->
             end
     end.
 
-epmd_executable() ->
-    case os:find_executable("epmd") of
-        false -> epmd_executable_from_runtime();
-        Executable -> Executable
-    end.
-
-epmd_executable_from_runtime() ->
+erl_executable_from_runtime() ->
     case init:get_argument(bindir) of
-        {ok, [[Bindir] | _]} -> os:find_executable("epmd", Bindir);
+        {ok, [[Bindir] | _]} -> os:find_executable("erl", Bindir);
         _ -> false
     end.
 
-epmd_arguments() ->
-    case os:getenv("ERL_EPMD_PORT") of
-        false -> ["-daemon"];
-        Value ->
-            Trimmed = string:trim(Value),
-            case string:to_integer(Trimmed) of
-                {Port, []} when Port >= 1, Port =< 65535 ->
-                    ["-port", Trimmed, "-daemon"];
-                _ -> erlang:error({invalid_record_epmd_port, Value})
-            end
-    end.
+epmd_bootstrap_arguments() ->
+    Name = "beamtrace_epmd_" ++ integer_to_list(
+        erlang:unique_integer([positive, monotonic])
+    ),
+    ["-sname", Name, "-noshell", "-eval", "halt(0)."].
+
+epmd_bootstrap_environment() ->
+    [
+        {"ERL_AFLAGS", false},
+        {"ERL_FLAGS", false},
+        {"ERL_ZFLAGS", false},
+        {"BEAMTRACE_RECORD_GATE", false},
+        {"BEAMTRACE_RECORD_FINISH_GATE", false},
+        {"BEAMTRACE_RECORD_TRIGGER_MODULE", false},
+        {"BEAMTRACE_RECORD_NODE_NAME", false},
+        {"BEAMTRACE_RECORD_NAME_DOMAIN", false},
+        {"BEAMTRACE_RECORD_GUARD_BEAM", false},
+        {"BEAMTRACE_RECORD_DIRECT_VM", false},
+        {"BEAMTRACE_RECORD_WRAPPER", false}
+    ].
 
 collect_epmd_start(Port, Output, Deadline) ->
     Remaining = erlang:max(
