@@ -1,13 +1,5 @@
 # Changelog
 
-## 0.3.0 (2026-08-26)
-
-- Replace completeness and numeric confidence claims with structured capture outcomes, integrity issues, receipts, and reproducible inference inputs.
-- Introduce `.beamtrace` schema v2 with node-relative instants, full seq_trace serial pairs, paired graph segments, clock calibration, strict checksums, validation, and explicit v1 migration.
-- Add seal/drain delivery barriers, batch sequence and receipt verification, configurable drain deadlines, and before/after minimum-RTT clock probes.
-- Publish API v2, relay protocol v3, interval-aware OTLP export, indexed DAG/diff/diagnostics, and graph-only Web Canvas rendering.
-- Retain v1 archives and relay protocol v2 as migration inputs; all new archives and relay sessions use v2/v3 contracts.
-
 ## [0.2.0](https://github.com/P4suta/beamtrace/compare/v0.1.1...v0.2.0) (2026-08-25)
 
 

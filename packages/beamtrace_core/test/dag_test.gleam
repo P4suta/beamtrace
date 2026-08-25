@@ -1,6 +1,6 @@
 import beamtrace/dag
 import beamtrace/types
-import gleam/option.{Some}
+import gleam/option.{None, Some}
 import gleeunit
 import gleeunit/should
 
@@ -117,6 +117,59 @@ pub fn distributed_clock_skew_does_not_break_serial_causality_test() {
     )),
   )
   graph.boundaries |> should.equal([])
+  dag.is_acyclic(graph) |> should.be_true()
+}
+
+pub fn trace_timestamp_precedes_mailbox_delivery_order_test() {
+  let parent = process("one@host", "<0.10.0>", "parent")
+  let child = process("one@host", "<0.20.0>", "child")
+  let serial = types.SequenceSerial(40, 41)
+  // Messages emitted by the seq_trace system tracer and the isolated trace
+  // session can reach the collector mailbox in a different order. The
+  // monotonic timestamp still records the causal order shown by offset_ns.
+  let events = [
+    types.TraceEvent(
+      ..event("root", 1, parent, types.Root(types.Mfa("api", "run", 0), [])),
+      local_instant: types.LocalInstant(1, 0),
+    ),
+    types.TraceEvent(
+      ..event(
+        "parent-receive",
+        5,
+        parent,
+        types.Received(child.physical, types.Tag("ready"), serial),
+      ),
+      local_instant: types.LocalInstant(5, 1),
+    ),
+    types.TraceEvent(
+      ..event(
+        "spawn",
+        2,
+        parent,
+        types.Spawn(child.physical, types.Mfa("worker", "start", 0)),
+      ),
+      local_instant: types.LocalInstant(2, 4),
+    ),
+    types.TraceEvent(
+      ..event("child-first", 3, child, types.SystemSignal("spawned", 0)),
+      local_instant: types.LocalInstant(3, 2),
+    ),
+    types.TraceEvent(
+      ..event(
+        "child-send",
+        4,
+        child,
+        types.Send(parent.physical, types.Tag("ready"), serial),
+      ),
+      local_instant: types.LocalInstant(4, 3),
+    ),
+  ]
+
+  let assert Ok(graph) = dag.build(events)
+  dag.edge_between(graph, "spawn", "child-first")
+  |> should.not_equal(None)
+  dag.edge_between(graph, "child-send", "parent-receive")
+  |> should.not_equal(None)
   dag.is_acyclic(graph) |> should.be_true()
 }
 

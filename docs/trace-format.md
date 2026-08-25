@@ -19,7 +19,7 @@ Event and graph segments are contiguous six-digit sequences. Every event segment
 
 `manifest.json` records schema/tool versions, capture ID, observed nodes, privacy policy, and a structured `CaptureOutcome`. The outcome separates the observation end (`quiet_period`, `time_window`, `user_stopped`, `budget_reached`, `agent_failure`, or `legacy_unknown`) from integrity issues and per-node final receipts. `delivery_verified` is derived only when the issue list is empty and at least one receipt exists; it is not stored as a claim.
 
-Each event stores `LocalInstant {offset_ns, order}`. Both values are non-negative JavaScript-safe integers relative to a node-local origin. They may order events on the same node only. Full seq_trace identifiers are `{previous,current}`; a migrated v1 value is tagged `legacy` and cannot establish an exact edge when it collides.
+Each event stores `LocalInstant {offset_ns, order}`. Both values are non-negative JavaScript-safe integers relative to node-local origins. Within one node they are compared lexicographically, with monotonic `offset_ns` first and strict trace `order` only as its tie breaker. Collector mailbox arrival order is not causal. Full seq_trace identifiers are `{previous,current}`; a migrated v1 value is tagged `legacy` and cannot establish an exact edge when it collides.
 
 Evidence is either `{"kind":"exact"}` or a structured inference containing `method`, `reason`, and bounded inputs. Inputs identify evidence events, observed values, and algorithm settings. Schema v2 has no confidence field.
 

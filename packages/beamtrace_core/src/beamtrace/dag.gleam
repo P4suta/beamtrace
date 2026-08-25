@@ -122,9 +122,13 @@ fn compare_local(
   left: types.TraceEvent,
   right: types.TraceEvent,
 ) -> order.Order {
-  case int.compare(left.local_instant.order, right.local_instant.order) {
-    order.Eq ->
-      int.compare(left.local_instant.offset_ns, right.local_instant.offset_ns)
+  // OTP strict monotonic trace instants are lexicographic: monotonic time is
+  // primary and the unique order is its tie breaker. Collector mailbox
+  // delivery can interleave trace sessions, so arrival order is not causal.
+  case
+    int.compare(left.local_instant.offset_ns, right.local_instant.offset_ns)
+  {
+    order.Eq -> int.compare(left.local_instant.order, right.local_instant.order)
     other -> other
   }
 }
@@ -435,14 +439,14 @@ fn compare_topology_event(
       {
         order.Eq ->
           case
-            int.compare(left.local_instant.order, right.local_instant.order)
+            int.compare(
+              left.local_instant.offset_ns,
+              right.local_instant.offset_ns,
+            )
           {
             order.Eq ->
               case
-                int.compare(
-                  left.local_instant.offset_ns,
-                  right.local_instant.offset_ns,
-                )
+                int.compare(left.local_instant.order, right.local_instant.order)
               {
                 order.Eq -> string.compare(left.id, right.id)
                 compared -> compared

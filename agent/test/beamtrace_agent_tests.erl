@@ -246,8 +246,12 @@ exact_meta_trigger_and_cleanup() ->
     ?assert(lists:member(send, Kinds)),
     ?assert(lists:member('receive', Kinds)),
     Orders = [maps:get(local_order, Event) || Event <- Events],
-    ?assert(lists:all(fun(Order) -> is_integer(Order) andalso Order >= 0 end, Orders)),
-    ?assertEqual(Orders, lists:sort(Orders)),
+    ?assert(lists:all(
+        fun(Order) ->
+            is_integer(Order) andalso Order >= 0 andalso Order =< 9007199254740991
+        end,
+        Orders
+    )),
     ?assertEqual(length(Orders), length(lists:usort(Orders))),
     ok = beamtrace_agent:stop(Agent),
     timer:sleep(20),
