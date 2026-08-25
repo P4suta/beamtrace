@@ -15,6 +15,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'project-version.ps1')
+. (Join-Path $PSScriptRoot 'invoke-gleam-with-network-retry.ps1')
 $projectVersion = Get-BeamTraceVersion -RepositoryRoot $repoRoot
 if ($Version -ne $projectVersion) {
     throw "Published version $Version does not match project version $projectVersion."
@@ -42,12 +43,16 @@ try {
     Push-Location $consumer
     try {
         $expected = 'codec=round-trip dag_boundaries=1 diagnostic_messages=1'
-        $erlangOutput = (& gleam run --target erlang 2>&1 | Out-String).Trim()
-        if ($LASTEXITCODE -ne 0 -or -not $erlangOutput.EndsWith($expected)) {
+        $erlangRun = Invoke-GleamWithNetworkRetry -Arguments @('run', '--target', 'erlang')
+        $erlangOutput = $erlangRun.Output.Trim()
+        if ($erlangRun.ExitCode -ne 0 -or -not $erlangOutput.EndsWith($expected)) {
             throw "A clean Erlang consumer could not run beamtrace_core ${Version}:`n$erlangOutput"
         }
-        $javascriptOutput = (& gleam run --target javascript --runtime nodejs 2>&1 | Out-String).Trim()
-        if ($LASTEXITCODE -ne 0 -or -not $javascriptOutput.EndsWith($expected)) {
+        $javascriptRun = Invoke-GleamWithNetworkRetry -Arguments @(
+            'run', '--target', 'javascript', '--runtime', 'nodejs'
+        )
+        $javascriptOutput = $javascriptRun.Output.Trim()
+        if ($javascriptRun.ExitCode -ne 0 -or -not $javascriptOutput.EndsWith($expected)) {
             throw "A clean JavaScript consumer could not run beamtrace_core ${Version}:`n$javascriptOutput"
         }
     }

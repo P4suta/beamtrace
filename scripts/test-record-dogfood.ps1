@@ -18,6 +18,9 @@ $gleamTracePath = Join-Path $workRoot 'record-gleam.beamtrace'
 $jsonlPath = Join-Path $workRoot 'record.jsonl'
 $inspectRoot = Join-Path $workRoot 'inspect'
 $previousCleanupAssertion = $env:BEAMTRACE_RECORD_ASSERT_CLEANUP
+$previousEpmdPort = $env:ERL_EPMD_PORT
+$isolatedEpmdPort = $null
+$epmdCommand = (Get-Command epmd -ErrorAction Stop).Source
 $resolvedLauncher = $null
 if (-not [string]::IsNullOrWhiteSpace($Launcher)) {
     $resolvedLauncher = [IO.Path]::GetFullPath($Launcher)
@@ -60,6 +63,20 @@ try {
     if ($hostName -notmatch '^[A-Za-z0-9_.-]+$') {
         throw "The local node hostname is unsafe: $hostName"
     }
+
+    # A normal `erl -sname` launch starts EPMD for the user. `record` defers
+    # distribution until it has identified the final target VM, so prove the
+    # production path can bootstrap a clean, isolated EPMD instance itself.
+    $epmdPortProbe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    $epmdPortProbe.Start()
+    try {
+        $isolatedEpmdPort = ([Net.IPEndPoint]$epmdPortProbe.LocalEndpoint).Port
+    }
+    finally {
+        $epmdPortProbe.Stop()
+    }
+    $env:ERL_EPMD_PORT = [string]$isolatedEpmdPort
+
     $node = "beamtrace_record_$PID@$hostName"
     $expression = "P=spawn(fun()->beamtrace_agent_fixture:filtered_trigger({allowed,2}) end),R=erlang:monitor(process,P),receive {'DOWN',R,process,P,_}->ok end."
     $env:BEAMTRACE_RECORD_ASSERT_CLEANUP = '1'
@@ -71,6 +88,18 @@ try {
         '-eval', $expression
     )
     Invoke-CheckedBeamTrace -Arguments $recordArguments -Description 'Direct Erlang record dogfood'
+
+    $epmdNames = (& $epmdCommand -port ([string]$isolatedEpmdPort) -names 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0 -or $epmdNames -notmatch 'up and running') {
+        throw "Record did not bootstrap its isolated EPMD instance:`n$epmdNames"
+    }
+    $epmdKill = (& $epmdCommand -port ([string]$isolatedEpmdPort) -kill 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0 -or $epmdKill -notmatch 'Killed') {
+        throw "Could not stop the isolated record EPMD instance:`n$epmdKill"
+    }
+    $isolatedEpmdPort = $null
+    $env:ERL_EPMD_PORT = $previousEpmdPort
+
     if (-not (Test-Path -LiteralPath $tracePath -PathType Leaf)) {
         throw 'Record dogfood did not produce a trace archive.'
     }
@@ -152,6 +181,15 @@ try {
 }
 finally {
     $env:BEAMTRACE_RECORD_ASSERT_CLEANUP = $previousCleanupAssertion
+    $env:ERL_EPMD_PORT = $previousEpmdPort
+    if ($null -ne $isolatedEpmdPort) {
+        try {
+            & $epmdCommand -port ([string]$isolatedEpmdPort) -kill 2>&1 | Out-Null
+        }
+        catch {
+            Write-Warning "Could not stop the isolated EPMD during failure cleanup: $($_.Exception.Message)"
+        }
+    }
     if (Test-Path -LiteralPath $workRoot) {
         Remove-Item -LiteralPath $workRoot -Recurse -Force
     }

@@ -11,6 +11,9 @@
 
 -define(APPLICATION, beamtrace_record_guard_app).
 -define(FINAL_KEY, {?MODULE, final_target}).
+-define(EPMD_OUTPUT_LIMIT, 4096).
+-define(EPMD_READY_ATTEMPTS, 100).
+-define(EPMD_START_TIMEOUT_MS, 5000).
 
 prepare() ->
     case single_vm_wrapper() of
@@ -156,10 +159,117 @@ start_distribution() ->
         "longnames" -> longnames;
         Other -> erlang:error({invalid_record_name_domain, Other})
     end,
-    case net_kernel:start([list_to_atom(Name), Domain]) of
+    ok = ensure_epmd(),
+    case net_kernel:start(list_to_atom(Name), #{name_domain => Domain}) of
         {ok, _Pid} -> ok;
         {error, {already_started, _Pid}} -> ok;
         {error, Reason} -> erlang:error({record_distribution_failed, Reason})
+    end.
+
+%% `erl -sname` starts the native EPMD daemon when necessary, but a node that
+%% becomes distributed later through net_kernel:start/2 does not. `record`
+%% must defer distribution until the final target VM is known, so start EPMD
+%% here through a resolved executable and an argv list (never a shell).
+ensure_epmd() ->
+    case application:get_env(kernel, epmd_module, erl_epmd) of
+        erl_epmd -> ensure_native_epmd();
+        _AlternativeDiscovery -> ok
+    end.
+
+ensure_native_epmd() ->
+    case net_adm:names() of
+        {ok, _Names} -> ok;
+        {error, _Unavailable} ->
+            StartResult = start_epmd_daemon(),
+            case await_epmd_ready(?EPMD_READY_ATTEMPTS, unavailable) of
+                ok -> ok;
+                {error, LastReason} -> erlang:error({
+                    record_epmd_start_failed, StartResult, LastReason
+                })
+            end
+    end.
+
+start_epmd_daemon() ->
+    case epmd_executable() of
+        false -> {error, epmd_executable_not_found};
+        Executable ->
+            try
+                Port = open_port(
+                    {spawn_executable, Executable},
+                    [
+                        binary,
+                        exit_status,
+                        stderr_to_stdout,
+                        use_stdio,
+                        {args, epmd_arguments()}
+                    ]
+                ),
+                collect_epmd_start(
+                    Port,
+                    <<>>,
+                    erlang:monotonic_time(millisecond)
+                        + ?EPMD_START_TIMEOUT_MS
+                )
+            catch
+                Class:Reason -> {error, {Class, Reason}}
+            end
+    end.
+
+epmd_executable() ->
+    case os:find_executable("epmd") of
+        false -> epmd_executable_from_runtime();
+        Executable -> Executable
+    end.
+
+epmd_executable_from_runtime() ->
+    case init:get_argument(bindir) of
+        {ok, [[Bindir] | _]} -> os:find_executable("epmd", Bindir);
+        _ -> false
+    end.
+
+epmd_arguments() ->
+    case os:getenv("ERL_EPMD_PORT") of
+        false -> ["-daemon"];
+        Value ->
+            Trimmed = string:trim(Value),
+            case string:to_integer(Trimmed) of
+                {Port, []} when Port >= 1, Port =< 65535 ->
+                    ["-port", Trimmed, "-daemon"];
+                _ -> erlang:error({invalid_record_epmd_port, Value})
+            end
+    end.
+
+collect_epmd_start(Port, Output, Deadline) ->
+    Remaining = erlang:max(
+        0, Deadline - erlang:monotonic_time(millisecond)
+    ),
+    receive
+        {Port, {data, Data}} -> collect_epmd_start(
+            Port, append_epmd_output(Output, Data), Deadline
+        );
+        {Port, {exit_status, Status}} -> {exit_status, Status, Output}
+    after Remaining ->
+        try port_close(Port) catch _:_ -> ok end,
+        {error, {epmd_start_timeout, Output}}
+    end.
+
+append_epmd_output(Output, Data) ->
+    Combined = <<Output/binary, Data/binary>>,
+    Size = byte_size(Combined),
+    case Size =< ?EPMD_OUTPUT_LIMIT of
+        true -> Combined;
+        false -> binary:part(
+            Combined, Size - ?EPMD_OUTPUT_LIMIT, ?EPMD_OUTPUT_LIMIT
+        )
+    end.
+
+await_epmd_ready(0, LastReason) -> {error, LastReason};
+await_epmd_ready(Attempts, _LastReason) ->
+    case net_adm:names() of
+        {ok, _Names} -> ok;
+        {error, Reason} ->
+            timer:sleep(20),
+            await_epmd_ready(Attempts - 1, Reason)
     end.
 
 start_guard_application() ->

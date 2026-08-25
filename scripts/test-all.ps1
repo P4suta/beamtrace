@@ -10,6 +10,7 @@ $steps = @(
     'check-format.ps1',
     'test-brand.ps1',
     'test-brand-portability.ps1',
+    'test-gleam-network-retry.ps1',
     'test-core.ps1',
     'test-core-consumer.ps1',
     'test-runtime.ps1',

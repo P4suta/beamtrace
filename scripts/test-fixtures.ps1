@@ -4,6 +4,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $PSScriptRoot 'invoke-gleam-with-network-retry.ps1')
 
 & (Join-Path $PSScriptRoot 'ensure-rebar3.ps1')
 $env:PATH = "$PSScriptRoot;$env:PATH"
@@ -11,8 +12,11 @@ $env:REBAR_CACHE_DIR = Join-Path $repoRoot '.cache\rebar3'
 
 Push-Location (Join-Path $repoRoot 'fixtures\gleam')
 try {
-    & gleam deps download
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $download = Invoke-GleamWithNetworkRetry -Arguments @('deps', 'download')
+    if (-not [string]::IsNullOrWhiteSpace($download.Output)) {
+        Write-Host $download.Output.TrimEnd()
+    }
+    if ($download.ExitCode -ne 0) { exit $download.ExitCode }
     & gleam test
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
