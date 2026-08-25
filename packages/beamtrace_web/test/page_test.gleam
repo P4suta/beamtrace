@@ -20,7 +20,7 @@ pub fn api_page_decodes_only_renderable_metadata_test() {
   row.kind |> should.equal("exit")
   row.anomalous |> should.be_true()
   row.evidence
-  |> should.equal(workspace.Inferred("restart proximity", 0.9))
+  |> should.equal(workspace.Inferred("legacy_v1_inference", "restart proximity"))
 }
 
 pub fn malformed_page_is_rejected_without_partial_rows_test() {

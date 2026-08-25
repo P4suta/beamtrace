@@ -35,7 +35,7 @@ function cursorQuery(cursor, limit) {
 
 export function fetchTraces(cursor, onSuccess, onError) {
   complete(
-    request(`/api/v1/traces?${cursorQuery(cursor, 50)}`),
+    request(`/api/v2/traces?${cursorQuery(cursor, 50)}`),
     onSuccess,
     onError,
   );
@@ -44,7 +44,7 @@ export function fetchTraces(cursor, onSuccess, onError) {
 export function fetchEvents(traceId, cursor, onSuccess, onError) {
   complete(
     request(
-      `/api/v1/traces/${encodeURIComponent(traceId)}/events?${cursorQuery(cursor, 200)}`,
+      `/api/v2/traces/${encodeURIComponent(traceId)}/events?${cursorQuery(cursor, 200)}`,
     ),
     onSuccess,
     onError,
@@ -63,7 +63,7 @@ function cookie(name) {
 export function updateHold(traceId, enabled, onSuccess, onError) {
   const csrf = cookie("beamtrace_csrf");
   complete(
-    request(`/api/v1/traces/${encodeURIComponent(traceId)}/hold`, {
+    request(`/api/v2/traces/${encodeURIComponent(traceId)}/hold`, {
       method: enabled ? "POST" : "DELETE",
       headers: { "x-beamtrace-csrf": csrf },
     }),

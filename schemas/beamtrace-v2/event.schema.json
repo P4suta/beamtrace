@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://beamtrace.dev/schema/v2/event.schema.json",
+  "title": "BeamTrace v2 event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "id", "root_id", "node", "process", "local_instant", "event", "evidence"],
+  "properties": {
+    "schema_version": {"const": 2},
+    "id": {"$ref": "#/$defs/id"},
+    "root_id": {"$ref": "#/$defs/id"},
+    "node": {"$ref": "#/$defs/node"},
+    "process": {"$ref": "#/$defs/process_identity"},
+    "local_instant": {"$ref": "#/$defs/local_instant"},
+    "event": {"$ref": "#/$defs/event_kind"},
+    "evidence": {"$ref": "#/$defs/evidence"}
+  },
+  "$defs": {
+    "id": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\u0000]+$"},
+    "text": {"type": "string", "minLength": 1, "maxLength": 1024, "pattern": "^[^\\u0000]+$"},
+    "identity_text": {"type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[^\\u0000]+$"},
+    "event_name": {"type": "string", "minLength": 1, "maxLength": 255, "pattern": "^[^\\u0000]+$"},
+    "node": {"type": "string", "minLength": 3, "maxLength": 255, "pattern": "^[^@\\u0000]+@[^@\\u0000]+$"},
+    "safe_nonnegative": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "local_instant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["offset_ns", "order"],
+      "properties": {"offset_ns": {"$ref": "#/$defs/safe_nonnegative"}, "order": {"$ref": "#/$defs/safe_nonnegative"}}
+    },
+    "process_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node", "pid"],
+      "properties": {"node": {"$ref": "#/$defs/node"}, "pid": {"type": "string", "minLength": 1, "maxLength": 255}}
+    },
+    "mfa": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module", "function", "arity"],
+      "properties": {
+        "module": {"type": "string", "minLength": 1, "maxLength": 255},
+        "function": {"type": "string", "minLength": 1, "maxLength": 255},
+        "arity": {"type": "integer", "minimum": 0, "maximum": 255}
+      }
+    },
+    "logical_actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label"],
+      "properties": {"id": {"$ref": "#/$defs/id"}, "label": {"$ref": "#/$defs/identity_text"}}
+    },
+    "identity_evidence": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"enum": ["registered_name", "process_label", "ancestor", "supervisor_child_id"]}, "value": {"$ref": "#/$defs/identity_text"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "mfa"], "properties": {"kind": {"const": "initial_call"}, "mfa": {"$ref": "#/$defs/mfa"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "milliseconds"], "properties": {"kind": {"const": "restart_proximity"}, "milliseconds": {"$ref": "#/$defs/safe_nonnegative"}}}
+      ]
+    },
+    "process_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["physical", "logical", "identity_evidence"],
+      "properties": {
+        "physical": {"$ref": "#/$defs/process_ref"},
+        "logical": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/logical_actor"}]},
+        "identity_evidence": {"type": "array", "maxItems": 64, "items": {"$ref": "#/$defs/identity_evidence"}}
+      }
+    },
+    "serial": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind", "previous", "current"], "properties": {"kind": {"const": "sequence"}, "previous": {"$ref": "#/$defs/safe_nonnegative"}, "current": {"$ref": "#/$defs/safe_nonnegative"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "current"], "properties": {"kind": {"const": "legacy"}, "current": {"$ref": "#/$defs/safe_nonnegative"}}}
+      ]
+    },
+    "evidence": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"const": "exact"}}},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "inference"],
+          "properties": {
+            "kind": {"const": "inferred"},
+            "inference": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["method", "reason", "inputs"],
+              "properties": {
+                "method": {"type": "string", "minLength": 1, "maxLength": 128},
+                "reason": {"type": "string", "minLength": 1, "maxLength": 2048},
+                "inputs": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/inference_input"}}
+              }
+            }
+          }
+        }
+      ]
+    },
+    "inference_input": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind", "id"], "properties": {"kind": {"const": "event"}, "id": {"$ref": "#/$defs/id"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "name", "value"], "properties": {"kind": {"const": "observation"}, "name": {"type": "string", "minLength": 1, "maxLength": 128}, "value": {"type": "string", "minLength": 1, "maxLength": 2048}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "name", "value"], "properties": {"kind": {"const": "setting"}, "name": {"type": "string", "minLength": 1, "maxLength": 128}, "value": {"type": "string", "minLength": 1, "maxLength": 2048}}}
+      ]
+    },
+    "term": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind"], "properties": {"kind": {"const": "hidden"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"enum": ["atom", "tag", "redacted"]}, "value": {"$ref": "#/$defs/text"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "items"], "properties": {"kind": {"const": "tuple"}, "items": {"type": "array", "maxItems": 1024, "items": {"$ref": "#/$defs/term"}}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "name", "fields"], "properties": {"kind": {"const": "constructor"}, "name": {"$ref": "#/$defs/text"}, "fields": {"type": "array", "maxItems": 1024, "items": {"$ref": "#/$defs/term"}}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "length", "items"], "properties": {"kind": {"const": "list"}, "length": {"type": "integer", "minimum": 0, "maximum": 1000000}, "items": {"type": "array", "maxItems": 1024, "items": {"$ref": "#/$defs/term"}}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "size", "entries"], "properties": {"kind": {"const": "map"}, "size": {"type": "integer", "minimum": 0, "maximum": 1000000}, "entries": {"type": "array", "maxItems": 1024, "items": {"type": "object", "additionalProperties": false, "required": ["key", "value"], "properties": {"key": {"$ref": "#/$defs/term"}, "value": {"$ref": "#/$defs/term"}}}}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "bytes", "display", "fingerprint"], "properties": {"kind": {"const": "binary"}, "bytes": {"$ref": "#/$defs/safe_nonnegative"}, "display": {"type": ["string", "null"], "maxLength": 1048576}, "fingerprint": {"type": ["string", "null"], "maxLength": 128}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "scalar_kind", "display", "fingerprint"], "properties": {"kind": {"const": "scalar"}, "scalar_kind": {"type": "string", "minLength": 1, "maxLength": 64}, "display": {"type": ["string", "null"], "maxLength": 1048576}, "fingerprint": {"type": ["string", "null"], "maxLength": 128}}}
+      ]
+    },
+    "event_kind": {
+      "oneOf": [
+        {"type": "object", "additionalProperties": false, "required": ["kind", "trigger", "arguments"], "properties": {"kind": {"const": "root"}, "trigger": {"$ref": "#/$defs/mfa"}, "arguments": {"type": "array", "maxItems": 1024, "items": {"$ref": "#/$defs/term"}}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "to", "message", "serial"], "properties": {"kind": {"const": "send"}, "to": {"$ref": "#/$defs/process_ref"}, "message": {"$ref": "#/$defs/term"}, "serial": {"$ref": "#/$defs/serial"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "from", "message", "serial"], "properties": {"kind": {"const": "receive"}, "from": {"$ref": "#/$defs/process_ref"}, "message": {"$ref": "#/$defs/term"}, "serial": {"$ref": "#/$defs/serial"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "child", "initial_call"], "properties": {"kind": {"const": "spawn"}, "child": {"$ref": "#/$defs/process_ref"}, "initial_call": {"$ref": "#/$defs/mfa"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "reason"], "properties": {"kind": {"const": "exit"}, "reason": {"$ref": "#/$defs/term"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "value"], "properties": {"kind": {"enum": ["register", "stop"]}, "value": {"$ref": "#/$defs/text"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "peer"], "properties": {"kind": {"const": "link"}, "peer": {"$ref": "#/$defs/process_ref"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "name", "value"], "properties": {"kind": {"const": "metric"}, "name": {"$ref": "#/$defs/event_name"}, "value": {"type": "number"}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "name", "value"], "properties": {"kind": {"const": "system_signal"}, "name": {"$ref": "#/$defs/event_name"}, "value": {"type": "integer", "minimum": -9007199254740991, "maximum": 9007199254740991}}},
+        {"type": "object", "additionalProperties": false, "required": ["kind", "dropped_events", "reason"], "properties": {"kind": {"const": "gap"}, "dropped_events": {"type": "integer", "minimum": 1, "maximum": 9007199254740991}, "reason": {"$ref": "#/$defs/text"}}}
+      ]
+    }
+  }
+}

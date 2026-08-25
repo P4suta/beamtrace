@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
+import beamtrace_web/page
 import beamtrace_web/workspace
 import gleam/dynamic/decode
 import gleam/json
@@ -125,16 +126,7 @@ fn topology_edge_decoder() -> decode.Decoder(workspace.TopologyEdge) {
 }
 
 fn evidence_decoder() -> decode.Decoder(workspace.Evidence) {
-  use status <- decode.field("status", decode.string)
-  case status {
-    "exact" -> decode.success(workspace.Exact)
-    "inferred" -> {
-      use reason <- decode.field("reason", decode.string)
-      use confidence <- decode.field("confidence", decode.float)
-      decode.success(workspace.Inferred(reason, confidence))
-    }
-    _ -> decode.failure(workspace.Exact, expected: "live evidence")
-  }
+  page.evidence_decoder()
 }
 
 @external(javascript, "./live_control_ffi.mjs", "fetchLive")

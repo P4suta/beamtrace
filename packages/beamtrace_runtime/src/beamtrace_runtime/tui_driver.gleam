@@ -100,7 +100,8 @@ fn live_event(
 fn evidence_text(evidence: types.Evidence) -> String {
   case evidence {
     types.Exact -> "Exact"
-    types.Inferred(reason, _) -> "Inferred · " <> reason
+    types.Inferred(inference) ->
+      "Inferred · " <> inference.method <> " · " <> inference.reason
   }
 }
 
@@ -121,6 +122,7 @@ fn arm(store: capture_session.Store, source: String) -> Result(Nil, String) {
           trigger: types.Mfa(module_, function_, arity),
           where_aql: None,
           capture_window_ms: 30_000,
+          drain_timeout_ms: 10_000,
           budget: capture.default_budget(),
           max_roots: 1,
           preset: types.Generic,
@@ -136,10 +138,13 @@ fn poll(store: capture_session.Store) -> session.CaptureState {
     capture_session.Armed -> session.SessionArmed
     capture_session.Cancelling -> session.SessionCancelling
     capture_session.Failed(reason) -> session.SessionFailed(reason)
-    capture_session.Ready(_, completeness) ->
+    capture_session.Ready(_, outcome_summary) ->
       case capture_session.result(store) {
         Ok(result) ->
-          session.SessionReady(adapter.from_trace(result.events), completeness)
+          session.SessionReady(
+            adapter.from_trace(result.events),
+            outcome_summary,
+          )
         Error(error) -> session.SessionFailed(error_name(error))
       }
   }
@@ -162,11 +167,17 @@ fn save(
               tool_version: tool_version,
               capture_id: capture_id(),
               nodes: capture_session.nodes(store),
-              completeness: result.completeness,
+              outcome: result.outcome,
               privacy: types.Metadata,
-              checksums: [],
             )
-          case storage.save(path, manifest, result.events) {
+          case
+            storage.save_with_clocks(
+              path,
+              manifest,
+              result.events,
+              result.clocks,
+            )
+          {
             Ok(Nil) -> Ok(Nil)
             Error(error) -> Error(string.inspect(error))
           }

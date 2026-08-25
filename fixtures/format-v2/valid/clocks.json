@@ -1,0 +1,1 @@
+{"schema_version":2,"capture_anchor_unix_ns":"1700000000000000000","nodes":[{"node":"fixture@host","origin_local_ns":"-576460751000000000","before":{"local_ns":"-576460751100000000","unix_midpoint_ns":"1699999999900000000","uncertainty_ns":50,"rtt_ns":100},"after":{"local_ns":"-576460750900000000","unix_midpoint_ns":"1700000000100000000","uncertainty_ns":60,"rtt_ns":120}}]}

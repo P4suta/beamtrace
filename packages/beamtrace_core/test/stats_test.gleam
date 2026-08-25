@@ -6,19 +6,18 @@ import gleeunit/should
 
 pub fn multi_run_branch_statistics_include_percentiles_and_occurrence_test() {
   stats.summarize([
-    [stats.BranchSample("call>reply", 10)],
-    [stats.BranchSample("call>reply", 20)],
+    [stats.BranchSample("call>reply", types.ExactTime(10))],
+    [stats.BranchSample("call>reply", types.ExactTime(20))],
     [],
-    [stats.BranchSample("call>reply", 100)],
+    [stats.BranchSample("call>reply", types.ExactTime(100))],
   ])
   |> should.equal([
     stats.BranchStats(
       signature: "call>reply",
-      p50_ns: 20,
-      p95_ns: 100,
+      p50: types.TimeSummary(types.ExactTime(20), 3, 0),
+      p95: types.TimeSummary(types.ExactTime(100), 3, 0),
       occurrences: 3,
       total_runs: 4,
-      occurrence_rate: 0.75,
     ),
   ])
 }
@@ -42,7 +41,7 @@ fn event(
       logical: Some(types.LogicalActor("checkout-worker", "Checkout worker")),
       evidence: [],
     ),
-    local_timestamp_ns: timestamp_ns,
+    local_instant: types.LocalInstant(timestamp_ns, timestamp_ns),
     kind: kind,
     evidence: types.Exact,
   )
@@ -72,19 +71,17 @@ pub fn trace_statistics_are_pid_and_clock_origin_independent_test() {
   |> should.equal([
     stats.BranchStats(
       signature: "checkout-worker|root:shop:checkout/1:",
-      p50_ns: 0,
-      p95_ns: 0,
+      p50: types.TimeSummary(types.ExactTime(0), 2, 0),
+      p95: types.TimeSummary(types.ExactTime(0), 2, 0),
       occurrences: 2,
       total_runs: 2,
-      occurrence_rate: 1.0,
     ),
     stats.BranchStats(
       signature: "checkout-worker|stop:complete",
-      p50_ns: 20,
-      p95_ns: 100,
+      p50: types.TimeSummary(types.ExactTime(20), 2, 0),
+      p95: types.TimeSummary(types.ExactTime(100), 2, 0),
       occurrences: 2,
       total_runs: 2,
-      occurrence_rate: 1.0,
     ),
   ])
 }
@@ -99,11 +96,10 @@ pub fn duplicate_event_shapes_count_once_per_run_but_keep_latency_samples_test()
   |> should.equal([
     stats.BranchStats(
       signature: "checkout-worker|stop:complete",
-      p50_ns: 0,
-      p95_ns: 20,
+      p50: types.TimeSummary(types.ExactTime(0), 2, 0),
+      p95: types.TimeSummary(types.ExactTime(20), 2, 0),
       occurrences: 1,
       total_runs: 1,
-      occurrence_rate: 1.0,
     ),
   ])
 }

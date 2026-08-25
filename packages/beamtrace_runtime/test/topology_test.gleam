@@ -5,11 +5,16 @@ import gleam/option.{None, Some}
 import gleeunit/should
 
 pub fn supervision_spawn_and_link_graphs_remain_distinct_test() {
+  let inferred =
+    types.inferred("proc_lib_ancestor_v1", "proc_lib ancestor", [
+      types.ObservedValue("process", "worker"),
+      types.ObservedValue("ancestor", "sup"),
+    ])
   let snapshots = [
     topology.ProcessSnapshot("sup", None, None, ["worker"]),
     topology.ProcessSnapshot(
       "worker",
-      Some(#("sup", types.inferred("proc_lib ancestor", 0.85))),
+      Some(#("sup", inferred)),
       Some(#("starter", types.Exact)),
       ["sup"],
     ),
@@ -18,7 +23,7 @@ pub fn supervision_spawn_and_link_graphs_remain_distinct_test() {
 
   graphs.supervision
   |> should.equal([
-    topology.Edge("sup", "worker", types.inferred("proc_lib ancestor", 0.85)),
+    topology.Edge("sup", "worker", inferred),
   ])
   graphs.spawn
   |> should.equal([

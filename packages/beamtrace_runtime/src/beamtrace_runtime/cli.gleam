@@ -62,7 +62,9 @@ pub type Command {
   )
   Open(path: String, mode: UiMode, port: Int)
   Compare(left: String, right: String)
-  Export(path: String, format: ExportFormat)
+  Export(path: String, format: ExportFormat, otlp_anchor_now: Bool)
+  Validate(path: String, json: Bool)
+  Migrate(path: String, output: String)
   Serve(port: Int)
   Demo(mode: DemoMode, out: String, port: Int)
   Relay(hub_url: String, enrollment_token: String, target: Option(RelayTarget))
@@ -88,6 +90,7 @@ type CaptureOptions {
     cookie_file: Option(String),
     max_roots: Int,
     preset: types.Preset,
+    acknowledge_seq_trace_reset: Bool,
   )
 }
 
@@ -112,6 +115,7 @@ type RelayOptions {
     max_roots: Int,
     preset: types.Preset,
     raw_grant_file: Option(String),
+    acknowledge_seq_trace_reset: Bool,
   )
 }
 
@@ -136,9 +140,14 @@ fn parse_command(arguments: List(String)) -> Result(Command, ParseError) {
     ["record", ..options] -> parse_record(options)
     ["open", path, ..options] -> parse_open(path, options)
     ["compare", left, right] -> Ok(Compare(left, right))
-    ["export", path, "--format", format] ->
-      parse_export_format(format)
-      |> map_result(fn(format) { Export(path, format) })
+    ["export", path, "--format", format, ..options] ->
+      parse_export(path, format, options)
+    ["export", path, "--otlp-anchor-now", "--format", format] ->
+      parse_export(path, format, ["--otlp-anchor-now"])
+    ["validate", path] -> Ok(Validate(path, False))
+    ["validate", path, "--json"] | ["validate", "--json", path] ->
+      Ok(Validate(path, True))
+    ["migrate", path, "--output", output] -> Ok(Migrate(path, output))
     ["serve", ..options] -> parse_serve(options)
     ["demo", ..options] ->
       parse_demo(options, DemoWeb, "beamtrace-demo.beamtrace", 4040)
@@ -157,6 +166,8 @@ fn parse_command(arguments: List(String)) -> Result(Command, ParseError) {
       || known == "open"
       || known == "compare"
       || known == "export"
+      || known == "validate"
+      || known == "migrate"
       || known == "relay"
       || known == "tui"
       || known == "serve"
@@ -203,25 +214,29 @@ fn parse_relay(
 ) -> Result(Command, ParseError) {
   use parsed <- try_result(parse_relay_options(
     options,
-    RelayOptions(None, None, None, None, 1, types.Generic, None),
+    RelayOptions(None, None, None, None, 1, types.Generic, None, False),
   ))
   use _ <- try_result(validate_where(parsed.where_aql))
   case parsed.node, parsed.trigger, options {
     None, None, [] -> Ok(Relay(hub_url, token, None))
     Some(node), Some(trigger), _ ->
-      Ok(Relay(
-        hub_url,
-        token,
-        Some(RelayTarget(
-          node,
-          trigger,
-          parsed.where_aql,
-          parsed.cookie_file,
-          parsed.max_roots,
-          parsed.preset,
-          parsed.raw_grant_file,
-        )),
-      ))
+      case parsed.acknowledge_seq_trace_reset {
+        False -> Error(seq_trace_acknowledgement_error())
+        True ->
+          Ok(Relay(
+            hub_url,
+            token,
+            Some(RelayTarget(
+              node,
+              trigger,
+              parsed.where_aql,
+              parsed.cookie_file,
+              parsed.max_roots,
+              parsed.preset,
+              parsed.raw_grant_file,
+            )),
+          ))
+      }
     None, _, _ -> Error(usage("relay producer requires --node <node>"))
     _, None, _ ->
       Error(usage("relay producer requires --trigger Module:function/arity"))
@@ -256,6 +271,11 @@ fn parse_relay_options(
             RelayOptions(..parsed, raw_grant_file: Some(value)),
           )
       }
+    ["--acknowledge-seq-trace-reset", ..rest] ->
+      parse_relay_options(
+        rest,
+        RelayOptions(..parsed, acknowledge_seq_trace_reset: True),
+      )
     ["--max-roots", value, ..rest] ->
       case int.parse(value) {
         Ok(max_roots) if max_roots >= 1 && max_roots <= 1000 ->
@@ -354,11 +374,12 @@ fn parse_attach(
   node: String,
   options: List(String),
 ) -> Result(Command, ParseError) {
-  parse_attach_options(options, Web, None, 4040)
-  |> map_result(fn(parsed) {
-    let #(mode, cookie_file, port) = parsed
-    Attach(node, mode, cookie_file, port)
-  })
+  use parsed <- try_result(parse_attach_options(options, Web, None, 4040, False))
+  let #(mode, cookie_file, port, acknowledged) = parsed
+  case acknowledged {
+    True -> Ok(Attach(node, mode, cookie_file, port))
+    False -> Error(seq_trace_acknowledgement_error())
+  }
 }
 
 fn parse_attach_options(
@@ -366,17 +387,22 @@ fn parse_attach_options(
   mode: UiMode,
   cookie_file: Option(String),
   port: Int,
-) -> Result(#(UiMode, Option(String), Int), ParseError) {
+  acknowledged: Bool,
+) -> Result(#(UiMode, Option(String), Int, Bool), ParseError) {
   case options {
-    [] -> Ok(#(mode, cookie_file, port))
-    ["--web", ..rest] -> parse_attach_options(rest, Web, cookie_file, port)
-    ["--tui", ..rest] -> parse_attach_options(rest, TuiMode, cookie_file, port)
+    [] -> Ok(#(mode, cookie_file, port, acknowledged))
+    ["--web", ..rest] ->
+      parse_attach_options(rest, Web, cookie_file, port, acknowledged)
+    ["--tui", ..rest] ->
+      parse_attach_options(rest, TuiMode, cookie_file, port, acknowledged)
     ["--cookie-file", path, ..rest] ->
-      parse_attach_options(rest, mode, Some(path), port)
+      parse_attach_options(rest, mode, Some(path), port, acknowledged)
     ["--port", value, ..rest] -> {
       use port <- try_result(parse_port(value))
-      parse_attach_options(rest, mode, cookie_file, port)
+      parse_attach_options(rest, mode, cookie_file, port, acknowledged)
     }
+    ["--acknowledge-seq-trace-reset", ..rest] ->
+      parse_attach_options(rest, mode, cookie_file, port, True)
     [option, ..] -> Error(usage("unknown attach option '" <> option <> "'"))
   }
 }
@@ -385,20 +411,25 @@ fn parse_capture(
   node: Option(String),
   options: List(String),
 ) -> Result(Command, ParseError) {
-  let initial = CaptureOptions(node, None, None, None, None, 1, types.Generic)
+  let initial =
+    CaptureOptions(node, None, None, None, None, 1, types.Generic, False)
   use parsed <- try_result(parse_capture_options(options, initial))
   use _ <- try_result(validate_where(parsed.where_aql))
   case parsed.node, parsed.trigger, parsed.out {
     Some(node), Some(trigger), Some(out) ->
-      Ok(Capture(
-        node: node,
-        trigger: trigger,
-        where_aql: parsed.where_aql,
-        out: out,
-        cookie_file: parsed.cookie_file,
-        max_roots: parsed.max_roots,
-        preset: parsed.preset,
-      ))
+      case parsed.acknowledge_seq_trace_reset {
+        False -> Error(seq_trace_acknowledgement_error())
+        True ->
+          Ok(Capture(
+            node: node,
+            trigger: trigger,
+            where_aql: parsed.where_aql,
+            out: out,
+            cookie_file: parsed.cookie_file,
+            max_roots: parsed.max_roots,
+            preset: parsed.preset,
+          ))
+      }
     None, _, _ -> Error(usage("capture requires a node or --node <node>"))
     _, None, _ ->
       Error(usage("capture requires --trigger Module:function/arity"))
@@ -460,6 +491,11 @@ fn parse_capture_options(
       use preset <- try_result(parse_capture_preset(value))
       parse_capture_options(rest, CaptureOptions(..parsed, preset: preset))
     }
+    ["--acknowledge-seq-trace-reset", ..rest] ->
+      parse_capture_options(
+        rest,
+        CaptureOptions(..parsed, acknowledge_seq_trace_reset: True),
+      )
     [option, ..] -> Error(usage("unknown capture option '" <> option <> "'"))
   }
 }
@@ -561,8 +597,31 @@ fn parse_export_format(source: String) -> Result(ExportFormat, ParseError) {
   }
 }
 
+fn parse_export(
+  path: String,
+  format_source: String,
+  options: List(String),
+) -> Result(Command, ParseError) {
+  use format <- try_result(parse_export_format(format_source))
+  case format, options {
+    _, [] -> Ok(Export(path, format, False))
+    Otlp, ["--otlp-anchor-now"] -> Ok(Export(path, format, True))
+    _, ["--otlp-anchor-now"] ->
+      Error(usage("--otlp-anchor-now is only valid with --format otlp"))
+    _, [option, ..] -> Error(usage("unknown export option '" <> option <> "'"))
+  }
+}
+
 fn usage(message: String) -> ParseError {
   ParseError(message, 2)
+}
+
+fn seq_trace_acknowledgement_error() -> ParseError {
+  ParseError(
+    "exact attach capture acquires the VM-global seq_trace lease and resets "
+      <> "its label during cleanup; re-run with --acknowledge-seq-trace-reset",
+    4,
+  )
 }
 
 fn try_result(

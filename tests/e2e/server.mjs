@@ -24,28 +24,54 @@ async function readJson(request) {
 function event(index, query = "") {
   const needle = query ? `needle-${index}` : `event-${index}`;
   return {
-    id: needle,
-    root_id: "root-1",
-    node: "fixture@host",
-    process: {
-      physical: { node: "fixture@host", pid: `<0.${index}.0>` },
-      logical: { id: "checkout-worker", label: "Checkout worker" },
-      evidence: [],
+    observation: {
+      schema_version: 2,
+      id: needle,
+      root_id: "root-1",
+      node: "fixture@host",
+      process: {
+        physical: { node: "fixture@host", pid: `<0.${index}.0>` },
+        logical: { id: "checkout-worker", label: "Checkout worker" },
+        identity_evidence: [],
+      },
+      local_instant: { offset_ns: index * 100, order: index },
+      event: { kind: index % 97 === 0 ? "exit" : "send" },
+      evidence: index === 2
+        ? {
+            kind: "inferred",
+            inference: {
+              method: "logical_actor_refinement_v2",
+              reason: "stable actor metadata",
+              inputs: [{ kind: "event", event_id: "event-1" }],
+            },
+          }
+        : { kind: "exact" },
     },
-    local_timestamp_ns: index * 100,
-    event: { kind: index % 97 === 0 ? "exit" : "send" },
-    evidence: { kind: "exact" },
+    time: index === 2
+      ? {
+          kind: "estimated",
+          value_ns: "1774000000000000200",
+          lower_ns: "1774000000000000150",
+          upper_ns: "1774000000000000250",
+        }
+      : { kind: "exact", value_ns: String(1774000000000000000n + BigInt(index * 100)) },
   };
 }
 
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", "http://127.0.0.1:4173");
-  if (url.pathname === "/api/v1/live" && request.method === "GET") {
+  if (url.pathname === "/api/v2/live" && request.method === "GET") {
     liveGeneration += 1;
     const evidence = {
-      status: "inferred",
-      reason: "EWMA exceeded baseline with hysteresis",
-      confidence: 0.8,
+      kind: "inferred",
+      inference: {
+        method: "ewma_hysteresis_v2",
+        reason: "EWMA exceeded baseline with hysteresis",
+        inputs: [
+          { kind: "observed", name: "mailbox_len", value: "50" },
+          { kind: "setting", name: "hysteresis", value: "enabled" },
+        ],
+      },
     };
     const payload = {
       node: "fixture@host",
@@ -82,16 +108,19 @@ const server = createServer(async (request, response) => {
           from: "orders_sup",
           to: "<0.42.0>",
           evidence: {
-            status: "inferred",
-            reason: "proc_lib ancestor metadata",
-            confidence: 0.85,
+            kind: "inferred",
+            inference: {
+              method: "proc_lib_ancestor_v2",
+              reason: "proc_lib ancestor metadata",
+              inputs: [{ kind: "observed", name: "ancestor", value: "orders_sup" }],
+            },
           },
         }],
         spawn: [],
         links: [{
           from: "<0.7.0>",
           to: "<0.42.0>",
-          evidence: { status: "exact" },
+          evidence: { kind: "exact" },
         }],
       },
     };
@@ -102,7 +131,7 @@ const server = createServer(async (request, response) => {
     response.end(JSON.stringify(payload));
     return;
   }
-  if (url.pathname === "/api/v1/compare" && request.method === "POST") {
+  if (url.pathname === "/api/v2/compare" && request.method === "POST") {
     const body = await readJson(request);
     if (!Array.isArray(body.paths) || body.paths.length < 2 || body.paths.length > 20) {
       response.writeHead(400, { "content-type": "application/json" });
@@ -121,40 +150,82 @@ const server = createServer(async (request, response) => {
         added: 1,
         removed: 0,
         changed: 0,
+        ambiguity_count: 1,
+        first_divergence: {
+          left_frontier: ["event-1"],
+          right_frontier: ["event-3"],
+          causal_path: ["event-1", "event-3"],
+        },
         items: [
           {
             status: "matched",
             left_id: "left-send",
             right_id: "right-send",
-            latency_delta_ns: 90,
+            latency_delta: {
+              kind: "estimated",
+              value_ns: "90",
+              lower_ns: "80",
+              upper_ns: "100",
+            },
           },
-          { status: "added", right_id: "retry-branch" },
+          {
+            status: "added",
+            right_id: "retry-branch",
+            reason: "unique causal neighborhood",
+          },
         ],
       })),
       statistics: [{
         signature: "orders|send:tag:work",
-        p50_ns: 10,
-        p95_ns: 100,
+        p50: {
+          estimate: { kind: "exact", value_ns: "10" },
+          valid_samples: 2,
+          missing_samples: 1,
+        },
+        p95: {
+          estimate: {
+            kind: "estimated",
+            value_ns: "100",
+            lower_ns: "95",
+            upper_ns: "105",
+          },
+          valid_samples: 2,
+          missing_samples: 1,
+        },
         occurrences: 2,
         total_runs: body.paths.length,
-        occurrence_rate: 2 / body.paths.length,
       }],
     }));
     return;
   }
-  if (url.pathname === "/api/v1/sessions/current" && request.method === "GET") {
+  if (url.pathname === "/api/v2/sessions/current" && request.method === "GET") {
     if (capturePhase === "armed") {
       capturePolls += 1;
       if (capturePolls >= 3) capturePhase = "ready";
     }
     const payload = capturePhase === "ready"
-      ? { status: "ready", event_count: 1, completeness: "complete" }
+      ? {
+          status: "sealed",
+          event_count: 1,
+          outcome: {
+            end: { kind: "quiet_period", quiet_ms: 250 },
+            issues: [],
+            receipts: [{
+              node: "fixture@host",
+              final_batch_sequence: 1,
+              event_count: 1,
+              byte_count: 128,
+            }],
+          },
+          delivery_verified: true,
+          clocks: { schema_version: 2, unix_anchor_ns: "1774000000000000000", nodes: [] },
+        }
       : { status: capturePhase };
     response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
     response.end(JSON.stringify(payload));
     return;
   }
-  if (url.pathname === "/api/v1/targets/current/mfas" && request.method === "GET") {
+  if (url.pathname === "/api/v2/targets/current/mfas" && request.method === "GET") {
     const query = (url.searchParams.get("q") ?? "").toLowerCase();
     const candidates = "shop:checkout/1".includes(query)
       ? [{
@@ -169,7 +240,7 @@ const server = createServer(async (request, response) => {
     response.end(JSON.stringify({ candidates }));
     return;
   }
-  if (url.pathname === "/api/v1/sessions/current/arm" && request.method === "POST") {
+  if (url.pathname === "/api/v2/sessions/current/arm" && request.method === "POST") {
     const body = await readJson(request);
     if (body.trigger !== "shop:checkout/1") {
       response.writeHead(400, { "content-type": "application/json" });
@@ -191,13 +262,13 @@ const server = createServer(async (request, response) => {
     response.end(JSON.stringify({ status: "armed" }));
     return;
   }
-  if (url.pathname === "/api/v1/sessions/current/cancel" && request.method === "POST") {
+  if (url.pathname === "/api/v2/sessions/current/cancel" && request.method === "POST") {
     capturePhase = "cancelling";
     response.writeHead(202, { "content-type": "application/json" });
     response.end(JSON.stringify({ status: "cancelling" }));
     return;
   }
-  if (url.pathname === "/api/v1/sessions/current/save" && request.method === "POST") {
+  if (url.pathname === "/api/v2/sessions/current/save" && request.method === "POST") {
     const body = await readJson(request);
     if (capturePhase !== "ready" || typeof body.path !== "string") {
       response.writeHead(409, { "content-type": "application/json" });
@@ -208,7 +279,50 @@ const server = createServer(async (request, response) => {
     response.end(JSON.stringify({ status: "saved", path: body.path }));
     return;
   }
-  if (url.pathname === "/api/v1/sessions/current/events") {
+  if (url.pathname === "/api/v2/sessions/current/graph" && request.method === "GET") {
+    response.writeHead(200, {
+      "content-type": "application/json; charset=utf-8",
+      "cache-control": "no-store",
+    });
+    response.end(JSON.stringify({
+      schema_version: 2,
+      event_ids: ["event-1", "event-2", "event-3", "event-4", "event-5", "event-6"],
+      edges: [
+        {
+          from: "event-1",
+          to: "event-3",
+          kind: { kind: "process_order" },
+          evidence: { kind: "exact" },
+        },
+        {
+          from: "event-3",
+          to: "event-4",
+          kind: { kind: "sequential_message", serial: { previous: 8, current: 9 } },
+          evidence: {
+            kind: "inferred",
+            inference: {
+              method: "legacy_boundary_v2",
+              reason: "one endpoint was migrated",
+              inputs: [{ kind: "event", event_id: "event-3" }],
+            },
+          },
+        },
+        {
+          from: "event-5",
+          to: "event-6",
+          kind: { kind: "spawned" },
+          evidence: { kind: "exact" },
+        },
+      ],
+      boundaries: [{
+        event_id: "event-4",
+        kind: { kind: "spawned" },
+        reason: "child first event outside the visible observation",
+      }],
+    }));
+    return;
+  }
+  if (url.pathname === "/api/v2/sessions/current/events") {
     const start = Math.max(Number.parseInt(url.searchParams.get("start") ?? "0", 10), 0);
     const requested = Math.max(Number.parseInt(url.searchParams.get("limit") ?? "200", 10), 1);
     const limit = Math.min(requested, 200);
@@ -216,7 +330,16 @@ const server = createServer(async (request, response) => {
     const total = capturePhase === "ready" ? (query ? 0 : 1) : (query ? 1 : 1_000_000);
     const count = Math.max(Math.min(limit, total - start), 0);
     const events = capturePhase === "ready"
-      ? (count === 1 ? [{ ...event(1), id: "captured-root", root_id: "captured-root" }] : [])
+      ? (count === 1
+          ? [{
+              ...event(1),
+              observation: {
+                ...event(1).observation,
+                id: "captured-root",
+                root_id: "captured-root",
+              },
+            }]
+          : [])
       : Array.from({ length: count }, (_, offset) => event(start + offset + 1, query));
     response.writeHead(200, {
       "content-type": "application/json; charset=utf-8",

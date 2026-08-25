@@ -20,6 +20,7 @@ pub fn capture_command_contract_test() {
     "gen-server",
     "--cookie-file",
     ".secrets/cookie",
+    "--acknowledge-seq-trace-reset",
   ])
   |> should.equal(
     Ok(cli.Capture(
@@ -42,6 +43,7 @@ pub fn capture_defaults_to_one_generic_root_test() {
     "shop:checkout/1",
     "--out",
     "x.beamtrace",
+    "--acknowledge-seq-trace-reset",
   ])
   |> should.equal(
     Ok(cli.Capture(
@@ -65,6 +67,7 @@ pub fn capture_accepts_an_option_node_for_project_profile_expansion_test() {
     "shop:checkout/1",
     "--out",
     "x.beamtrace",
+    "--acknowledge-seq-trace-reset",
   ])
   |> should.equal(
     Ok(cli.Capture(
@@ -101,7 +104,12 @@ pub fn capture_rejects_invalid_root_budget_and_preset_test() {
 
 pub fn every_public_command_parses_test() {
   [
-    cli.parse(["attach", "app@host", "--web"]),
+    cli.parse([
+      "attach",
+      "app@host",
+      "--web",
+      "--acknowledge-seq-trace-reset",
+    ]),
     cli.parse([
       "record",
       "--node",
@@ -183,6 +191,7 @@ pub fn relay_target_producer_parses_capture_options_without_plaintext_cookie_tes
     "3",
     "--preset",
     "gen-server",
+    "--acknowledge-seq-trace-reset",
   ])
   |> should.equal(
     Ok(cli.Relay(
@@ -226,6 +235,7 @@ pub fn relay_raw_capture_accepts_only_a_grant_file_not_a_plaintext_token_test() 
       "shop:checkout/1",
       "--raw-grant-file",
       ".secrets/raw-grant.json",
+      "--acknowledge-seq-trace-reset",
     ])
   target.raw_grant_file |> should.equal(Some(".secrets/raw-grant.json"))
 
@@ -337,13 +347,31 @@ pub fn plaintext_cookie_argument_is_a_safety_refusal_test() {
   )
 }
 
-pub fn defaults_do_not_smuggle_a_cookie_test() {
-  cli.parse(["attach", "app@host"])
+pub fn attach_requires_explicit_seq_trace_reset_acknowledgement_test() {
+  let assert Error(error) = cli.parse(["attach", "app@host"])
+  error.exit_code |> should.equal(4)
+  error.message
+  |> should.equal(
+    "exact attach capture acquires the VM-global seq_trace lease and resets its label during cleanup; re-run with --acknowledge-seq-trace-reset",
+  )
+
+  cli.parse([
+    "attach",
+    "app@host",
+    "--acknowledge-seq-trace-reset",
+  ])
   |> should.equal(Ok(cli.Attach("app@host", cli.Web, None, 4040)))
 }
 
 pub fn local_web_commands_accept_ephemeral_or_explicit_ports_test() {
-  cli.parse(["attach", "app@host", "--web", "--port", "0"])
+  cli.parse([
+    "attach",
+    "app@host",
+    "--web",
+    "--port",
+    "0",
+    "--acknowledge-seq-trace-reset",
+  ])
   |> should.equal(Ok(cli.Attach("app@host", cli.Web, None, 0)))
   cli.parse(["open", "trace.beamtrace", "--web", "--port", "8123"])
   |> should.equal(Ok(cli.Open("trace.beamtrace", cli.Web, 8123)))

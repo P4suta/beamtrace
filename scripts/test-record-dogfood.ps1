@@ -151,8 +151,13 @@ try {
 
     Expand-Archive -LiteralPath $tracePath -DestinationPath $inspectRoot -Force
     $manifest = Get-Content -Raw -LiteralPath (Join-Path $inspectRoot 'manifest.json') | ConvertFrom-Json
-    if ($manifest.completeness.kind -ne 'complete' -or $manifest.privacy.kind -ne 'metadata') {
-        throw 'Record dogfood archive is incomplete or not metadata-only.'
+    if (
+        $manifest.schema_version -ne 2 -or
+        $manifest.outcome.issues.Count -ne 0 -or
+        $manifest.outcome.receipts.Count -lt 1 -or
+        $manifest.privacy.kind -ne 'metadata'
+    ) {
+        throw 'Record dogfood archive is not schema v2, delivery-verified, or metadata-only.'
     }
 
     $gleamCommand = (Get-Command gleam -ErrorAction Stop).Source
@@ -193,14 +198,16 @@ try {
             Get-Content
     )
     if (
-        $gleamManifest.completeness.kind -ne 'complete' -or
+        $gleamManifest.schema_version -ne 2 -or
+        $gleamManifest.outcome.issues.Count -ne 0 -or
+        $gleamManifest.outcome.receipts.Count -lt 1 -or
         $gleamManifest.privacy.kind -ne 'metadata' -or
         $gleamEventLines.Count -lt 1
     ) {
-        throw 'Gleam-wrapper record dogfood archive is empty, incomplete, or not metadata-only.'
+        throw 'Gleam-wrapper record dogfood archive is empty, not schema v2, not delivery-verified, or not metadata-only.'
     }
 
-    Write-Host "Record dogfood passed: direct erl and gleam run/shim captures are complete, metadata-only, and cleanup-verified."
+    Write-Host "Record dogfood passed: direct erl and gleam run/shim captures are schema v2, delivery-verified, metadata-only, and cleanup-verified."
 }
 finally {
     $env:BEAMTRACE_RECORD_ASSERT_CLEANUP = $previousCleanupAssertion

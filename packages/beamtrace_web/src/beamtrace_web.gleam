@@ -2,6 +2,7 @@
 import beamtrace_web/canvas
 import beamtrace_web/capture_control
 import beamtrace_web/compare_control
+import beamtrace_web/graph_control
 import beamtrace_web/live_control
 import beamtrace_web/page_loader
 import beamtrace_web/team_control
@@ -66,6 +67,7 @@ fn update(
       case phase {
         workspace.Armed | workspace.Arming | workspace.Cancelling ->
           finish_update(next, [capture_control.poll_after(150)])
+        workspace.Ready(_, _) -> finish_update(next, [graph_control.load()])
         _ -> finish_update(next, [])
       }
     }
@@ -169,6 +171,7 @@ fn startup_effect(model: workspace.Model) -> Effect(workspace.Msg) {
   effect.batch([
     draw_effect(model),
     page_loader.load(0, 200, workspace.remote_query(model)),
+    graph_control.load(),
     capture_control.status(),
     capture_control.install_cleanup(),
     effect.from(fn(dispatch) {

@@ -28,7 +28,7 @@ test("event page URL preserves arbitrary Unicode search text as one query value"
           : ["limit", "q", "start"];
 
         assert.equal(parsed.origin, "https://beamtrace.invalid");
-        assert.equal(parsed.pathname, "/api/v1/sessions/current/events");
+        assert.equal(parsed.pathname, "/api/v2/sessions/current/events");
         assert.deepEqual([...parsed.searchParams.keys()].sort(), expectedKeys);
         assert.equal(parsed.searchParams.getAll("start").length, 1);
         assert.equal(parsed.searchParams.get("start"), String(start));

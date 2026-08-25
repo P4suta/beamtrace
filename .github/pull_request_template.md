@@ -15,7 +15,7 @@ Describe the user-visible behavior and the smallest useful reason for the change
 
 - [ ] Capture cleanup and bounded-resource behavior remain covered.
 - [ ] No secret, raw value, cookie, token, or customer trace is included.
-- [ ] Any inferred causal result still carries evidence and confidence.
+- [ ] Any inferred causal result carries method, reason, evidence events, observed values, and algorithm settings; no uncalibrated confidence is shown.
 - [ ] User-facing or public-contract changes include documentation.
 
 ## Verification notes

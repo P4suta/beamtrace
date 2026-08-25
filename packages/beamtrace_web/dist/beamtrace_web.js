@@ -6045,16 +6045,15 @@ class Team extends CustomType {
 }
 var Mode$Team$const = new Team;
 class TeamTrace extends CustomType {
-  constructor(id2, status, node, module_, function_, arity, privacy, completeness, event_count, received_at_ms, legal_hold, locked) {
+  constructor(id2, node, module_, function_, arity, privacy, delivery_status, event_count, received_at_ms, legal_hold, locked) {
     super();
     this.id = id2;
-    this.status = status;
     this.node = node;
     this.module_ = module_;
     this.function_ = function_;
     this.arity = arity;
     this.privacy = privacy;
-    this.completeness = completeness;
+    this.delivery_status = delivery_status;
     this.event_count = event_count;
     this.received_at_ms = received_at_ms;
     this.legal_hold = legal_hold;
@@ -6080,10 +6079,55 @@ class Exact extends CustomType {
 }
 var Evidence$Exact$const = new Exact;
 class Inferred extends CustomType {
-  constructor(reason, confidence) {
+  constructor(method, reason) {
+    super();
+    this.method = method;
+    this.reason = reason;
+  }
+}
+class ExactTime extends CustomType {
+  constructor(value_ns) {
+    super();
+    this.value_ns = value_ns;
+  }
+}
+class EstimatedTime extends CustomType {
+  constructor(value_ns, lower_ns, upper_ns) {
+    super();
+    this.value_ns = value_ns;
+    this.lower_ns = lower_ns;
+    this.upper_ns = upper_ns;
+  }
+}
+class TimeUnavailable extends CustomType {
+  constructor(reason) {
     super();
     this.reason = reason;
-    this.confidence = confidence;
+  }
+}
+class TimeSummary extends CustomType {
+  constructor(estimate, valid_samples, missing_samples) {
+    super();
+    this.estimate = estimate;
+    this.valid_samples = valid_samples;
+    this.missing_samples = missing_samples;
+  }
+}
+class GraphEdge extends CustomType {
+  constructor(from3, to, kind, evidence) {
+    super();
+    this.from = from3;
+    this.to = to;
+    this.kind = kind;
+    this.evidence = evidence;
+  }
+}
+class GraphBoundary extends CustomType {
+  constructor(event_id, kind, reason) {
+    super();
+    this.event_id = event_id;
+    this.kind = kind;
+    this.reason = reason;
   }
 }
 class Unavailable extends CustomType {
@@ -6102,10 +6146,10 @@ class Cancelling extends CustomType {
 }
 var CapturePhase$Cancelling$const = new Cancelling;
 class Ready extends CustomType {
-  constructor(event_count, completeness) {
+  constructor(event_count, outcome_summary) {
     super();
     this.event_count = event_count;
-    this.completeness = completeness;
+    this.outcome_summary = outcome_summary;
   }
 }
 class Failed extends CustomType {
@@ -6115,13 +6159,14 @@ class Failed extends CustomType {
   }
 }
 class EventRow extends CustomType {
-  constructor(id2, actor, kind, timestamp_ns, duration_ns, evidence, anomalous, internal) {
+  constructor(id2, actor, kind, timestamp_ns, duration_ns, time, evidence, anomalous, internal) {
     super();
     this.id = id2;
     this.actor = actor;
     this.kind = kind;
     this.timestamp_ns = timestamp_ns;
     this.duration_ns = duration_ns;
+    this.time = time;
     this.evidence = evidence;
     this.anomalous = anomalous;
     this.internal = internal;
@@ -6188,34 +6233,35 @@ class LiveSnapshot extends CustomType {
   }
 }
 class CompareItem extends CustomType {
-  constructor(status, left_id, right_id, latency_delta_ns, reason) {
+  constructor(status, left_id, right_id, latency_delta, reason) {
     super();
     this.status = status;
     this.left_id = left_id;
     this.right_id = right_id;
-    this.latency_delta_ns = latency_delta_ns;
+    this.latency_delta = latency_delta;
     this.reason = reason;
   }
 }
 class CompareRun extends CustomType {
-  constructor(path, added, removed, changed, items) {
+  constructor(path, added, removed, changed, ambiguity_count, first_divergence_path, items) {
     super();
     this.path = path;
     this.added = added;
     this.removed = removed;
     this.changed = changed;
+    this.ambiguity_count = ambiguity_count;
+    this.first_divergence_path = first_divergence_path;
     this.items = items;
   }
 }
 class BranchStatistic extends CustomType {
-  constructor(signature, p50_ns, p95_ns, occurrences, total_runs, occurrence_rate) {
+  constructor(signature, p50, p95, occurrences, total_runs) {
     super();
     this.signature = signature;
-    this.p50_ns = p50_ns;
-    this.p95_ns = p95_ns;
+    this.p50 = p50;
+    this.p95 = p95;
     this.occurrences = occurrences;
     this.total_runs = total_runs;
-    this.occurrence_rate = occurrence_rate;
   }
 }
 class CompareReport extends CustomType {
@@ -6228,11 +6274,15 @@ class CompareReport extends CustomType {
   }
 }
 class Model extends CustomType {
-  constructor(remote, mode, events2, total_events, loaded_start, loaded_limit, loaded_query, loading, load_error, selected_event_id, query, show_internal, viewport_start, viewport_size, zoom, palette_open, search_focused, bookmarks, annotation, trigger_input, mfa_suggestions, capture_where, capture_preset, capture_max_roots, save_path, capture_phase, capture_notice, live_rows, live_findings, live_supervision, live_spawn, live_links, live_generation, live_sampled_at_ms, live_loading, live_error, selected_live_pid, compare_paths_input, compare_loading, compare_error, compare_report, team_traces, team_next_cursor, team_loading, team_error, selected_trace_id, team_events, team_events_next_cursor, team_events_loading, team_events_error) {
+  constructor(remote, mode, events2, graph_edges, graph_boundaries, graph_loading, graph_error, total_events, loaded_start, loaded_limit, loaded_query, loading, load_error, selected_event_id, query, show_internal, viewport_start, viewport_size, zoom, palette_open, search_focused, bookmarks, annotation, trigger_input, mfa_suggestions, capture_where, capture_preset, capture_max_roots, save_path, capture_phase, capture_notice, live_rows, live_findings, live_supervision, live_spawn, live_links, live_generation, live_sampled_at_ms, live_loading, live_error, selected_live_pid, compare_paths_input, compare_loading, compare_error, compare_report, team_traces, team_next_cursor, team_loading, team_error, selected_trace_id, team_events, team_events_next_cursor, team_events_loading, team_events_error) {
     super();
     this.remote = remote;
     this.mode = mode;
     this.events = events2;
+    this.graph_edges = graph_edges;
+    this.graph_boundaries = graph_boundaries;
+    this.graph_loading = graph_loading;
+    this.graph_error = graph_error;
     this.total_events = total_events;
     this.loaded_start = loaded_start;
     this.loaded_limit = loaded_limit;
@@ -6354,6 +6404,19 @@ class PageLoadFailed extends CustomType {
   constructor(query, reason) {
     super();
     this.query = query;
+    this.reason = reason;
+  }
+}
+class GraphLoaded extends CustomType {
+  constructor(edges, boundaries) {
+    super();
+    this.edges = edges;
+    this.boundaries = boundaries;
+  }
+}
+class GraphLoadFailed extends CustomType {
+  constructor(reason) {
+    super();
     this.reason = reason;
   }
 }
@@ -6540,12 +6603,12 @@ class TraceHoldFailed extends CustomType {
   }
 }
 function init(events2) {
-  return new Model(false, Mode$Capture$const, events2, length(events2), 0, length(events2), "", false, Option$None$const, Option$None$const, "", false, 0, 80, 1, false, false, List$Empty$const, "", "", List$Empty$const, "", "generic", "1", "capture.beamtrace", CapturePhase$Unavailable$const, "", List$Empty$const, List$Empty$const, List$Empty$const, List$Empty$const, List$Empty$const, 0, 0, false, Option$None$const, Option$None$const, `baseline.beamtrace
+  return new Model(false, Mode$Capture$const, events2, List$Empty$const, List$Empty$const, false, Option$None$const, length(events2), 0, length(events2), "", false, Option$None$const, Option$None$const, "", false, 0, 80, 1, false, false, List$Empty$const, "", "", List$Empty$const, "", "generic", "1", "capture.beamtrace", CapturePhase$Unavailable$const, "", List$Empty$const, List$Empty$const, List$Empty$const, List$Empty$const, List$Empty$const, 0, 0, false, Option$None$const, Option$None$const, `baseline.beamtrace
 candidate.beamtrace`, false, Option$None$const, Option$None$const, List$Empty$const, Option$None$const, false, Option$None$const, Option$None$const, List$Empty$const, Option$None$const, false, Option$None$const);
 }
 function init_remote() {
   let _record = init(List$Empty$const);
-  return new Model(true, _record.mode, _record.events, _record.total_events, _record.loaded_start, 200, _record.loaded_query, true, _record.load_error, _record.selected_event_id, _record.query, _record.show_internal, _record.viewport_start, 80, _record.zoom, _record.palette_open, _record.search_focused, _record.bookmarks, _record.annotation, _record.trigger_input, _record.mfa_suggestions, _record.capture_where, _record.capture_preset, _record.capture_max_roots, _record.save_path, CapturePhase$Idle$const, _record.capture_notice, _record.live_rows, _record.live_findings, _record.live_supervision, _record.live_spawn, _record.live_links, _record.live_generation, _record.live_sampled_at_ms, _record.live_loading, _record.live_error, _record.selected_live_pid, _record.compare_paths_input, _record.compare_loading, _record.compare_error, _record.compare_report, _record.team_traces, _record.team_next_cursor, _record.team_loading, _record.team_error, _record.selected_trace_id, _record.team_events, _record.team_events_next_cursor, _record.team_events_loading, _record.team_events_error);
+  return new Model(true, _record.mode, _record.events, _record.graph_edges, _record.graph_boundaries, true, _record.graph_error, _record.total_events, _record.loaded_start, 200, _record.loaded_query, true, _record.load_error, _record.selected_event_id, _record.query, _record.show_internal, _record.viewport_start, 80, _record.zoom, _record.palette_open, _record.search_focused, _record.bookmarks, _record.annotation, _record.trigger_input, _record.mfa_suggestions, _record.capture_where, _record.capture_preset, _record.capture_max_roots, _record.save_path, CapturePhase$Idle$const, _record.capture_notice, _record.live_rows, _record.live_findings, _record.live_supervision, _record.live_spawn, _record.live_links, _record.live_generation, _record.live_sampled_at_ms, _record.live_loading, _record.live_error, _record.selected_live_pid, _record.compare_paths_input, _record.compare_loading, _record.compare_error, _record.compare_report, _record.team_traces, _record.team_next_cursor, _record.team_loading, _record.team_error, _record.selected_trace_id, _record.team_events, _record.team_events_next_cursor, _record.team_events_loading, _record.team_events_error);
 }
 function merge_team_traces(existing, incoming) {
   let _pipe = fold2(incoming, existing, (traces, incoming_trace) => {
@@ -6644,7 +6707,7 @@ function update2(loop$model, loop$message) {
     let message = loop$message;
     if (message instanceof UserSelectedMode) {
       let mode = message[0];
-      return new Model(model.remote, mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, (() => {
+      return new Model(model.remote, mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, (() => {
         if (mode instanceof Live) {
           return true;
         } else {
@@ -6672,24 +6735,24 @@ function update2(loop$model, loop$message) {
       })(), model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserSelectedEvent) {
       let id2 = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, new Some(id2), model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, new Some(id2), model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserChangedQuery) {
       let query = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, Option$None$const, model.selected_event_id, query, model.show_internal, 0, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, Option$None$const, model.selected_event_id, query, model.show_internal, 0, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserToggledInternalNoise) {
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, !model.show_internal, 0, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, !model.show_internal, 0, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserFocusedSearch) {
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, true, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, true, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserOpenedPalette) {
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, true, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, true, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserClosedPalette) {
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, false, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, false, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserToggledBookmark) {
       let id2 = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, toggle_member(model.bookmarks, id2), model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, toggle_member(model.bookmarks, id2), model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserChangedAnnotation) {
       let annotation = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserPressedKey) {
       let key = message[0];
       let $ = keyboard_shortcut(key);
@@ -6703,31 +6766,38 @@ function update2(loop$model, loop$message) {
     } else if (message instanceof ViewportChanged) {
       let start5 = message.start;
       let size3 = message.size;
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, Option$None$const, model.selected_event_id, model.query, model.show_internal, max2(start5, 0), min2(max2(size3, 1), 1000), model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, Option$None$const, model.selected_event_id, model.query, model.show_internal, max2(start5, 0), min2(max2(size3, 1), 1000), model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserZoomed) {
       let zoom = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, clamp(zoom, 0.25, 4), model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, clamp(zoom, 0.25, 4), model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof PageLoaded) {
       let query = message.query;
       let page = message.page;
       let $ = !model.remote || query === remote_query(model);
       if ($) {
-        return new Model(model.remote, model.mode, page.events, page.total, page.start, page.limit, query, false, Option$None$const, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+        return new Model(model.remote, model.mode, page.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, page.total, page.start, page.limit, query, false, Option$None$const, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
       } else {
-        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, false, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+        return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, false, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
       }
     } else if (message instanceof PageLoadFailed) {
       let query = message.query;
       let reason = message.reason;
       let $ = !model.remote || query === remote_query(model);
       if ($) {
-        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, false, new Some(reason), model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+        return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, false, new Some(reason), model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
       } else {
-        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, false, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+        return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, false, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
       }
+    } else if (message instanceof GraphLoaded) {
+      let edges = message.edges;
+      let boundaries = message.boundaries;
+      return new Model(model.remote, model.mode, model.events, edges, boundaries, false, Option$None$const, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+    } else if (message instanceof GraphLoadFailed) {
+      let reason = message.reason;
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, false, new Some(reason), model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserChangedTrigger) {
       let trigger = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, trigger, (() => {
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, trigger, (() => {
         let $ = trim(trigger);
         if ($ === "") {
           return List$Empty$const;
@@ -6737,106 +6807,106 @@ function update2(loop$model, loop$message) {
       })(), model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof MfaSuggestionsLoaded) {
       let suggestions = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, take(suggestions, 200), model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, take(suggestions, 200), model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserChangedCaptureWhere) {
       let source = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, source, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, source, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserChangedCapturePreset) {
       let preset = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserChangedMaxRoots) {
       let max_roots = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserRequestedArm) {
       let $ = trim(model.trigger_input);
       let $1 = parse_root_budget(model);
       if ($ === "") {
-        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, new Failed("trigger_required"), "Enter an MFA trigger", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+        return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, new Failed("trigger_required"), "Enter an MFA trigger", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
       } else if ($1 instanceof Ok) {
-        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, CapturePhase$Arming$const, "Arming " + trim(model.trigger_input), model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+        return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, CapturePhase$Arming$const, "Arming " + trim(model.trigger_input), model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
       } else {
-        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, new Failed("invalid_root_budget"), "Max roots must be between 1 and 1000", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+        return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, new Failed("invalid_root_budget"), "Max roots must be between 1 and 1000", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
       }
     } else if (message instanceof CaptureArmAccepted) {
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, CapturePhase$Armed$const, "Capture armed; perform one operation", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, CapturePhase$Armed$const, "Capture armed; perform one operation", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof CaptureArmFailed) {
       let reason = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, new Failed(reason), reason, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, new Failed(reason), reason, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof PollCaptureStatus) {
       return model;
     } else if (message instanceof CaptureStatusLoaded) {
       let phase = message[0];
       if (phase instanceof Ready) {
         let count = phase.event_count;
-        return new Model(model.remote, model.mode, model.events, count, 0, 0, "", false, Option$None$const, model.selected_event_id, model.query, model.show_internal, 0, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, phase, "", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+        return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, count, 0, 0, "", false, Option$None$const, model.selected_event_id, model.query, model.show_internal, 0, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, phase, "", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
       } else if (phase instanceof Failed) {
         let $ = phase.reason;
         if ($ === "system_tracer_occupied") {
-          return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, phase, "Exact capture was refused; another tracer owns the node. Use Live for bounded inferred sampling.", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+          return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, phase, "Exact capture was refused; another tracer owns the node. Use Live for bounded inferred sampling.", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
         } else {
-          return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+          return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
         }
       } else {
-        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+        return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
       }
     } else if (message instanceof UserRequestedCancel) {
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, CapturePhase$Cancelling$const, "Stopping capture and cleaning the target", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, CapturePhase$Cancelling$const, "Stopping capture and cleaning the target", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof CaptureCancelFailed) {
       let reason = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, new Failed(reason), reason, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, new Failed(reason), reason, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserChangedSavePath) {
       let path = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserRequestedSave) {
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, "Saving capture", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, "Saving capture", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof CaptureSaved) {
       let path = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, "Saved " + path, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, "Saved " + path, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof CaptureSaveFailed) {
       let reason = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, reason, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, reason, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof PollLive) {
       let $ = model.mode;
       if ($ instanceof Live) {
-        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, true, Option$None$const, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+        return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, true, Option$None$const, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
       } else {
         return model;
       }
     } else if (message instanceof LiveLoaded) {
       let snapshot = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, snapshot.rows, snapshot.findings, snapshot.supervision, snapshot.spawn, snapshot.links, snapshot.generation, snapshot.sampled_at_ms, false, Option$None$const, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, snapshot.rows, snapshot.findings, snapshot.supervision, snapshot.spawn, snapshot.links, snapshot.generation, snapshot.sampled_at_ms, false, Option$None$const, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof LiveLoadFailed) {
       let reason = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, false, new Some(reason), model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, false, new Some(reason), model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserSelectedLiveProcess) {
       let pid = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, new Some(pid), model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, new Some(pid), model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserChangedComparePaths) {
       let paths = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, paths, model.compare_loading, Option$None$const, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, paths, model.compare_loading, Option$None$const, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserRequestedCompare) {
       let $ = valid_compare_paths(compare_paths(model));
       if ($) {
-        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, true, Option$None$const, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+        return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, true, Option$None$const, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
       } else {
-        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, false, new Some("Enter 2–20 distinct .beamtrace paths"), model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+        return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, false, new Some("Enter 2–20 distinct .beamtrace paths"), model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
       }
     } else if (message instanceof CompareLoaded) {
       let report = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, false, Option$None$const, new Some(report), model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, false, Option$None$const, new Some(report), model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof CompareFailed) {
       let reason = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, false, new Some(reason), model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, false, new Some(reason), model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserRequestedTeamTraces) {
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, List$Empty$const, Option$None$const, true, Option$None$const, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, List$Empty$const, Option$None$const, true, Option$None$const, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserRequestedMoreTeamTraces) {
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, true, Option$None$const, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, true, Option$None$const, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof TeamTracesLoaded) {
       let page = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, merge_team_traces(model.team_traces, page.traces), page.next_cursor, false, Option$None$const, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, merge_team_traces(model.team_traces, page.traces), page.next_cursor, false, Option$None$const, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof TeamTracesFailed) {
       let reason = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, false, new Some(reason), model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, false, new Some(reason), model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserSelectedTeamTrace) {
       let id2 = message[0];
       let $ = find(model.team_traces, (trace) => {
@@ -6844,7 +6914,7 @@ function update2(loop$model, loop$message) {
       });
       if ($ instanceof Ok) {
         let trace = $[0];
-        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, new Some(id2), List$Empty$const, Option$None$const, !trace.locked, (() => {
+        return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, new Some(id2), List$Empty$const, Option$None$const, !trace.locked, (() => {
           let $1 = trace.locked;
           if ($1) {
             return new Some("Raw trace content is locked for this role");
@@ -6856,7 +6926,7 @@ function update2(loop$model, loop$message) {
         return model;
       }
     } else if (message instanceof UserRequestedMoreTeamEvents) {
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, true, Option$None$const);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, true, Option$None$const);
     } else if (message instanceof TeamEventsLoaded) {
       let page = message[0];
       let $ = isEqual(model.selected_trace_id, new Some(page.trace_id));
@@ -6865,7 +6935,7 @@ function update2(loop$model, loop$message) {
         let _pipe = append(model.team_events, page.events);
         _block = take(_pipe, 1000);
         let events2 = _block;
-        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, events2, (() => {
+        return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, events2, (() => {
           let $1 = length(events2) >= 1000;
           if ($1) {
             return Option$None$const;
@@ -6881,7 +6951,7 @@ function update2(loop$model, loop$message) {
       let reason = message.reason;
       let $ = isEqual(model.selected_trace_id, new Some(trace_id));
       if ($) {
-        return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, false, new Some(reason));
+        return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, false, new Some(reason));
       } else {
         return model;
       }
@@ -6889,7 +6959,7 @@ function update2(loop$model, loop$message) {
       return model;
     } else if (message instanceof TraceHoldUpdated) {
       let updated = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, map2(model.team_traces, (trace) => {
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, map2(model.team_traces, (trace) => {
         let $ = trace.id === updated.id;
         if ($) {
           return updated;
@@ -6899,7 +6969,7 @@ function update2(loop$model, loop$message) {
       }), model.team_next_cursor, model.team_loading, Option$None$const, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else {
       let reason = message[0];
-      return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, new Some(reason), model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+      return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, new Some(reason), model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     }
   }
 }
@@ -6925,7 +6995,7 @@ function selected_team_trace(model) {
   }
 }
 function begin_loading(model) {
-  return new Model(model.remote, model.mode, model.events, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, true, Option$None$const, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+  return new Model(model.remote, model.mode, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, true, Option$None$const, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.search_focused, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
 }
 function needs_page(model) {
   let requested_end = min2(model.viewport_start + model.viewport_size, model.total_events);
@@ -7009,18 +7079,26 @@ var palette = {
   muted: "#817b88",
   exact: "#f1bc5b",
   receive: "#9b7bff",
-  anomaly: "#ff7369"
+  anomaly: "#ff7369",
+  process: "#79b8ff",
+  message: "#f1bc5b",
+  spawn: "#72d6a0",
+  boundary: "#817b88"
 };
 function draw(root2, source, zoom) {
   const canvas2 = root2?.querySelector?.("#causal-canvas") ?? document.querySelector("#causal-canvas");
   if (!(canvas2 instanceof HTMLCanvasElement))
     return;
-  let rows;
+  let payload;
   try {
-    rows = JSON.parse(source);
+    payload = JSON.parse(source);
   } catch (_) {
     return;
   }
+  const rows = Array.isArray(payload) ? payload : payload.rows ?? [];
+  const edges = Array.isArray(payload) ? [] : payload.edges ?? [];
+  const boundaries = Array.isArray(payload) ? [] : payload.boundaries ?? [];
+  const divergencePath = Array.isArray(payload) ? [] : payload.divergence_path ?? [];
   const bounds = canvas2.getBoundingClientRect();
   const width = Math.max(1, Math.floor(bounds.width));
   const height = Math.max(1, Math.floor(bounds.height));
@@ -7057,29 +7135,98 @@ function draw(root2, source, zoom) {
     context.fillText("No events in this window", left, top + 20);
     return;
   }
-  const first = Math.min(...rows.map((row) => Number(row.timestamp_ns)));
-  const last = Math.max(...rows.map((row) => Number(row.timestamp_ns)));
-  const range = Math.max(last - first, 1);
   const usable = Math.max(width - left - right, 1) * Math.max(0.25, Math.min(zoom, 4));
-  const points = rows.map((row) => {
+  const points = rows.map((row, index4) => {
     const lane = Math.max(actors.indexOf(row.actor), 0);
     return {
       ...row,
-      x: left + (Number(row.timestamp_ns) - first) / range * usable,
+      x: left + index4 / Math.max(rows.length - 1, 1) * usable,
       y: top + lane * laneHeight
     };
   });
-  context.strokeStyle = "rgba(216, 209, 196, 0.32)";
-  context.lineWidth = 1.5;
-  for (let index4 = 1;index4 < points.length; index4 += 1) {
-    const from3 = points[index4 - 1];
-    const to = points[index4];
-    context.beginPath();
-    context.moveTo(from3.x, from3.y);
-    context.bezierCurveTo(from3.x + 24, from3.y, to.x - 24, to.y, to.x, to.y);
-    context.stroke();
+  const pointsById = new Map(points.map((point) => [point.id, point]));
+  const divergencePairs = new Set;
+  for (let index4 = 1;index4 < divergencePath.length; index4 += 1) {
+    divergencePairs.add(`${divergencePath[index4 - 1]}\x00${divergencePath[index4]}`);
   }
+  const renderedEdges = edges.filter((edge) => pointsById.has(edge.from) || pointsById.has(edge.to));
+  const renderedBoundaries = boundaries.filter((boundary) => pointsById.has(boundary.event_id));
+  canvas2.dataset.edgeCount = String(renderedEdges.length);
+  canvas2.dataset.edgeKinds = [...new Set(renderedEdges.map((edge) => edge.kind))].sort().join(",");
+  canvas2.dataset.inferredEdgeCount = String(renderedEdges.filter((edge) => edge.evidence === "inferred").length);
+  canvas2.dataset.boundaryCount = String(renderedBoundaries.length);
+  canvas2.dataset.estimatedTimeCount = String(points.filter((point) => point.time?.kind === "estimated").length);
+  canvas2.dataset.divergenceEdgeCount = String(renderedEdges.filter((edge) => divergencePairs.has(`${edge.from}\x00${edge.to}`)).length);
+  const edgeColor = (kind) => kind === "sequential_message" ? palette.message : kind === "spawned" ? palette.spawn : kind === "process_order" ? palette.process : palette.muted;
+  edges.forEach((edge) => {
+    const from3 = pointsById.get(edge.from);
+    const to = pointsById.get(edge.to);
+    if (!from3 && !to)
+      return;
+    const highlighted = divergencePairs.has(`${edge.from}\x00${edge.to}`);
+    context.strokeStyle = highlighted ? palette.anomaly : edgeColor(edge.kind);
+    context.lineWidth = highlighted ? 3 : 1.5;
+    context.setLineDash(edge.evidence === "inferred" ? [5, 4] : []);
+    context.beginPath();
+    if (from3 && to) {
+      context.moveTo(from3.x, from3.y);
+      context.bezierCurveTo(from3.x + 24, from3.y, to.x - 24, to.y, to.x, to.y);
+    } else {
+      const point = from3 ?? to;
+      const direction = from3 ? 1 : -1;
+      context.moveTo(point.x, point.y);
+      context.lineTo(point.x + direction * 30, point.y);
+    }
+    context.stroke();
+    context.setLineDash([]);
+    if (!from3 || !to) {
+      const point = from3 ?? to;
+      const direction = from3 ? 1 : -1;
+      context.fillStyle = palette.background;
+      context.strokeStyle = palette.boundary;
+      context.beginPath();
+      context.arc(point.x + direction * 30, point.y, 4, 0, Math.PI * 2);
+      context.fill();
+      context.stroke();
+    }
+  });
+  boundaries.forEach((boundary) => {
+    const point = pointsById.get(boundary.event_id);
+    if (!point)
+      return;
+    context.strokeStyle = palette.boundary;
+    context.lineWidth = 1.5;
+    context.beginPath();
+    context.moveTo(point.x, point.y);
+    context.lineTo(point.x - 24, point.y - 12);
+    context.stroke();
+    context.fillStyle = palette.background;
+    context.beginPath();
+    context.arc(point.x - 24, point.y - 12, 4, 0, Math.PI * 2);
+    context.fill();
+    context.stroke();
+  });
   points.forEach((point) => {
+    if (point.time?.kind === "estimated") {
+      let width2 = 12;
+      try {
+        const difference = BigInt(point.time.upper_ns) - BigInt(point.time.lower_ns);
+        const capped = difference > 1000000000000000n ? 1000000000000000n : difference < 0n ? -difference : difference;
+        width2 = Math.min(34, 6 + Math.log10(Number(capped) + 1) * 3);
+      } catch (_) {
+        width2 = 12;
+      }
+      context.strokeStyle = palette.muted;
+      context.lineWidth = 1;
+      context.beginPath();
+      context.moveTo(point.x - width2, point.y - 11);
+      context.lineTo(point.x + width2, point.y - 11);
+      context.moveTo(point.x - width2, point.y - 15);
+      context.lineTo(point.x - width2, point.y - 7);
+      context.moveTo(point.x + width2, point.y - 15);
+      context.lineTo(point.x + width2, point.y - 7);
+      context.stroke();
+    }
     context.fillStyle = point.anomalous ? palette.anomaly : point.kind === "receive" ? palette.receive : palette.exact;
     context.beginPath();
     context.arc(point.x, point.y, point.anomalous ? 7 : 5, 0, Math.PI * 2);
@@ -7108,72 +7255,163 @@ function installShortcuts(handler) {
 }
 
 // build/dev/javascript/beamtrace_web/beamtrace_web/canvas.mjs
-function rows_payload(rows) {
-  let _pipe = rows;
-  let _pipe$1 = take(_pipe, 1000);
-  let _pipe$2 = array2(_pipe$1, (row) => {
-    return object2(toList([
-      ["id", string3(row.id)],
-      ["actor", string3(row.actor)],
-      ["kind", string3(row.kind)],
-      ["timestamp_ns", int3(row.timestamp_ns)],
-      ["duration_ns", int3(row.duration_ns)],
-      ["anomalous", bool2(row.anomalous)],
-      [
-        "evidence",
-        string3((() => {
-          let $ = row.evidence;
-          if ($ instanceof Exact) {
-            return "exact";
-          } else {
-            return "inferred";
-          }
-        })())
-      ]
-    ]));
-  });
-  return to_string2(_pipe$2);
+function first_divergence(loop$reports) {
+  while (true) {
+    let reports = loop$reports;
+    if (reports instanceof Empty) {
+      return reports;
+    } else {
+      let run2 = reports.head;
+      let rest = reports.tail;
+      let $ = run2.first_divergence_path;
+      if ($ instanceof Empty) {
+        loop$reports = rest;
+      } else {
+        return $;
+      }
+    }
+  }
 }
-function event_payload(model) {
-  return rows_payload(visible_events(model));
+function divergence_path(model) {
+  let $ = model.compare_report;
+  if ($ instanceof Some) {
+    let report = $[0];
+    return first_divergence(report.reports);
+  } else {
+    return List$Empty$const;
+  }
+}
+function boundary_json(boundary) {
+  return object2(toList([
+    ["event_id", string3(boundary.event_id)],
+    ["kind", string3(boundary.kind)],
+    ["reason", string3(boundary.reason)]
+  ]));
+}
+function evidence_kind(evidence) {
+  if (evidence instanceof Exact) {
+    return "exact";
+  } else {
+    return "inferred";
+  }
+}
+function edge_json(edge) {
+  return object2(toList([
+    ["from", string3(edge.from)],
+    ["to", string3(edge.to)],
+    ["kind", string3(edge.kind)],
+    ["evidence", string3(evidence_kind(edge.evidence))]
+  ]));
+}
+function time_json(time) {
+  if (time instanceof ExactTime) {
+    let value2 = time.value_ns;
+    return object2(toList([
+      ["kind", string3("exact")],
+      ["value_ns", string3(value2)]
+    ]));
+  } else if (time instanceof EstimatedTime) {
+    let value2 = time.value_ns;
+    let lower = time.lower_ns;
+    let upper = time.upper_ns;
+    return object2(toList([
+      ["kind", string3("estimated")],
+      ["value_ns", string3(value2)],
+      ["lower_ns", string3(lower)],
+      ["upper_ns", string3(upper)]
+    ]));
+  } else {
+    let reason = time.reason;
+    return object2(toList([
+      ["kind", string3("unavailable")],
+      ["reason", string3(reason)]
+    ]));
+  }
+}
+function row_json(row) {
+  return object2(toList([
+    ["id", string3(row.id)],
+    ["actor", string3(row.actor)],
+    ["kind", string3(row.kind)],
+    ["local_offset_ns", int3(row.timestamp_ns)],
+    ["duration_ns", int3(row.duration_ns)],
+    ["time", time_json(row.time)],
+    ["anomalous", bool2(row.anomalous)],
+    ["evidence", string3(evidence_kind(row.evidence))]
+  ]));
+}
+function rows_payload(rows, edges, boundaries, divergence) {
+  let rows$1 = take(rows, 1000);
+  let ids = map2(rows$1, (row) => {
+    return row.id;
+  });
+  let _pipe = object2(toList([
+    ["rows", array2(rows$1, row_json)],
+    [
+      "edges",
+      (() => {
+        let _pipe2 = edges;
+        let _pipe$1 = filter(_pipe2, (edge) => {
+          return contains(ids, edge.from) || contains(ids, edge.to);
+        });
+        return array2(_pipe$1, edge_json);
+      })()
+    ],
+    [
+      "boundaries",
+      (() => {
+        let _pipe2 = boundaries;
+        let _pipe$1 = filter(_pipe2, (boundary) => {
+          return contains(ids, boundary.event_id);
+        });
+        return array2(_pipe$1, boundary_json);
+      })()
+    ],
+    ["divergence_path", array2(divergence, string3)]
+  ]));
+  return to_string2(_pipe);
 }
 function live_payload(model) {
+  let _block;
   let _pipe = model;
   let _pipe$1 = filtered_live_rows(_pipe);
   let _pipe$2 = take(_pipe$1, 200);
-  let _pipe$3 = array2(_pipe$2, (row) => {
+  _block = map2(_pipe$2, (row) => {
     let anomalous = any(model.live_findings, (finding) => {
       return finding.pid === row.pid;
     });
-    return object2(toList([
-      ["id", string3(row.pid)],
-      ["actor", string3(row.label)],
-      ["kind", string3(row.status)],
-      ["timestamp_ns", int3(row.reductions)],
-      ["duration_ns", int3(row.mailbox_len)],
-      ["anomalous", bool2(anomalous)],
-      [
-        "evidence",
-        string3((() => {
-          if (anomalous) {
-            return "inferred";
-          } else {
-            return "exact";
-          }
-        })())
-      ]
-    ]));
+    return new EventRow(row.pid, row.label, row.status, row.reductions, row.mailbox_len, new TimeUnavailable("live sample has no causal clock"), (() => {
+      if (anomalous) {
+        return new Inferred("live_sampling", "diagnostic threshold");
+      } else {
+        return Evidence$Exact$const;
+      }
+    })(), anomalous, false);
   });
-  return to_string2(_pipe$3);
+  let rows = _block;
+  let supervision = map2(model.live_supervision, (edge) => {
+    return new GraphEdge(edge.from, edge.to, "supervision", edge.evidence);
+  });
+  let spawn = map2(model.live_spawn, (edge) => {
+    return new GraphEdge(edge.from, edge.to, "spawned", edge.evidence);
+  });
+  let links = map2(model.live_links, (edge) => {
+    return new GraphEdge(edge.from, edge.to, "link_relationship", edge.evidence);
+  });
+  return rows_payload(rows, (() => {
+    let _pipe$3 = supervision;
+    let _pipe$4 = append(_pipe$3, spawn);
+    return append(_pipe$4, links);
+  })(), List$Empty$const, List$Empty$const);
 }
 function payload(model) {
   let $ = model.mode;
   if ($ instanceof Live) {
     return live_payload(model);
   } else if ($ instanceof Team) {
-    return rows_payload(model.team_events);
+    return rows_payload(model.team_events, List$Empty$const, List$Empty$const, List$Empty$const);
   } else {
-    return event_payload(model);
+    return rows_payload(visible_events(model), model.graph_edges, model.graph_boundaries, divergence_path(model));
   }
 }
 
@@ -7208,12 +7446,13 @@ function complete(promise, onSuccess, onError) {
   });
 }
 function armCapture(trigger, whereAql, preset, maxRoots, onSuccess, onError) {
-  complete(request("/api/v1/sessions/current/arm", {
+  complete(request("/api/v2/sessions/current/arm", {
     method: "POST",
     body: JSON.stringify({
       trigger: trigger.trim(),
       where: whereAql.trim() || null,
       capture_window_ms: 30000,
+      drain_timeout_ms: 1e4,
       max_events: 1e5,
       max_bytes: 64000000,
       max_agent_mailbox: 1e4,
@@ -7226,10 +7465,10 @@ function armCapture(trigger, whereAql, preset, maxRoots, onSuccess, onError) {
   }), onSuccess, onError);
 }
 function fetchCaptureStatus(onSuccess, onError) {
-  complete(request("/api/v1/sessions/current", { method: "GET" }).then((body) => {
+  complete(request("/api/v2/sessions/current", { method: "GET" }).then((body) => {
     try {
       const status = JSON.parse(body).status;
-      if (status === "ready" || status === "failed" || status === "idle") {
+      if (status === "ready" || status === "sealed" || status === "failed" || status === "idle") {
         captureActive = false;
       }
     } catch {}
@@ -7246,7 +7485,7 @@ function searchMfas(query, onSuccess, onError) {
   }
   mfaSearchTimer = globalThis.setTimeout(() => {
     mfaSearchController = new AbortController;
-    request(`/api/v1/targets/current/mfas?q=${encodeURIComponent(normalized)}&limit=20`, { method: "GET", signal: mfaSearchController.signal }).then(onSuccess).catch((error) => {
+    request(`/api/v2/targets/current/mfas?q=${encodeURIComponent(normalized)}&limit=20`, { method: "GET", signal: mfaSearchController.signal }).then(onSuccess).catch((error) => {
       if (error?.name !== "AbortError") {
         onError(error instanceof Error ? error.message : "MFA search failed");
       }
@@ -7254,10 +7493,10 @@ function searchMfas(query, onSuccess, onError) {
   }, 120);
 }
 function cancelCapture(onSuccess, onError) {
-  complete(request("/api/v1/sessions/current/cancel", { method: "POST" }), onSuccess, onError);
+  complete(request("/api/v2/sessions/current/cancel", { method: "POST" }), onSuccess, onError);
 }
 function saveCapture(path, onSuccess, onError) {
-  complete(request("/api/v1/sessions/current/save", {
+  complete(request("/api/v2/sessions/current/save", {
     method: "POST",
     body: JSON.stringify({ path })
   }), onSuccess, onError);
@@ -7270,7 +7509,7 @@ function installPageCleanup() {
     if (!captureActive)
       return;
     captureActive = false;
-    fetch("/api/v1/sessions/current/cancel", {
+    fetch("/api/v2/sessions/current/cancel", {
       method: "POST",
       credentials: "same-origin",
       keepalive: true,
@@ -7281,11 +7520,12 @@ function installPageCleanup() {
 
 // build/dev/javascript/beamtrace_web/beamtrace_web/capture_control.mjs
 class StatusPayload extends CustomType {
-  constructor(status, event_count, completeness, reason) {
+  constructor(status, event_count, outcome, delivery_verified, reason) {
     super();
     this.status = status;
     this.event_count = event_count;
-    this.completeness = completeness;
+    this.outcome = outcome;
+    this.delivery_verified = delivery_verified;
     this.reason = reason;
   }
 }
@@ -7312,12 +7552,42 @@ function arm(trigger, where_aql, preset, max_roots) {
     });
   });
 }
+function outcome_end_decoder() {
+  return field("kind", string2, (kind) => {
+    if (kind === "quiet_period") {
+      return field("quiet_ms", int2, (quiet_ms) => {
+        return success("sealed after " + to_string(quiet_ms) + "ms quiet period");
+      });
+    } else if (kind === "time_window") {
+      return field("window_ms", int2, (window_ms) => {
+        return success("sealed after " + to_string(window_ms) + "ms window");
+      });
+    } else if (kind === "user_stopped") {
+      return success("sealed after user stop");
+    } else if (kind === "budget_reached") {
+      return success("sealed after budget limit");
+    } else if (kind === "agent_failure") {
+      return success("sealed after agent failure");
+    } else if (kind === "legacy_unknown") {
+      return success("legacy observation end unknown");
+    } else {
+      return failure("", "observation end");
+    }
+  });
+}
+function outcome_decoder() {
+  return field("end", outcome_end_decoder(), (end) => {
+    return success(end);
+  });
+}
 function status_decoder() {
   return field("status", string2, (status) => {
     return optional_field("event_count", 0, int2, (event_count) => {
-      return optional_field("completeness", "", string2, (completeness) => {
-        return optional_field("reason", "", string2, (reason) => {
-          return success(new StatusPayload(status, event_count, completeness, reason));
+      return optional_field("outcome", "sealed", outcome_decoder(), (outcome) => {
+        return optional_field("delivery_verified", false, bool, (delivery_verified) => {
+          return optional_field("reason", "", string2, (reason) => {
+            return success(new StatusPayload(status, event_count, outcome, delivery_verified, reason));
+          });
         });
       });
     });
@@ -7335,7 +7605,23 @@ function decode_status(source) {
     } else if ($1 === "cancelling") {
       return new Ok(CapturePhase$Cancelling$const);
     } else if ($1 === "ready") {
-      return new Ok(new Ready(payload2.event_count, payload2.completeness));
+      return new Ok(new Ready(payload2.event_count, payload2.outcome + (() => {
+        let $2 = payload2.delivery_verified;
+        if ($2) {
+          return " · delivery verified";
+        } else {
+          return " · integrity issues present";
+        }
+      })()));
+    } else if ($1 === "sealed") {
+      return new Ok(new Ready(payload2.event_count, payload2.outcome + (() => {
+        let $2 = payload2.delivery_verified;
+        if ($2) {
+          return " · delivery verified";
+        } else {
+          return " · integrity issues present";
+        }
+      })()));
     } else if ($1 === "failed") {
       return new Ok(new Failed(payload2.reason));
     } else {
@@ -7431,9 +7717,168 @@ function install_cleanup() {
   });
 }
 
+// build/dev/javascript/beamtrace_web/beamtrace_web/page.mjs
+function is_internal(actor) {
+  let normalized = lowercase(actor);
+  return contains_string(normalized, "logger") || contains_string(normalized, "code_server") || contains_string(normalized, "beamtrace") || contains_string(normalized, "standard_io");
+}
+function event_row(id2, actor, timestamp_ns, kind, time, evidence) {
+  return new EventRow(id2, actor, kind, timestamp_ns, 0, time, evidence, kind === "exit" || kind === "gap", is_internal(actor));
+}
+function legacy_evidence_decoder() {
+  return field("kind", string2, (kind) => {
+    if (kind === "exact") {
+      return success(Evidence$Exact$const);
+    } else if (kind === "inferred") {
+      return field("reason", string2, (reason) => {
+        return field("confidence", float2, (_) => {
+          return success(new Inferred("legacy_v1_inference", reason));
+        });
+      });
+    } else {
+      return failure(Evidence$Exact$const, "legacy event evidence");
+    }
+  });
+}
+function kind_decoder() {
+  return field("kind", string2, (kind) => {
+    return success(kind);
+  });
+}
+function logical_decoder() {
+  return field("label", string2, (label2) => {
+    return success(label2);
+  });
+}
+function physical_decoder() {
+  return field("pid", string2, (pid) => {
+    return success(pid);
+  });
+}
+function actor_decoder() {
+  return field("physical", physical_decoder(), (physical) => {
+    return field("logical", optional(logical_decoder()), (logical) => {
+      return success((() => {
+        if (logical instanceof Some) {
+          let label2 = logical[0];
+          return label2;
+        } else {
+          return physical;
+        }
+      })());
+    });
+  });
+}
+function flat_v1_event_decoder() {
+  return field("id", string2, (id2) => {
+    return field("process", actor_decoder(), (actor) => {
+      return field("local_timestamp_ns", int2, (timestamp_ns) => {
+        return field("event", kind_decoder(), (kind) => {
+          return field("evidence", legacy_evidence_decoder(), (evidence) => {
+            return success(event_row(id2, actor, timestamp_ns, kind, new TimeUnavailable("legacy trace has no clock calibration"), evidence));
+          });
+        });
+      });
+    });
+  });
+}
+function inference_decoder() {
+  return field("method", string2, (method) => {
+    return field("reason", string2, (reason) => {
+      return success([method, reason]);
+    });
+  });
+}
+function evidence_decoder() {
+  return field("kind", string2, (kind) => {
+    if (kind === "exact") {
+      return success(Evidence$Exact$const);
+    } else if (kind === "inferred") {
+      return field("inference", inference_decoder(), (inference) => {
+        return success(new Inferred(inference[0], inference[1]));
+      });
+    } else {
+      return failure(Evidence$Exact$const, "event evidence");
+    }
+  });
+}
+function local_offset_decoder() {
+  return field("offset_ns", int2, (offset) => {
+    return field("order", int2, (_) => {
+      return success(offset);
+    });
+  });
+}
+function flat_v2_event_decoder() {
+  return field("id", string2, (id2) => {
+    return field("process", actor_decoder(), (actor) => {
+      return field("local_instant", local_offset_decoder(), (timestamp_ns) => {
+        return field("event", kind_decoder(), (kind) => {
+          return field("evidence", evidence_decoder(), (evidence) => {
+            return success(event_row(id2, actor, timestamp_ns, kind, new TimeUnavailable("calibrated time was not supplied"), evidence));
+          });
+        });
+      });
+    });
+  });
+}
+function time_estimate_decoder() {
+  return field("kind", string2, (kind) => {
+    if (kind === "exact") {
+      return field("value_ns", string2, (value2) => {
+        return success(new ExactTime(value2));
+      });
+    } else if (kind === "estimated") {
+      return field("value_ns", string2, (value2) => {
+        return field("lower_ns", string2, (lower) => {
+          return field("upper_ns", string2, (upper) => {
+            return success(new EstimatedTime(value2, lower, upper));
+          });
+        });
+      });
+    } else if (kind === "unavailable") {
+      return field("reason", string2, (reason) => {
+        return success(new TimeUnavailable(reason));
+      });
+    } else {
+      return failure(new TimeUnavailable("invalid time estimate"), "time estimate");
+    }
+  });
+}
+function v2_page_event_decoder() {
+  return field("observation", flat_v2_event_decoder(), (row) => {
+    return field("time", time_estimate_decoder(), (time) => {
+      return success(new EventRow(row.id, row.actor, row.kind, row.timestamp_ns, row.duration_ns, time, row.evidence, row.anomalous, row.internal));
+    });
+  });
+}
+function event_decoder() {
+  return one_of(v2_page_event_decoder(), toList([flat_v2_event_decoder(), flat_v1_event_decoder()]));
+}
+function page_decoder() {
+  return field("start", int2, (start5) => {
+    return field("limit", int2, (limit) => {
+      return field("total", int2, (total) => {
+        return field("events", list2(event_decoder()), (events2) => {
+          return success(new EventPage(events2, total, start5, limit));
+        });
+      });
+    });
+  });
+}
+function decode3(source) {
+  let $ = parse(source, page_decoder());
+  if ($ instanceof Ok) {
+    return $;
+  } else {
+    let errors = $[0];
+    return new Error2(inspect2(errors));
+  }
+}
+
 // build/dev/javascript/beamtrace_web/beamtrace_web/compare_control_ffi.mjs
 function requestCompare(body, onSuccess, onError) {
-  fetch("/api/v1/compare", {
+  fetch("/api/v2/compare", {
     method: "POST",
     credentials: "same-origin",
     headers: {
@@ -7459,15 +7904,22 @@ function requestCompare(body, onSuccess, onError) {
 }
 
 // build/dev/javascript/beamtrace_web/beamtrace_web/compare_control.mjs
+function time_summary_decoder() {
+  return field("estimate", time_estimate_decoder(), (estimate) => {
+    return field("valid_samples", int2, (valid) => {
+      return field("missing_samples", int2, (missing) => {
+        return success(new TimeSummary(estimate, valid, missing));
+      });
+    });
+  });
+}
 function statistic_decoder() {
   return field("signature", string2, (signature) => {
-    return field("p50_ns", int2, (p50_ns) => {
-      return field("p95_ns", int2, (p95_ns) => {
+    return field("p50", time_summary_decoder(), (p50) => {
+      return field("p95", time_summary_decoder(), (p95) => {
         return field("occurrences", int2, (occurrences) => {
           return field("total_runs", int2, (total_runs) => {
-            return field("occurrence_rate", float2, (occurrence_rate) => {
-              return success(new BranchStatistic(signature, p50_ns, p95_ns, occurrences, total_runs, occurrence_rate));
-            });
+            return success(new BranchStatistic(signature, p50, p95, occurrences, total_runs));
           });
         });
       });
@@ -7478,23 +7930,114 @@ function item_decoder() {
   return field("status", string2, (status2) => {
     return optional_field("left_id", "", string2, (left_id) => {
       return optional_field("right_id", "", string2, (right_id) => {
-        return optional_field("latency_delta_ns", 0, int2, (latency_delta_ns) => {
-          return optional_field("reason", "", string2, (reason) => {
-            if (status2 === "matched") {
-              return success(new CompareItem(status2, left_id, right_id, latency_delta_ns, reason));
-            } else if (status2 === "added") {
-              return success(new CompareItem(status2, left_id, right_id, latency_delta_ns, reason));
-            } else if (status2 === "removed") {
-              return success(new CompareItem(status2, left_id, right_id, latency_delta_ns, reason));
-            } else if (status2 === "changed") {
-              return success(new CompareItem(status2, left_id, right_id, latency_delta_ns, reason));
-            } else {
-              return failure(new CompareItem("", "", "", 0, ""), "compare item status");
-            }
+        return optional_field("latency_delta", new TimeUnavailable("latency does not apply"), time_estimate_decoder(), (latency_delta) => {
+          return optional_field("left_ids", List$Empty$const, list2(string2), (left_ids) => {
+            return optional_field("right_ids", List$Empty$const, list2(string2), (right_ids) => {
+              return optional_field("reason", "", string2, (reason) => {
+                if (status2 === "matched") {
+                  return success(new CompareItem(status2, (() => {
+                    if (left_ids instanceof Empty) {
+                      return left_id;
+                    } else if (left_id === "") {
+                      return join(left_ids, ", ");
+                    } else {
+                      return left_id;
+                    }
+                  })(), (() => {
+                    if (right_ids instanceof Empty) {
+                      return right_id;
+                    } else if (right_id === "") {
+                      return join(right_ids, ", ");
+                    } else {
+                      return right_id;
+                    }
+                  })(), latency_delta, reason));
+                } else if (status2 === "added") {
+                  return success(new CompareItem(status2, (() => {
+                    if (left_ids instanceof Empty) {
+                      return left_id;
+                    } else if (left_id === "") {
+                      return join(left_ids, ", ");
+                    } else {
+                      return left_id;
+                    }
+                  })(), (() => {
+                    if (right_ids instanceof Empty) {
+                      return right_id;
+                    } else if (right_id === "") {
+                      return join(right_ids, ", ");
+                    } else {
+                      return right_id;
+                    }
+                  })(), latency_delta, reason));
+                } else if (status2 === "removed") {
+                  return success(new CompareItem(status2, (() => {
+                    if (left_ids instanceof Empty) {
+                      return left_id;
+                    } else if (left_id === "") {
+                      return join(left_ids, ", ");
+                    } else {
+                      return left_id;
+                    }
+                  })(), (() => {
+                    if (right_ids instanceof Empty) {
+                      return right_id;
+                    } else if (right_id === "") {
+                      return join(right_ids, ", ");
+                    } else {
+                      return right_id;
+                    }
+                  })(), latency_delta, reason));
+                } else if (status2 === "changed") {
+                  return success(new CompareItem(status2, (() => {
+                    if (left_ids instanceof Empty) {
+                      return left_id;
+                    } else if (left_id === "") {
+                      return join(left_ids, ", ");
+                    } else {
+                      return left_id;
+                    }
+                  })(), (() => {
+                    if (right_ids instanceof Empty) {
+                      return right_id;
+                    } else if (right_id === "") {
+                      return join(right_ids, ", ");
+                    } else {
+                      return right_id;
+                    }
+                  })(), latency_delta, reason));
+                } else if (status2 === "ambiguous") {
+                  return success(new CompareItem(status2, (() => {
+                    if (left_ids instanceof Empty) {
+                      return left_id;
+                    } else if (left_id === "") {
+                      return join(left_ids, ", ");
+                    } else {
+                      return left_id;
+                    }
+                  })(), (() => {
+                    if (right_ids instanceof Empty) {
+                      return right_id;
+                    } else if (right_id === "") {
+                      return join(right_ids, ", ");
+                    } else {
+                      return right_id;
+                    }
+                  })(), latency_delta, reason));
+                } else {
+                  return failure(new CompareItem("", "", "", new TimeUnavailable("invalid compare item"), ""), "compare item status");
+                }
+              });
+            });
           });
         });
       });
     });
+  });
+}
+function divergence_decoder() {
+  return field("causal_path", list2(string2), (path) => {
+    return success(path);
   });
 }
 function run_decoder() {
@@ -7502,8 +8045,19 @@ function run_decoder() {
     return field("added", int2, (added) => {
       return field("removed", int2, (removed) => {
         return field("changed", int2, (changed) => {
-          return field("items", list2(item_decoder()), (items) => {
-            return success(new CompareRun(path, added, removed, changed, items));
+          return field("ambiguity_count", int2, (ambiguity_count) => {
+            return field("first_divergence", optional(divergence_decoder()), (first_divergence2) => {
+              return field("items", list2(item_decoder()), (items) => {
+                return success(new CompareRun(path, added, removed, changed, ambiguity_count, (() => {
+                  if (first_divergence2 instanceof Some) {
+                    let path$1 = first_divergence2[0];
+                    return path$1;
+                  } else {
+                    return List$Empty$const;
+                  }
+                })(), items));
+              });
+            });
           });
         });
       });
@@ -7550,9 +8104,91 @@ function run2(paths) {
   });
 }
 
+// build/dev/javascript/beamtrace_web/beamtrace_web/graph_control_ffi.mjs
+function fetchGraph(onSuccess, onError) {
+  fetch("/api/v2/sessions/current/graph", {
+    method: "GET",
+    credentials: "same-origin",
+    headers: { accept: "application/json" }
+  }).then(async (response) => {
+    const body = await response.text();
+    if (!response.ok)
+      throw new Error(body || `HTTP ${response.status}`);
+    onSuccess(body);
+  }).catch((error) => onError(String(error?.message ?? error)));
+}
+
+// build/dev/javascript/beamtrace_web/beamtrace_web/graph_control.mjs
+class GraphPayload extends CustomType {
+  constructor(edges, boundaries) {
+    super();
+    this.edges = edges;
+    this.boundaries = boundaries;
+  }
+}
+function edge_kind_decoder() {
+  return field("kind", string2, (kind) => {
+    return success(kind);
+  });
+}
+function boundary_decoder() {
+  return field("event_id", string2, (event_id) => {
+    return field("kind", edge_kind_decoder(), (kind) => {
+      return field("reason", string2, (reason) => {
+        return success(new GraphBoundary(event_id, kind, reason));
+      });
+    });
+  });
+}
+function edge_decoder() {
+  return field("from", string2, (from3) => {
+    return field("to", string2, (to) => {
+      return field("kind", edge_kind_decoder(), (kind) => {
+        return field("evidence", evidence_decoder(), (evidence) => {
+          return success(new GraphEdge(from3, to, kind, evidence));
+        });
+      });
+    });
+  });
+}
+function graph_decoder() {
+  return field("schema_version", int2, (_) => {
+    return field("edges", list2(edge_decoder()), (edges) => {
+      return field("boundaries", list2(boundary_decoder()), (boundaries) => {
+        return success(new GraphPayload(edges, boundaries));
+      });
+    });
+  });
+}
+function decode_graph(source) {
+  let $ = parse(source, graph_decoder());
+  if ($ instanceof Ok) {
+    return $;
+  } else {
+    let error = $[0];
+    return new Error2(inspect2(error));
+  }
+}
+function load() {
+  return from2((dispatch2) => {
+    return fetchGraph((body) => {
+      let $ = decode_graph(body);
+      if ($ instanceof Ok) {
+        let graph = $[0];
+        return dispatch2(new GraphLoaded(graph.edges, graph.boundaries));
+      } else {
+        let reason = $[0];
+        return dispatch2(new GraphLoadFailed(reason));
+      }
+    }, (reason) => {
+      return dispatch2(new GraphLoadFailed(reason));
+    });
+  });
+}
+
 // build/dev/javascript/beamtrace_web/beamtrace_web/live_control_ffi.mjs
 function fetchLive(onSuccess, onError) {
-  fetch("/api/v1/live?limit=200", {
+  fetch("/api/v2/live?limit=200", {
     method: "GET",
     credentials: "same-origin",
     headers: { accept: "application/json" }
@@ -7585,25 +8221,13 @@ class TopologyPayload extends CustomType {
     this.links = links;
   }
 }
-function evidence_decoder() {
-  return field("status", string2, (status2) => {
-    if (status2 === "exact") {
-      return success(Evidence$Exact$const);
-    } else if (status2 === "inferred") {
-      return field("reason", string2, (reason) => {
-        return field("confidence", float2, (confidence) => {
-          return success(new Inferred(reason, confidence));
-        });
-      });
-    } else {
-      return failure(Evidence$Exact$const, "live evidence");
-    }
-  });
+function evidence_decoder2() {
+  return evidence_decoder();
 }
 function topology_edge_decoder() {
   return field("from", string2, (from3) => {
     return field("to", string2, (to) => {
-      return field("evidence", evidence_decoder(), (evidence) => {
+      return field("evidence", evidence_decoder2(), (evidence) => {
         return success(new TopologyEdge(from3, to, evidence));
       });
     });
@@ -7623,7 +8247,7 @@ function finding_decoder() {
     return field("label", string2, (label2) => {
       return field("kind", string2, (kind) => {
         return field("summary", string2, (summary) => {
-          return field("evidence", evidence_decoder(), (evidence) => {
+          return field("evidence", evidence_decoder2(), (evidence) => {
             return success(new LiveFinding(pid, label2, kind, summary, evidence));
           });
         });
@@ -7692,7 +8316,7 @@ function decode_snapshot(source) {
     return new Error2(inspect2(errors));
   }
 }
-function load() {
+function load2() {
   return from2((dispatch2) => {
     return fetchLive((body) => {
       let $ = decode_snapshot(body);
@@ -7716,89 +8340,6 @@ function poll_after2(delay_ms) {
   });
 }
 
-// build/dev/javascript/beamtrace_web/beamtrace_web/page.mjs
-function is_internal(actor) {
-  let normalized = lowercase(actor);
-  return contains_string(normalized, "logger") || contains_string(normalized, "code_server") || contains_string(normalized, "beamtrace") || contains_string(normalized, "standard_io");
-}
-function evidence_decoder2() {
-  return field("kind", string2, (kind) => {
-    if (kind === "exact") {
-      return success(Evidence$Exact$const);
-    } else if (kind === "inferred") {
-      return field("reason", string2, (reason) => {
-        return field("confidence", float2, (confidence) => {
-          return success(new Inferred(reason, confidence));
-        });
-      });
-    } else {
-      return failure(Evidence$Exact$const, "event evidence");
-    }
-  });
-}
-function kind_decoder() {
-  return field("kind", string2, (kind) => {
-    return success(kind);
-  });
-}
-function logical_decoder() {
-  return field("label", string2, (label2) => {
-    return success(label2);
-  });
-}
-function physical_decoder() {
-  return field("pid", string2, (pid) => {
-    return success(pid);
-  });
-}
-function actor_decoder() {
-  return field("physical", physical_decoder(), (physical) => {
-    return field("logical", optional(logical_decoder()), (logical) => {
-      return success((() => {
-        if (logical instanceof Some) {
-          let label2 = logical[0];
-          return label2;
-        } else {
-          return physical;
-        }
-      })());
-    });
-  });
-}
-function event_decoder() {
-  return field("id", string2, (id2) => {
-    return field("process", actor_decoder(), (actor) => {
-      return field("local_timestamp_ns", int2, (timestamp_ns) => {
-        return field("event", kind_decoder(), (kind) => {
-          return field("evidence", evidence_decoder2(), (evidence) => {
-            return success(new EventRow(id2, actor, kind, timestamp_ns, 0, evidence, kind === "exit" || kind === "gap", is_internal(actor)));
-          });
-        });
-      });
-    });
-  });
-}
-function page_decoder() {
-  return field("start", int2, (start5) => {
-    return field("limit", int2, (limit) => {
-      return field("total", int2, (total) => {
-        return field("events", list2(event_decoder()), (events2) => {
-          return success(new EventPage(events2, total, start5, limit));
-        });
-      });
-    });
-  });
-}
-function decode3(source) {
-  let $ = parse(source, page_decoder());
-  if ($ instanceof Ok) {
-    return $;
-  } else {
-    let errors = $[0];
-    return new Error2(inspect2(errors));
-  }
-}
-
 // build/dev/javascript/beamtrace_web/beamtrace_web/page_loader_ffi.mjs
 function pageUrl(start5, limit, search) {
   const query = new URLSearchParams({
@@ -7808,7 +8349,7 @@ function pageUrl(start5, limit, search) {
   if (search.trim() !== "") {
     query.set("q", search.trim());
   }
-  return `/api/v1/sessions/current/events?${query}`;
+  return `/api/v2/sessions/current/events?${query}`;
 }
 function fetchPage(start5, limit, search, onSuccess, onError) {
   fetch(pageUrl(start5, limit, search), {
@@ -7827,7 +8368,7 @@ function fetchPage(start5, limit, search, onSuccess, onError) {
 }
 
 // build/dev/javascript/beamtrace_web/beamtrace_web/page_loader.mjs
-function load2(start5, limit, query) {
+function load3(start5, limit, query) {
   return from2((dispatch2) => {
     return fetchPage(start5, limit, query, (body) => {
       let $ = decode3(body);
@@ -7877,10 +8418,10 @@ function cursorQuery(cursor, limit) {
   return query.toString();
 }
 function fetchTraces(cursor, onSuccess, onError) {
-  complete2(request2(`/api/v1/traces?${cursorQuery(cursor, 50)}`), onSuccess, onError);
+  complete2(request2(`/api/v2/traces?${cursorQuery(cursor, 50)}`), onSuccess, onError);
 }
 function fetchEvents(traceId, cursor, onSuccess, onError) {
-  complete2(request2(`/api/v1/traces/${encodeURIComponent(traceId)}/events?${cursorQuery(cursor, 200)}`), onSuccess, onError);
+  complete2(request2(`/api/v2/traces/${encodeURIComponent(traceId)}/events?${cursorQuery(cursor, 200)}`), onSuccess, onError);
 }
 function cookie(name) {
   const prefix = `${name}=`;
@@ -7893,7 +8434,7 @@ function cookie(name) {
 }
 function updateHold(traceId, enabled, onSuccess, onError) {
   const csrf = cookie("beamtrace_csrf");
-  complete2(request2(`/api/v1/traces/${encodeURIComponent(traceId)}/hold`, {
+  complete2(request2(`/api/v2/traces/${encodeURIComponent(traceId)}/hold`, {
     method: enabled ? "POST" : "DELETE",
     headers: { "x-beamtrace-csrf": csrf }
   }), onSuccess, onError);
@@ -7911,16 +8452,16 @@ function mfa_decoder() {
 }
 function trace_decoder() {
   return field("id", string2, (id2) => {
-    return field("status", string2, (status2) => {
+    return optional_field("status", "", string2, (_) => {
       return field("node", string2, (node) => {
         return field("mfa", mfa_decoder(), (mfa) => {
           return field("privacy", string2, (privacy) => {
-            return field("completeness", string2, (completeness) => {
+            return field("delivery_status", string2, (delivery_status) => {
               return field("event_count", int2, (event_count) => {
                 return field("received_at_ms", int2, (received_at_ms) => {
                   return field("legal_hold", bool, (legal_hold) => {
                     return field("locked", bool, (locked) => {
-                      return success(new TeamTrace(id2, status2, node, mfa[0], mfa[1], mfa[2], privacy, completeness, event_count, received_at_ms, legal_hold, locked));
+                      return success(new TeamTrace(id2, node, mfa[0], mfa[1], mfa[2], privacy, delivery_status, event_count, received_at_ms, legal_hold, locked));
                     });
                   });
                 });
@@ -8090,7 +8631,10 @@ function compare_summary(model) {
     let changed = fold2(report.reports, 0, (total, run3) => {
       return total + run3.changed;
     });
-    return to_string(report.run_count) + " runs · +" + to_string(added) + " −" + to_string(removed) + " ~" + to_string(changed);
+    let ambiguous = fold2(report.reports, 0, (total, run3) => {
+      return total + run3.ambiguity_count;
+    });
+    return to_string(report.run_count) + " runs · +" + to_string(added) + " −" + to_string(removed) + " ~" + to_string(changed) + " ambiguous " + to_string(ambiguous);
   } else {
     return "No comparison loaded";
   }
@@ -8107,13 +8651,43 @@ function panel_heading(title, index4) {
     strong(List$Empty$const, toList([text3(title)]))
   ]));
 }
+function event_boundary_label(model, event_id) {
+  let _block;
+  let _pipe = model.graph_boundaries;
+  let _pipe$1 = filter(_pipe, (boundary) => {
+    return boundary.event_id === event_id;
+  });
+  _block = map2(_pipe$1, (boundary) => {
+    return boundary.kind + " · " + boundary.reason;
+  });
+  let boundaries = _block;
+  if (boundaries instanceof Empty) {
+    return "None observed";
+  } else {
+    return join(boundaries, "; ");
+  }
+}
+function time_estimate_label(estimate) {
+  if (estimate instanceof ExactTime) {
+    let value2 = estimate.value_ns;
+    return value2 + " ns exact";
+  } else if (estimate instanceof EstimatedTime) {
+    let value2 = estimate.value_ns;
+    let lower = estimate.lower_ns;
+    let upper = estimate.upper_ns;
+    return value2 + " ns estimated [" + lower + ", " + upper + "]";
+  } else {
+    let reason = estimate.reason;
+    return "time unavailable · " + reason;
+  }
+}
 function evidence_label(evidence) {
   if (evidence instanceof Exact) {
     return "Exact";
   } else {
+    let method = evidence.method;
     let reason = evidence.reason;
-    let confidence = evidence.confidence;
-    return "Inferred " + zoom_label(confidence) + " · " + reason;
+    return "Inferred · " + method + " · " + reason;
   }
 }
 function compare_inspector(model) {
@@ -8153,7 +8727,7 @@ function list_text(items) {
 }
 function mode_title(mode) {
   if (mode instanceof Capture) {
-    return "Exact causal sequence";
+    return "Bounded causal observation";
   } else if (mode instanceof Live) {
     return "Runtime signals";
   } else if (mode instanceof Compare) {
@@ -8173,6 +8747,9 @@ function mode_slug(mode) {
     return "team";
   }
 }
+function time_summary_label(summary) {
+  return time_estimate_label(summary.estimate) + " · " + to_string(summary.valid_samples) + " valid / " + to_string(summary.missing_samples) + " missing";
+}
 function statistics_table(rows) {
   return div(toList([class$("event-table-wrap compare-statistics")]), toList([
     table(toList([aria_label("Multi-run branch statistics")]), toList([
@@ -8187,7 +8764,7 @@ function statistics_table(rows) {
         return tr(List$Empty$const, toList([
           td(List$Empty$const, toList([text3(row.signature)])),
           td(List$Empty$const, toList([
-            text3("p50 " + to_string(row.p50_ns) + " ns · p95 " + to_string(row.p95_ns) + " ns")
+            text3("p50 " + time_summary_label(row.p50) + " · p95 " + time_summary_label(row.p95))
           ])),
           td(List$Empty$const, toList([
             text3(to_string(row.occurrences) + "/" + to_string(row.total_runs) + " runs")
@@ -8207,12 +8784,7 @@ function or_dash(value2) {
 function latency_delta(item) {
   let $ = item.status;
   if ($ === "matched") {
-    let $1 = item.latency_delta_ns >= 0;
-    if ($1) {
-      return "+" + to_string(item.latency_delta_ns) + " ns";
-    } else {
-      return to_string(item.latency_delta_ns) + " ns";
-    }
+    return time_estimate_label(item.latency_delta);
   } else {
     return "—";
   }
@@ -8257,48 +8829,39 @@ function alignment_table(rows) {
     ]))
   ]));
 }
-function compare_workspace(model) {
-  let _block;
-  let $ = model.compare_report;
-  if ($ instanceof Some) {
-    let report = $[0];
-    let _pipe = report.reports;
-    _block = flat_map(_pipe, (run3) => {
-      return map2(run3.items, (item) => {
-        return new ComparedItem(run3.path, item);
-      });
-    });
-  } else {
-    _block = List$Empty$const;
-  }
-  let items = _block;
-  return section(toList([
-    class$("causal panel compare-panel"),
-    aria_label("Trace comparison")
-  ]), toList([
-    div(toList([class$("panel-toolbar")]), toList([
-      div(List$Empty$const, toList([
-        p(toList([class$("eyebrow")]), toList([text3("compare")])),
-        h2(List$Empty$const, toList([text3("PID-independent causal alignment")]))
-      ])),
-      span(toList([
-        class$("window-count"),
-        aria_live("polite")
-      ]), toList([text3(compare_summary(model))]))
-    ])),
-    (() => {
-      let $1 = model.compare_report;
-      if ($1 instanceof Some) {
-        let report = $1[0];
-        return div(toList([class$("compare-results")]), toList([alignment_table(items), statistics_table(report.statistics)]));
+function first_divergence_path(loop$reports) {
+  while (true) {
+    let reports = loop$reports;
+    if (reports instanceof Empty) {
+      return reports;
+    } else {
+      let run3 = reports.head;
+      let rest = reports.tail;
+      let $ = run3.first_divergence_path;
+      if ($ instanceof Empty) {
+        loop$reports = rest;
       } else {
-        return div(toList([class$("empty-state compare-empty")]), toList([
-          p(List$Empty$const, toList([
-            text3("Enter two or more local .beamtrace paths. The first run is the baseline.")
-          ]))
-        ]));
+        return $;
       }
-    })()
+    }
+  }
+}
+function divergence_summary(reports) {
+  let path = first_divergence_path(reports);
+  return div(toList([
+    class$("divergence-summary"),
+    aria_label("First divergence causal path")
+  ]), toList([
+    strong(List$Empty$const, toList([text3("First divergence")])),
+    span(List$Empty$const, toList([
+      text3((() => {
+        if (path instanceof Empty) {
+          return " · none established";
+        } else {
+          return " · " + join(path, " → ");
+        }
+      })())
+    ]))
   ]));
 }
 function live_evidence_label(findings) {
@@ -8345,8 +8908,8 @@ function capture_phase_label(phase) {
     return "Cancelling";
   } else if (phase instanceof Ready) {
     let count = phase.event_count;
-    let completeness = phase.completeness;
-    return "Ready · " + to_string(count) + " events · " + completeness;
+    let outcome = phase.outcome_summary;
+    return "Sealed · " + to_string(count) + " events · " + outcome;
   } else {
     let reason = phase.reason;
     return "Failed · " + reason;
@@ -8517,8 +9080,7 @@ function team_inspector(model) {
         let trace = $[0];
         return div(List$Empty$const, toList([
           definition("Trace", trace.id),
-          definition("Status", trace.status),
-          definition("Completeness", trace.completeness),
+          definition("Delivery status", trace.delivery_status),
           definition("Privacy", (() => {
             let $1 = trace.locked;
             if ($1) {
@@ -8588,8 +9150,10 @@ function inspector_event(model, row) {
     ])),
     definition("Event ID", row.id),
     definition("Evidence", evidence_label(row.evidence)),
+    definition("Calibrated time", time_estimate_label(row.time)),
+    definition("Node-local offset", to_string(row.timestamp_ns) + " ns (not cross-node comparable)"),
     definition("Duration", to_string(row.duration_ns) + " ns"),
-    definition("Boundary", "None observed"),
+    definition("Boundary", event_boundary_label(model, row.id)),
     definition("Source", "Unavailable in this event metadata"),
     label(toList([class$("annotation")]), toList([
       span(List$Empty$const, toList([text3("Annotation")])),
@@ -8696,7 +9260,7 @@ function inspector(model) {
     return team_inspector(model);
   }
 }
-function event_row(row) {
+function event_row2(row) {
   return tr(toList([
     class$((() => {
       let $ = row.anomalous;
@@ -8715,7 +9279,9 @@ function event_row(row) {
     td(List$Empty$const, toList([
       span(toList([class$("kind-pill")]), toList([text3(row.kind)]))
     ])),
-    td(List$Empty$const, toList([text3(to_string(row.timestamp_ns) + " ns")])),
+    td(List$Empty$const, toList([
+      text3(to_string(row.timestamp_ns) + " ns node-local · " + time_estimate_label(row.time))
+    ])),
     td(List$Empty$const, toList([text3(evidence_label(row.evidence))]))
   ]));
 }
@@ -8731,7 +9297,7 @@ function event_table(rows) {
           th(List$Empty$const, toList([text3("Evidence")]))
         ]))
       ])),
-      tbody(List$Empty$const, map2(rows, event_row))
+      tbody(List$Empty$const, map2(rows, event_row2))
     ]))
   ]));
 }
@@ -8797,7 +9363,7 @@ function team_trace_row(trace) {
       button(toList([class$("event-link")]), toList([text3(trace.id)]))
     ])),
     td(List$Empty$const, toList([
-      span(toList([class$("kind-pill")]), toList([text3(trace.status)]))
+      span(toList([class$("kind-pill")]), toList([text3(trace.delivery_status)]))
     ])),
     td(List$Empty$const, toList([
       text3(trace.node + " · " + trace.module_ + ":" + trace.function_ + "/" + to_string(trace.arity))
@@ -8948,6 +9514,63 @@ function event_workspace(model) {
       ]))
     ])),
     event_table(visible)
+  ]));
+}
+function compare_workspace(model) {
+  let _block;
+  let $ = model.compare_report;
+  if ($ instanceof Some) {
+    let report = $[0];
+    let _pipe = report.reports;
+    _block = flat_map(_pipe, (run3) => {
+      return map2(run3.items, (item) => {
+        return new ComparedItem(run3.path, item);
+      });
+    });
+  } else {
+    _block = List$Empty$const;
+  }
+  let items = _block;
+  return section(toList([
+    class$("causal panel compare-panel"),
+    aria_label("Trace comparison")
+  ]), toList([
+    div(toList([class$("panel-toolbar")]), toList([
+      div(List$Empty$const, toList([
+        p(toList([class$("eyebrow")]), toList([text3("compare")])),
+        h2(List$Empty$const, toList([text3("PID-independent causal alignment")]))
+      ])),
+      span(toList([
+        class$("window-count"),
+        aria_live("polite")
+      ]), toList([text3(compare_summary(model))]))
+    ])),
+    (() => {
+      let $1 = model.compare_report;
+      if ($1 instanceof Some) {
+        let report = $1[0];
+        return div(toList([class$("compare-results")]), toList([
+          divergence_summary(report.reports),
+          div(toList([class$("canvas-frame")]), toList([
+            canvas(toList([
+              id("causal-canvas"),
+              attribute2("width", "1600"),
+              attribute2("height", "620"),
+              aria_hidden(true)
+            ]))
+          ])),
+          event_table(visible_events(model)),
+          alignment_table(items),
+          statistics_table(report.statistics)
+        ]));
+      } else {
+        return div(toList([class$("empty-state compare-empty")]), toList([
+          p(List$Empty$const, toList([
+            text3("Enter two or more local .beamtrace paths. The first run is the baseline.")
+          ]))
+        ]));
+      }
+    })()
   ]));
 }
 function live_row(model, row) {
@@ -9338,7 +9961,7 @@ function finish_update(next, extra_effects) {
     let loading = begin_loading(next);
     return [
       loading,
-      batch(prepend(draw_effect(loading), prepend(load2(loading.viewport_start, page_limit(loading), remote_query(loading)), extra_effects)))
+      batch(prepend(draw_effect(loading), prepend(load3(loading.viewport_start, page_limit(loading), remote_query(loading)), extra_effects)))
     ];
   } else {
     return [next, batch(prepend(draw_effect(next), extra_effects))];
@@ -9348,7 +9971,7 @@ function update3(model, message) {
   if (message instanceof UserSelectedMode) {
     let $ = message[0];
     if ($ instanceof Live) {
-      return finish_update(update2(model, message), toList([load()]));
+      return finish_update(update2(model, message), toList([load2()]));
     } else if ($ instanceof Team) {
       let next = update2(model, message);
       let $1 = next.team_traces;
@@ -9386,6 +10009,8 @@ function update3(model, message) {
       return finish_update(next, toList([poll_after(150)]));
     } else if (phase instanceof Cancelling) {
       return finish_update(next, toList([poll_after(150)]));
+    } else if (phase instanceof Ready) {
+      return finish_update(next, toList([load()]));
     } else {
       return finish_update(next, List$Empty$const);
     }
@@ -9397,7 +10022,7 @@ function update3(model, message) {
     let next = update2(model, message);
     let $ = next.mode;
     if ($ instanceof Live) {
-      return finish_update(next, toList([load()]));
+      return finish_update(next, toList([load2()]));
     } else {
       return finish_update(next, List$Empty$const);
     }
@@ -9472,7 +10097,8 @@ function update3(model, message) {
 function startup_effect(model) {
   return batch(toList([
     draw_effect(model),
-    load2(0, 200, remote_query(model)),
+    load3(0, 200, remote_query(model)),
+    load(),
     status(),
     install_cleanup(),
     from2((dispatch2) => {
@@ -9490,7 +10116,7 @@ function main2() {
   let app = application(init2, update3, workspace);
   let $ = start4(app, "#app", undefined);
   if (!($ instanceof Ok)) {
-    throw makeError("let_assert", FILEPATH, "beamtrace_web", 16, "main", "Pattern match failed, no pattern matched the value.", { value: $, start: 468, end: 529, pattern_start: 479, pattern_end: 484 });
+    throw makeError("let_assert", FILEPATH, "beamtrace_web", 17, "main", "Pattern match failed, no pattern matched the value.", { value: $, start: 503, end: 564, pattern_start: 514, pattern_end: 519 });
   }
   return;
 }

@@ -24,6 +24,7 @@ pub type State {
   )
   Active(
     relay: enrollment_store.RelayRecord,
+    protocol_version: Int,
     last_sequence: Int,
     last_heartbeat_ms: Int,
     credits_remaining: Int,
@@ -62,9 +63,10 @@ pub fn receive_text(state: State, frame: String, now_ms: Int) -> Transition {
   case state {
     AwaitingHello(store, expected_relay_id, _) ->
       receive_hello(store, expected_relay_id, frame, now_ms)
-    Active(relay, previous_sequence, _, credits, session) ->
+    Active(relay, protocol_version, previous_sequence, _, credits, session) ->
       receive_envelope(
         relay,
+        protocol_version,
         previous_sequence,
         credits,
         session,
@@ -80,7 +82,7 @@ pub fn expire(state: State, now_ms: Int) -> State {
     AwaitingHello(_, _, connected_at)
       if now_ms - connected_at > hello_timeout_ms
     -> Rejected("hello_timeout")
-    Active(_, _, last_heartbeat, _, _)
+    Active(_, _, _, last_heartbeat, _, _)
       if now_ms - last_heartbeat > heartbeat_timeout_ms
     -> Rejected("heartbeat_timeout")
     _ -> state
@@ -103,8 +105,20 @@ fn receive_hello(
             Error(reason) -> reject(reason)
             Ok(relay) ->
               Transition(
-                Active(relay, 0, now_ms, credit_policy.initial_credits, None),
-                [SendText(credit_frame(credit_policy.initial_credits))],
+                Active(
+                  relay,
+                  hello.protocol_version,
+                  0,
+                  now_ms,
+                  credit_policy.initial_credits,
+                  None,
+                ),
+                [
+                  SendText(credit_frame(
+                    hello.protocol_version,
+                    credit_policy.initial_credits,
+                  )),
+                ],
               )
           }
       }
@@ -113,6 +127,7 @@ fn receive_hello(
 
 fn receive_envelope(
   relay: enrollment_store.RelayRecord,
+  protocol_version: Int,
   previous_sequence: Int,
   credits: Int,
   session: Option(SessionState),
@@ -121,6 +136,8 @@ fn receive_envelope(
 ) -> Transition {
   case relay_wire.decode_envelope(frame) {
     Error(reason) -> reject(reason)
+    Ok(envelope) if envelope.protocol_version != protocol_version ->
+      reject("protocol_version_changed")
     Ok(envelope) ->
       case
         relay_wire.verify_envelope(
@@ -135,12 +152,20 @@ fn receive_envelope(
             Error(reason) -> reject(reason)
             Ok(relay_session.Heartbeat) ->
               Transition(
-                Active(relay, envelope.sequence, now_ms, credits, session),
+                Active(
+                  relay,
+                  protocol_version,
+                  envelope.sequence,
+                  now_ms,
+                  credits,
+                  session,
+                ),
                 [],
               )
             Ok(relay_session.SessionStart(start)) ->
               receive_session_start(
                 relay,
+                protocol_version,
                 envelope.sequence,
                 start,
                 now_ms,
@@ -156,6 +181,7 @@ fn receive_envelope(
             )) ->
               receive_session_batch(
                 relay,
+                protocol_version,
                 envelope.sequence,
                 credits,
                 session,
@@ -168,6 +194,7 @@ fn receive_envelope(
             Ok(relay_session.SessionEnd(end)) ->
               receive_session_end(
                 relay,
+                protocol_version,
                 envelope.sequence,
                 credits,
                 session,
@@ -181,6 +208,7 @@ fn receive_envelope(
 
 fn receive_session_start(
   relay: enrollment_store.RelayRecord,
+  protocol_version: Int,
   sequence: Int,
   start: relay_session.Start,
   now_ms: Int,
@@ -193,6 +221,7 @@ fn receive_session_start(
       Transition(
         Active(
           relay,
+          protocol_version,
           sequence,
           now_ms,
           credit_policy.initial_credits,
@@ -205,6 +234,7 @@ fn receive_session_start(
 
 fn receive_session_batch(
   relay: enrollment_store.RelayRecord,
+  protocol_version: Int,
   sequence: Int,
   credits: Int,
   current: Option(SessionState),
@@ -237,6 +267,7 @@ fn receive_session_batch(
           Transition(
             Active(
               relay,
+              protocol_version,
               sequence,
               now_ms,
               credits - 1,
@@ -251,6 +282,7 @@ fn receive_session_batch(
 
 fn receive_session_end(
   relay: enrollment_store.RelayRecord,
+  protocol_version: Int,
   sequence: Int,
   credits: Int,
   current: Option(SessionState),
@@ -267,9 +299,12 @@ fn receive_session_end(
         False, _ -> reject("session_id_mismatch")
         _, False -> reject("invalid_session_sequence")
         True, True ->
-          Transition(Active(relay, sequence, now_ms, credits, None), [
-            SessionEnded(end),
-          ])
+          Transition(
+            Active(relay, protocol_version, sequence, now_ms, credits, None),
+            [
+              SessionEnded(end),
+            ],
+          )
       }
   }
 }
@@ -280,13 +315,20 @@ fn reject(reason: String) -> Transition {
 
 pub fn durable_accept(state: State) -> #(State, Option(String)) {
   case state {
-    Active(relay, sequence, heartbeat, remaining, session) -> {
+    Active(relay, protocol_version, sequence, heartbeat, remaining, session) -> {
       let refill = credit_policy.after_durable_accept(remaining)
       case refill.granted {
         0 -> #(state, None)
         granted -> #(
-          Active(relay, sequence, heartbeat, refill.available, session),
-          Some(credit_frame(granted)),
+          Active(
+            relay,
+            protocol_version,
+            sequence,
+            heartbeat,
+            refill.available,
+            session,
+          ),
+          Some(credit_frame(protocol_version, granted)),
         )
       }
     }
@@ -296,14 +338,23 @@ pub fn durable_accept(state: State) -> #(State, Option(String)) {
 
 pub fn current_session(state: State) -> Option(#(String, String)) {
   case state {
-    Active(relay, _, _, _, Some(SessionState(session, _))) ->
+    Active(relay, _, _, _, _, Some(SessionState(session, _))) ->
       Some(#(session.session_id, relay.id))
     _ -> None
   }
 }
 
-fn credit_frame(credits: Int) -> String {
-  "{\"type\":\"credit\",\"protocol_version\":2,\"credits\":"
+pub fn negotiated_protocol_version(state: State) -> Int {
+  case state {
+    Active(_, version, _, _, _, _) -> version
+    _ -> relay_wire.protocol_version
+  }
+}
+
+fn credit_frame(protocol_version: Int, credits: Int) -> String {
+  "{\"type\":\"credit\",\"protocol_version\":"
+  <> int.to_string(protocol_version)
+  <> ",\"credits\":"
   <> int.to_string(credits)
   <> ",\"max_batch_events\":128}"
 }

@@ -16,7 +16,7 @@ pub type Screen {
 pub type TeamTrace {
   TeamTrace(
     id: String,
-    status: String,
+    delivery_status: String,
     node: String,
     mfa: String,
     privacy: String,
@@ -40,7 +40,7 @@ pub type CapturePhase {
   CaptureArming
   CaptureArmed
   CaptureCancelling
-  CaptureReady(event_count: Int, completeness: String)
+  CaptureReady(event_count: Int, outcome_summary: String)
   CaptureFailed(reason: String)
 }
 
@@ -141,7 +141,10 @@ pub fn open_archive(events: List(Event), node: Option(String)) -> Model {
     ..init(events),
     node: node,
     connected: False,
-    capture_phase: CaptureReady(list.length(events), "offline"),
+    capture_phase: CaptureReady(
+      list.length(events),
+      "offline archive · inspect recorded outcome",
+    ),
     screen: CaptureScreen,
     focus: NormalFocus,
     notice: "Opened offline trace",
@@ -244,12 +247,12 @@ pub fn update(model: Model, message: Msg) -> Model {
         capture_phase: CaptureCancelling,
         notice: "Stopping capture and cleaning the target",
       )
-    CaptureCompleted(events, completeness) ->
+    CaptureCompleted(events, outcome_summary) ->
       Model(
         ..model,
         events: events,
-        capture_phase: CaptureReady(list.length(events), completeness),
-        notice: "Capture complete",
+        capture_phase: CaptureReady(list.length(events), outcome_summary),
+        notice: "Capture sealed; observation outcome recorded",
       )
     CaptureBecameIdle ->
       Model(

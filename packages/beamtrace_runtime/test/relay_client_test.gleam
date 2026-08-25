@@ -80,7 +80,7 @@ pub fn relay_channel_waits_for_credit_and_signs_strict_heartbeats_test() {
   let assert Ok(active) =
     relay_client.receive_control(
       initial,
-      "{\"type\":\"credit\",\"protocol_version\":2,\"credits\":8,\"max_batch_events\":128}",
+      "{\"type\":\"credit\",\"protocol_version\":3,\"credits\":8,\"max_batch_events\":128}",
     )
   active
   |> should.equal(relay_client.Active(
@@ -103,9 +103,9 @@ pub fn relay_channel_waits_for_credit_and_signs_strict_heartbeats_test() {
 
   relay_client.receive_control(
     next,
-    "{\"type\":\"stop\",\"completeness\":\"truncated\",\"reason\":\"hub_inbox_budget\"}",
+    "{\"type\":\"stop\",\"protocol_version\":3,\"delivery_status\":\"partial\",\"reason\":\"hub_inbox_budget\"}",
   )
-  |> should.equal(Ok(relay_client.Stopped("truncated:hub_inbox_budget")))
+  |> should.equal(Ok(relay_client.Stopped("partial:hub_inbox_budget")))
 }
 
 pub fn relay_channel_rejects_data_before_credit_and_unbounded_controls_test() {
@@ -114,7 +114,7 @@ pub fn relay_channel_rejects_data_before_credit_and_unbounded_controls_test() {
   |> should.equal(Error("awaiting_credit"))
   relay_client.receive_control(
     relay_client.initial_channel_state(),
-    "{\"type\":\"credit\",\"protocol_version\":2,\"credits\":1000001,\"max_batch_events\":128}",
+    "{\"type\":\"credit\",\"protocol_version\":3,\"credits\":1000001,\"max_batch_events\":128}",
   )
   |> should.equal(Error("invalid_control"))
   relay_client.receive_control(
@@ -130,12 +130,12 @@ pub fn session_ack_is_versioned_and_must_match_the_durable_end_test() {
       session_id: session_id(),
       sequence: 3,
       ended_at_ms: 2000,
-      completeness: relay_session.Complete,
+      delivery_status: relay_session.Delivered,
     )
   let frame =
-    "{\"type\":\"session_ack\",\"protocol_version\":2,\"session_id\":\""
+    "{\"type\":\"session_ack\",\"protocol_version\":3,\"session_id\":\""
     <> end.session_id
-    <> "\",\"sequence\":3,\"completeness\":\"complete\"}"
+    <> "\",\"sequence\":3,\"delivery_status\":\"delivered\"}"
   relay_client.receive_session_ack(frame, end) |> should.equal(Ok(True))
   relay_client.receive_session_ack(
     string.replace(frame, "\"sequence\":3", "\"sequence\":2"),
@@ -143,12 +143,12 @@ pub fn session_ack_is_versioned_and_must_match_the_durable_end_test() {
   )
   |> should.equal(Error("invalid_session_ack"))
   relay_client.receive_session_ack(
-    string.replace(frame, "\"protocol_version\":2", "\"protocol_version\":1"),
+    string.replace(frame, "\"protocol_version\":3", "\"protocol_version\":1"),
     end,
   )
   |> should.equal(Error("invalid_session_ack"))
   relay_client.receive_session_ack(
-    "{\"type\":\"credit\",\"protocol_version\":2,\"credits\":4,\"max_batch_events\":128}",
+    "{\"type\":\"credit\",\"protocol_version\":3,\"credits\":4,\"max_batch_events\":128}",
     end,
   )
   |> should.equal(Ok(False))
@@ -164,7 +164,7 @@ fn event(id: String, term: types.TermView) -> types.TraceEvent {
       logical: None,
       evidence: [],
     ),
-    local_timestamp_ns: 100,
+    local_instant: types.LocalInstant(100, 1),
     kind: types.Exit(term),
     evidence: types.Exact,
   )

@@ -6,6 +6,7 @@ import beamtrace_runtime/relay_inbox
 import beamtrace_runtime/relay_ingest
 import beamtrace_runtime/relay_session
 import beamtrace_runtime/relay_socket
+import beamtrace_runtime/relay_wire
 import beamtrace_runtime/team_store
 import gleam/erlang/process
 import gleam/http/request.{type Request}
@@ -62,7 +63,7 @@ pub fn upgrade(
         None -> Nil
         Some(#(session_id, active_relay_id)) -> {
           let _ =
-            team_store.mark_trace_incomplete(
+            team_store.mark_trace_failed(
               metadata,
               session_id,
               active_relay_id,
@@ -196,7 +197,7 @@ fn apply_effects(
               received_at_ms: received_at_ms,
               ended_at_ms: 0,
               last_received_at_ms: received_at_ms,
-              completeness: "active",
+              delivery_status: "active",
               event_count: 0,
               legal_hold: False,
               active: True,
@@ -204,7 +205,13 @@ fn apply_effects(
           case team_store.begin_trace_session(metadata, session, 64) {
             Error(_) -> {
               let _ =
-                mist.send_text_frame(connection, stop_frame("session_rejected"))
+                mist.send_text_frame(
+                  connection,
+                  stop_frame_for(
+                    relay_socket.negotiated_protocol_version(protocol),
+                    "session_rejected",
+                  ),
+                )
               mist.stop()
             }
             Ok(_) ->
@@ -281,20 +288,29 @@ fn apply_effects(
               let _ =
                 mist.send_text_frame(
                   connection,
-                  ingest_control_frame(truncated),
+                  ingest_control_frame_for(
+                    relay_socket.negotiated_protocol_version(protocol),
+                    truncated,
+                  ),
                 )
               mist.stop()
             }
             Error(_) as failed -> {
               let _ =
-                mist.send_text_frame(connection, ingest_control_frame(failed))
+                mist.send_text_frame(
+                  connection,
+                  ingest_control_frame_for(
+                    relay_socket.negotiated_protocol_version(protocol),
+                    failed,
+                  ),
+                )
               mist.stop()
             }
           }
         }
         relay_socket.SessionEnded(end) -> {
           let relay_id = case protocol {
-            relay_socket.Active(relay, _, _, _, _) -> relay.id
+            relay_socket.Active(relay, _, _, _, _, _) -> relay.id
             _ -> ""
           }
           case
@@ -302,14 +318,22 @@ fn apply_effects(
               metadata,
               end.session_id,
               relay_id,
-              relay_session.completeness_name(end.completeness),
+              relay_session.delivery_status_name(end.delivery_status),
               end.ended_at_ms,
               local_auth.now_ms(),
             )
           {
             Error(_) -> mist.stop_abnormal("session_end_failed")
             Ok(_) ->
-              case mist.send_text_frame(connection, session_ack_frame(end)) {
+              case
+                mist.send_text_frame(
+                  connection,
+                  session_ack_frame_for(
+                    relay_socket.negotiated_protocol_version(protocol),
+                    end,
+                  ),
+                )
+              {
                 Error(_) -> mist.stop_abnormal("relay_send_failed")
                 Ok(Nil) ->
                   apply_effects(
@@ -334,15 +358,24 @@ fn apply_effects(
 }
 
 pub fn session_ack_frame(end: relay_session.End) -> String {
+  session_ack_frame_for(relay_wire_protocol_version(), end)
+}
+
+fn session_ack_frame_for(
+  protocol_version: Int,
+  end: relay_session.End,
+) -> String {
+  let status = relay_session.delivery_status_name(end.delivery_status)
+  let status_field = case protocol_version {
+    2 -> #("completeness", json.string(legacy_delivery_status(status)))
+    _ -> #("delivery_status", json.string(status))
+  }
   json.object([
     #("type", json.string("session_ack")),
-    #("protocol_version", json.int(2)),
+    #("protocol_version", json.int(protocol_version)),
     #("session_id", json.string(end.session_id)),
     #("sequence", json.int(end.sequence)),
-    #(
-      "completeness",
-      json.string(relay_session.completeness_name(end.completeness)),
-    ),
+    status_field,
   ])
   |> json.to_string
 }
@@ -350,14 +383,22 @@ pub fn session_ack_frame(end: relay_session.End) -> String {
 pub fn ingest_control_frame(
   outcome: Result(relay_inbox.AppendStatus, String),
 ) -> String {
+  ingest_control_frame_for(relay_wire_protocol_version(), outcome)
+}
+
+fn ingest_control_frame_for(
+  protocol_version: Int,
+  outcome: Result(relay_inbox.AppendStatus, String),
+) -> String {
   case outcome {
     Ok(relay_inbox.Accepted) -> ""
-    Ok(relay_inbox.Truncated(_)) -> truncated_frame()
+    Ok(relay_inbox.Truncated(_)) -> truncated_frame_for(protocol_version)
     Error("relay_event_quota")
     | Error("relay_byte_quota")
     | Error("session_event_quota")
     | Error("session_byte_quota")
-    | Error("batch_event_limit") -> stop_frame("hub_quota")
+    | Error("batch_event_limit") ->
+      stop_frame_for(protocol_version, "hub_quota")
     Error("metadata_value_forbidden")
     | Error("invalid_metadata_fingerprint")
     | Error("raw_capture_not_authorized")
@@ -368,28 +409,52 @@ pub fn ingest_control_frame(
     | Error("raw_value_required")
     | Error("raw_redaction_required")
     | Error("raw_depth_exceeded")
-    | Error("raw_item_limit") -> stop_frame("privacy_policy")
+    | Error("raw_item_limit") ->
+      stop_frame_for(protocol_version, "privacy_policy")
     Error("invalid_payload")
     | Error("unknown_session")
     | Error("session_not_active")
     | Error("session_relay_mismatch")
     | Error("session_mode_mismatch")
     | Error("session_privacy_mismatch")
-    | Error("empty_batch") -> stop_frame("relay_protocol")
-    Error(_) -> storage_error_frame()
+    | Error("empty_batch") -> stop_frame_for(protocol_version, "relay_protocol")
+    Error(_) -> storage_error_frame_for(protocol_version)
   }
 }
 
-fn truncated_frame() -> String {
-  "{\"type\":\"stop\",\"completeness\":\"truncated\",\"reason\":\"hub_inbox_budget\"}"
+fn truncated_frame_for(protocol_version: Int) -> String {
+  stop_frame_for(protocol_version, "hub_inbox_budget")
 }
 
-fn storage_error_frame() -> String {
-  stop_frame("hub_storage_error")
+fn storage_error_frame_for(protocol_version: Int) -> String {
+  stop_frame_for(protocol_version, "hub_storage_error")
 }
 
-fn stop_frame(reason: String) -> String {
-  "{\"type\":\"stop\",\"completeness\":\"truncated\",\"reason\":\""
-  <> reason
-  <> "\"}"
+fn stop_frame_for(protocol_version: Int, reason: String) -> String {
+  case protocol_version {
+    2 ->
+      "{\"type\":\"stop\",\"completeness\":\"truncated\",\"reason\":\""
+      <> reason
+      <> "\"}"
+    _ ->
+      json.object([
+        #("type", json.string("stop")),
+        #("protocol_version", json.int(protocol_version)),
+        #("delivery_status", json.string("partial")),
+        #("reason", json.string(reason)),
+      ])
+      |> json.to_string
+  }
+}
+
+fn legacy_delivery_status(status: String) -> String {
+  case status {
+    "delivered" -> "complete"
+    "partial" -> "truncated"
+    _ -> "incomplete"
+  }
+}
+
+fn relay_wire_protocol_version() -> Int {
+  relay_wire.protocol_version
 }

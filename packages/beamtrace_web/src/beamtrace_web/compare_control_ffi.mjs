@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 export function requestCompare(body, onSuccess, onError) {
-  fetch("/api/v1/compare", {
+  fetch("/api/v2/compare", {
     method: "POST",
     credentials: "same-origin",
     headers: {

@@ -18,6 +18,7 @@ fn event(index: Int, internal: Bool) {
     },
     timestamp_ns: index * 1000,
     duration_ns: 100,
+    time: workspace.ExactTime(int.to_string(index * 1000)),
     evidence: workspace.Exact,
     anomalous: index == 42,
     internal: internal,
@@ -84,13 +85,12 @@ pub fn team_trace_selection_never_loads_locked_contents_and_ignores_stale_pages_
   let metadata =
     workspace.TeamTrace(
       "metadata-trace",
-      "complete",
       "app@host",
       "shop",
       "checkout",
       1,
       "metadata",
-      "complete",
+      "delivered",
       10,
       1000,
       False,
@@ -99,13 +99,12 @@ pub fn team_trace_selection_never_loads_locked_contents_and_ignores_stale_pages_
   let raw =
     workspace.TeamTrace(
       "raw-trace",
-      "incomplete",
       "app@host",
       "shop",
       "raw",
       0,
       "raw",
-      "incomplete",
+      "partial",
       5,
       2000,
       True,
@@ -246,9 +245,16 @@ pub fn capture_controls_preserve_the_trigger_and_track_the_real_session_test() {
   let ready =
     workspace.update(
       armed,
-      workspace.CaptureStatusLoaded(workspace.Ready(12, "complete")),
+      workspace.CaptureStatusLoaded(workspace.Ready(
+        12,
+        "sealed after 250ms quiet period · delivery verified",
+      )),
     )
-  ready.capture_phase |> should.equal(workspace.Ready(12, "complete"))
+  ready.capture_phase
+  |> should.equal(workspace.Ready(
+    12,
+    "sealed after 250ms quiet period · delivery verified",
+  ))
   ready.capture_notice |> should.equal("")
   ready.viewport_start |> should.equal(0)
 }
@@ -282,7 +288,7 @@ pub fn mfa_suggestions_are_bounded_model_state_not_fake_static_entries_test() {
   |> should.equal([])
 }
 
-pub fn failed_or_cancelled_capture_is_never_presented_as_complete_test() {
+pub fn failed_or_cancelled_capture_is_never_presented_as_verified_test() {
   let model = workspace.init_remote()
   let occupied =
     model
@@ -314,14 +320,17 @@ pub fn live_snapshot_replaces_process_state_and_filters_without_touching_capture
           "orders worker",
           "mailbox_growth",
           "mailbox is growing above its baseline",
-          workspace.Inferred("EWMA exceeded baseline with hysteresis", 0.8),
+          workspace.Inferred(
+            "ewma_hysteresis",
+            "EWMA exceeded baseline with hysteresis",
+          ),
         ),
       ],
       supervision: [
         workspace.TopologyEdge(
           "orders_sup",
           "<0.42.0>",
-          workspace.Inferred("proc_lib ancestor metadata", 0.85),
+          workspace.Inferred("proc_lib_ancestor", "proc_lib ancestor metadata"),
         ),
       ],
       spawn: [],
@@ -398,8 +407,16 @@ pub fn compare_requires_two_to_twenty_paths_and_preserves_capture_state_test() {
     workspace.CompareReport(
       "left.beamtrace",
       3,
-      [workspace.CompareRun("slow.beamtrace", 1, 0, 0, [])],
-      [workspace.BranchStatistic("orders|send:tag:work", 10, 100, 2, 3, 0.66)],
+      [workspace.CompareRun("slow.beamtrace", 1, 0, 0, 0, [], [])],
+      [
+        workspace.BranchStatistic(
+          "orders|send:tag:work",
+          workspace.TimeSummary(workspace.ExactTime("10"), 2, 0),
+          workspace.TimeSummary(workspace.ExactTime("100"), 2, 0),
+          2,
+          3,
+        ),
+      ],
     )
   let compared = workspace.update(ready, workspace.CompareLoaded(report))
   compared.events |> should.equal(original)

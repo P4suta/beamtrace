@@ -1,7 +1,7 @@
 %% SPDX-License-Identifier: Apache-2.0 OR MIT
 -module(beamtrace_enrollment_store_ffi).
 
--export([new_at/2, new_with_relays_at/4, consume/4, authenticate/6, close/1]).
+-export([new_at/2, new_with_relays_at/4, consume/4, authenticate/7, close/1]).
 
 new_at(NowMs, TtlMs) when is_integer(NowMs), is_integer(TtlMs) ->
     new_with_relays_at(
@@ -34,8 +34,10 @@ consume(Table, Code, PublicKey, NowMs)
 consume(_Table, _Code, _PublicKey, _NowMs) ->
     {error, <<"invalid_enrollment_request">>}.
 
-authenticate(Table, RelayId, TimestampMs, Nonce, Signature, NowMs)
-        when is_reference(Table), is_binary(RelayId), byte_size(RelayId) > 0,
+authenticate(Table, ProtocolVersion, RelayId, TimestampMs, Nonce, Signature, NowMs)
+        when is_reference(Table),
+             (ProtocolVersion =:= 2 orelse ProtocolVersion =:= 3),
+             is_binary(RelayId), byte_size(RelayId) > 0,
              byte_size(RelayId) =< 128, is_integer(TimestampMs),
              is_binary(Nonce), byte_size(Nonce) >= 16, byte_size(Nonce) =< 64,
              is_binary(Signature), byte_size(Signature) =:= 64,
@@ -44,19 +46,22 @@ authenticate(Table, RelayId, TimestampMs, Nonce, Signature, NowMs)
         [] -> {error, <<"unknown_relay">>};
         [{{relay, RelayId}, PublicKey}] ->
             authenticate_known(
-                Table, RelayId, PublicKey, TimestampMs, Nonce, Signature, NowMs
+                Table, ProtocolVersion, RelayId, PublicKey, TimestampMs,
+                Nonce, Signature, NowMs
             )
     catch
         error:badarg -> {error, <<"closed">>}
     end;
-authenticate(_Table, _RelayId, _TimestampMs, _Nonce, _Signature, _NowMs) ->
+authenticate(_Table, _ProtocolVersion, _RelayId, _TimestampMs, _Nonce, _Signature, _NowMs) ->
     {error, <<"invalid_hello">>}.
 
-authenticate_known(_Table, _RelayId, _PublicKey, TimestampMs, _Nonce, _Signature, NowMs)
+authenticate_known(_Table, _ProtocolVersion, _RelayId, _PublicKey,
+        TimestampMs, _Nonce, _Signature, NowMs)
         when TimestampMs < NowMs - 30000; TimestampMs > NowMs + 30000 ->
     {error, <<"stale_hello">>};
-authenticate_known(Table, RelayId, PublicKey, TimestampMs, Nonce, Signature, NowMs) ->
-    Payload = hello_payload(RelayId, TimestampMs, Nonce),
+authenticate_known(Table, ProtocolVersion, RelayId, PublicKey,
+        TimestampMs, Nonce, Signature, NowMs) ->
+    Payload = hello_payload(ProtocolVersion, RelayId, TimestampMs, Nonce),
     case verify(PublicKey, Payload, Signature) of
         false -> {error, <<"invalid_signature">>};
         true ->
@@ -69,9 +74,10 @@ authenticate_known(Table, RelayId, PublicKey, TimestampMs, Nonce, Signature, Now
             end
     end.
 
-hello_payload(RelayId, TimestampMs, Nonce) ->
+hello_payload(ProtocolVersion, RelayId, TimestampMs, Nonce) ->
     NonceEncoded = base64url(Nonce),
-    <<"beamtrace-relay-v2\nhello\n", RelayId/binary, "\n",
+    Domain = <<"beamtrace-relay-v", (integer_to_binary(ProtocolVersion))/binary>>,
+    <<Domain/binary, "\nhello\n", RelayId/binary, "\n",
       (integer_to_binary(TimestampMs))/binary, "\n", NonceEncoded/binary>>.
 
 verify(PublicKey, Payload, Signature) ->

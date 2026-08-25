@@ -44,7 +44,7 @@ beamtrace relay https://hub.example --enroll ENROLLMENT_CODE \
   --where 'message.tag == call' --cookie-file /run/secrets/beam.cookie
 ```
 
-The relay injects the bounded agent, captures one armed operation, opens a signed v2 session, and sends batches only when it has hub credit. It reports success only after the hub durably commits `session_end` and returns the matching `session_ack`. Exact capture truncates instead of sampling when any budget is exhausted. One relay owns at most one active session; the hub-wide default is 64. Disconnect without an end marks the session `incomplete`, and a reconnect may resume only with identical immutable metadata and idempotent sequence replays.
+The relay injects the bounded agent, captures one armed operation, opens a signed protocol-v3 session declaring event schema v2, and sends batches only when it has hub credit. It reports success only after the hub durably commits `session_end` and returns the matching `session_ack`. Exact capture seals with a budget outcome instead of sampling when any budget is exhausted. One relay owns at most one active session; the hub-wide default is 64. Disconnect without an end marks transfer `delivery_status` as failed, and a reconnect may resume only with identical immutable metadata and idempotent sequence replays. Relay protocol v2 remains migration input only.
 
 ## Raw relay capture
 
@@ -76,7 +76,7 @@ Hard ceilings are 30 seconds, 100,000 events, 64 MB, depth 32, binary metadata 1
 The Web and TUI trace selectors use these bounded routes:
 
 - `GET /api/v1/traces` uses an opaque cursor, defaults to 50 rows, and accepts at most 100.
-- `GET /api/v1/traces/:id` returns status, node/MFA, privacy, completeness, event count, receive time, and hold state.
+- `GET /api/v1/traces/:id` returns transfer status, node/MFA, privacy, `delivery_status`, event count, receive time, and hold state. Transfer status is not a claim about causal observation integrity.
 - `GET /api/v1/traces/:id/events` returns at most 200 events.
 - `POST` and `DELETE /api/v1/traces/:id/hold` require Admin, an exact Origin, CSRF cookie/header agreement, and an audit write.
 
@@ -91,6 +91,6 @@ The browser uses its HttpOnly OIDC session cookie. For the native TUI, place the
 
 ## Shutdown and retention
 
-SIGINT and SIGTERM stop capture, listeners, SQLite, and the selected blob backend. Disconnect, heartbeat timeout, capture timeout, or budget exhaustion compare-and-restores only BeamTrace-owned tracer state; a relay disconnect also persists the trace as `incomplete` rather than deleting evidence.
+SIGINT and SIGTERM seal capture, stop listeners, SQLite, and the selected blob backend. Disconnect, heartbeat timeout, capture timeout, or budget exhaustion compare-and-restores only BeamTrace-owned tracer state; a relay disconnect also persists available evidence with failed transfer `delivery_status` rather than deleting it.
 
 Retention runs at startup and hourly using the hub's receive timestamp, not a relay-provided clock. Metadata defaults to seven days and raw to one day; raw retention cannot exceed metadata retention. Legal hold prevents BeamTrace from deleting data until an Admin removes it, and every hold change is audited. Pruning deletes validated filesystem or S3 blob keys and their indexes without touching held sessions. Do not apply an independent expiration rule to the configured S3 prefix: an external lifecycle rule cannot see SQLite legal holds and can permanently remove held evidence. If an operator deliberately permits external deletion, BeamTrace can preserve the held metadata and audit record but cannot promise that the corresponding events remain readable.

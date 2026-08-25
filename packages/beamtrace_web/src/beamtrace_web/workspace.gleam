@@ -15,13 +15,12 @@ pub type Mode {
 pub type TeamTrace {
   TeamTrace(
     id: String,
-    status: String,
     node: String,
     module_: String,
     function_: String,
     arity: Int,
     privacy: String,
-    completeness: String,
+    delivery_status: String,
     event_count: Int,
     received_at_ms: Int,
     legal_hold: Bool,
@@ -43,7 +42,25 @@ pub type TeamEventPage {
 
 pub type Evidence {
   Exact
-  Inferred(reason: String, confidence: Float)
+  Inferred(method: String, reason: String)
+}
+
+pub type TimeEstimate {
+  ExactTime(value_ns: String)
+  EstimatedTime(value_ns: String, lower_ns: String, upper_ns: String)
+  TimeUnavailable(reason: String)
+}
+
+pub type TimeSummary {
+  TimeSummary(estimate: TimeEstimate, valid_samples: Int, missing_samples: Int)
+}
+
+pub type GraphEdge {
+  GraphEdge(from: String, to: String, kind: String, evidence: Evidence)
+}
+
+pub type GraphBoundary {
+  GraphBoundary(event_id: String, kind: String, reason: String)
 }
 
 pub type CapturePhase {
@@ -52,7 +69,7 @@ pub type CapturePhase {
   Arming
   Armed
   Cancelling
-  Ready(event_count: Int, completeness: String)
+  Ready(event_count: Int, outcome_summary: String)
   Failed(reason: String)
 }
 
@@ -63,6 +80,7 @@ pub type EventRow {
     kind: String,
     timestamp_ns: Int,
     duration_ns: Int,
+    time: TimeEstimate,
     evidence: Evidence,
     anomalous: Bool,
     internal: Bool,
@@ -125,7 +143,7 @@ pub type CompareItem {
     status: String,
     left_id: String,
     right_id: String,
-    latency_delta_ns: Int,
+    latency_delta: TimeEstimate,
     reason: String,
   )
 }
@@ -136,6 +154,8 @@ pub type CompareRun {
     added: Int,
     removed: Int,
     changed: Int,
+    ambiguity_count: Int,
+    first_divergence_path: List(String),
     items: List(CompareItem),
   )
 }
@@ -143,11 +163,10 @@ pub type CompareRun {
 pub type BranchStatistic {
   BranchStatistic(
     signature: String,
-    p50_ns: Int,
-    p95_ns: Int,
+    p50: TimeSummary,
+    p95: TimeSummary,
     occurrences: Int,
     total_runs: Int,
-    occurrence_rate: Float,
   )
 }
 
@@ -165,6 +184,10 @@ pub type Model {
     remote: Bool,
     mode: Mode,
     events: List(EventRow),
+    graph_edges: List(GraphEdge),
+    graph_boundaries: List(GraphBoundary),
+    graph_loading: Bool,
+    graph_error: Option(String),
     total_events: Int,
     loaded_start: Int,
     loaded_limit: Int,
@@ -230,6 +253,8 @@ pub type Msg {
   UserZoomed(Float)
   PageLoaded(query: String, page: EventPage)
   PageLoadFailed(query: String, reason: String)
+  GraphLoaded(edges: List(GraphEdge), boundaries: List(GraphBoundary))
+  GraphLoadFailed(reason: String)
   UserChangedTrigger(String)
   MfaSuggestionsLoaded(List(String))
   UserChangedCaptureWhere(String)
@@ -272,6 +297,10 @@ pub fn init(events: List(EventRow)) -> Model {
     remote: False,
     mode: Capture,
     events: events,
+    graph_edges: [],
+    graph_boundaries: [],
+    graph_loading: False,
+    graph_error: None,
     total_events: list.length(events),
     loaded_start: 0,
     loaded_limit: list.length(events),
@@ -327,6 +356,7 @@ pub fn init_remote() -> Model {
     ..init([]),
     remote: True,
     loading: True,
+    graph_loading: True,
     loaded_limit: 200,
     viewport_size: 80,
     capture_phase: Idle,
@@ -401,6 +431,16 @@ pub fn update(model: Model, message: Msg) -> Model {
         True -> Model(..model, loading: False, load_error: Some(reason))
         False -> Model(..model, loading: False)
       }
+    GraphLoaded(edges, boundaries) ->
+      Model(
+        ..model,
+        graph_edges: edges,
+        graph_boundaries: boundaries,
+        graph_loading: False,
+        graph_error: None,
+      )
+    GraphLoadFailed(reason) ->
+      Model(..model, graph_loading: False, graph_error: Some(reason))
     UserChangedTrigger(trigger) ->
       Model(
         ..model,
@@ -448,7 +488,7 @@ pub fn update(model: Model, message: Msg) -> Model {
     PollCaptureStatus -> model
     CaptureStatusLoaded(phase) ->
       case phase {
-        Ready(count, _completeness) ->
+        Ready(count, _outcome_summary) ->
           Model(
             ..model,
             capture_phase: phase,

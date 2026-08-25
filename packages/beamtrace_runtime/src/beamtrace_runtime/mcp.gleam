@@ -325,7 +325,7 @@ fn tool_catalog() -> List(json.Json) {
     ),
     tool(
       "trace_overview",
-      "Summarize version, cardinality, nodes, privacy, completeness, time range, and event kinds without returning trace payloads.",
+      "Summarize version, cardinality, nodes, privacy, capture outcome, node-local ranges, and event kinds without returning trace payloads.",
       [#("path", string_schema(".beamtrace path"))],
       ["path"],
       overview_output_schema(),
@@ -385,8 +385,23 @@ fn object_output_schema(
 fn comparison_output_schema() -> json.Json {
   let count = integer_schema("Event-shape count", 0, 1_000_000_000)
   object_output_schema(
-    [#("added", count), #("removed", count), #("changed", count)],
-    ["added", "removed", "changed"],
+    [
+      #("added", count),
+      #("removed", count),
+      #("changed", count),
+      #("ambiguity_count", count),
+      #(
+        "first_divergence",
+        json.object([#("type", json.array(["object", "null"], json.string))]),
+      ),
+    ],
+    [
+      "added",
+      "removed",
+      "changed",
+      "ambiguity_count",
+      "first_divergence",
+    ],
   )
 }
 
@@ -453,11 +468,14 @@ fn overview_output_schema() -> json.Json {
         ]),
       ),
       #("privacy", string_schema("Trace privacy classification")),
-      #("completeness", string_schema("Trace completeness")),
+      #("outcome", event_object_schema()),
+      #("delivery_verified", bool_schema("Agent receipts matched")),
       #(
-        "time_range",
+        "node_local_time_ranges",
         json.object([
-          #("type", json.array(["object", "null"], json.string)),
+          #("type", json.string("array")),
+          #("maxItems", json.int(64)),
+          #("items", event_object_schema()),
         ]),
       ),
       #(
@@ -477,8 +495,9 @@ fn overview_output_schema() -> json.Json {
       "event_count",
       "nodes",
       "privacy",
-      "completeness",
-      "time_range",
+      "outcome",
+      "delivery_verified",
+      "node_local_time_ranges",
       "event_kinds",
     ],
   )
@@ -487,6 +506,13 @@ fn overview_output_schema() -> json.Json {
 fn string_schema(description: String) -> json.Json {
   json.object([
     #("type", json.string("string")),
+    #("description", json.string(description)),
+  ])
+}
+
+fn bool_schema(description: String) -> json.Json {
+  json.object([
+    #("type", json.string("boolean")),
     #("description", json.string(description)),
   ])
 }
@@ -573,7 +599,7 @@ fn call_event_get(id: RpcId, source: String, modern: Bool) -> String {
           case
             storage.window(arguments.path, start: arguments.index, limit: 1)
           {
-            Ok(storage.EventWindow([event], total, _, _)) ->
+            Ok(storage.EventWindow([event], total, _, _, _)) ->
               tool_success(
                 id,
                 json.object([
@@ -611,6 +637,26 @@ fn call_compare_summary(id: RpcId, source: String, modern: Bool) -> String {
                   #("added", json.int(report.added)),
                   #("removed", json.int(report.removed)),
                   #("changed", json.int(report.changed)),
+                  #("ambiguity_count", json.int(report.ambiguity_count)),
+                  #(
+                    "first_divergence",
+                    json.nullable(report.first_divergence, fn(divergence) {
+                      json.object([
+                        #(
+                          "left_id",
+                          json.nullable(divergence.left_id, json.string),
+                        ),
+                        #(
+                          "right_id",
+                          json.nullable(divergence.right_id, json.string),
+                        ),
+                        #(
+                          "causal_path",
+                          json.array(divergence.causal_path, json.string),
+                        ),
+                      ])
+                    }),
+                  ),
                 ]),
                 modern,
               )
@@ -694,7 +740,7 @@ fn modern_result_fields() -> List(#(String, json.Json)) {
 }
 
 fn overview_json(archive: storage.Archive) -> json.Json {
-  let storage.Archive(manifest, events) = archive
+  let storage.Archive(manifest, events, _, _) = archive
   let kind_counts =
     event_kind_counts(events)
     |> dict.to_list
@@ -704,8 +750,9 @@ fn overview_json(archive: storage.Archive) -> json.Json {
     #("event_count", json.int(list.length(events))),
     #("nodes", json.array(list.take(manifest.nodes, 64), json.string)),
     #("privacy", json.string(privacy_name(manifest.privacy))),
-    #("completeness", json.string(completeness_name(manifest.completeness))),
-    #("time_range", event_time_range(events)),
+    #("outcome", codec.outcome_json(manifest.outcome)),
+    #("delivery_verified", json.bool(types.delivery_verified(manifest.outcome))),
+    #("node_local_time_ranges", event_time_ranges(events)),
     #(
       "event_kinds",
       json.object(
@@ -726,43 +773,34 @@ fn event_kind_counts(events: List(types.TraceEvent)) -> Dict(String, Int) {
   })
 }
 
-fn event_time_range(events: List(types.TraceEvent)) -> json.Json {
-  case events {
-    [] -> json.null()
-    [first, ..rest] -> {
-      let range =
-        list.fold(
-          rest,
-          #(first.local_timestamp_ns, first.local_timestamp_ns),
-          fn(range, event) {
-            #(
-              int.min(range.0, event.local_timestamp_ns),
-              int.max(range.1, event.local_timestamp_ns),
-            )
-          },
-        )
-      json.object([
-        #("start_ns", json.int(range.0)),
-        #("end_ns", json.int(range.1)),
-      ])
+fn event_time_ranges(events: List(types.TraceEvent)) -> json.Json {
+  events
+  |> list.fold(dict.new(), fn(ranges, event) {
+    let offset = event.local_instant.offset_ns
+    case dict.get(ranges, event.node) {
+      Error(_) -> dict.insert(ranges, event.node, #(offset, offset))
+      Ok(range) ->
+        dict.insert(ranges, event.node, #(
+          int.min(range.0, offset),
+          int.max(range.1, offset),
+        ))
     }
-  }
+  })
+  |> dict.to_list
+  |> list.sort(fn(left, right) { string.compare(left.0, right.0) })
+  |> json.array(fn(entry) {
+    json.object([
+      #("node", json.string(entry.0)),
+      #("start_offset_ns", json.int(entry.1.0)),
+      #("end_offset_ns", json.int(entry.1.1)),
+    ])
+  })
 }
 
 fn privacy_name(privacy: types.Privacy) -> String {
   case privacy {
     types.Metadata -> "metadata"
     types.Raw(_) -> "raw"
-  }
-}
-
-fn completeness_name(completeness: types.Completeness) -> String {
-  case completeness {
-    types.Complete -> "complete"
-    types.Truncated(_) -> "truncated"
-    types.Gapped(_) -> "gapped"
-    types.PartialNode(_) -> "partial_node"
-    types.InferredCapture(_) -> "inferred"
   }
 }
 

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://beamtrace.dev/schema/v2/annotations.schema.json",
+  "title": "BeamTrace v2 annotations extension point",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "annotations"],
+  "properties": {
+    "schema_version": {"const": 2},
+    "annotations": {"type": "array", "maxItems": 0}
+  }
+}

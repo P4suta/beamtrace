@@ -49,7 +49,7 @@ $sources = @(
     (Join-Path $repoRoot 'agent\test\beamtrace_distributed_tests.erl')
 )
 
-& erlc +debug_info -Werror -o $buildDir $sources
+& erlc +debug_info -DTEST -Werror -o $buildDir $sources
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $previousErlAflags = $env:ERL_AFLAGS
@@ -89,8 +89,10 @@ try {
         $env:ERL_AFLAGS = "-proto_dist inet_tls -ssl_dist_optfile $tlsConfigPath"
     }
 
+    # Erlang prepends each -pa argument, so keep the freshly erlc-compiled
+    # TEST build last to give it precedence over Gleam's runtime ebin paths.
     & erl -noshell @nameArguments -setcookie beamtrace_test_cookie `
-        -pa $buildDir @runtimeCodePaths `
+        -pa @runtimeCodePaths $buildDir `
         -eval 'case eunit:test([beamtrace_agent_tests, beamtrace_relay_tests, beamtrace_capture_tests, beamtrace_live_tests, beamtrace_distributed_tests], [verbose]) of ok -> halt(0); _ -> halt(1) end.'
     exit $LASTEXITCODE
 }

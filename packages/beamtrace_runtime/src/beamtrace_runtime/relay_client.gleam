@@ -45,7 +45,7 @@ pub type TransferMetadata {
     module_: String,
     function_: String,
     arity: Int,
-    completeness: relay_session.Completeness,
+    delivery_status: relay_session.DeliveryStatus,
   )
 }
 
@@ -59,7 +59,7 @@ type CreditControl {
 }
 
 type StopControl {
-  StopControl(completeness: String, reason: String)
+  StopControl(delivery_status: String, reason: String)
 }
 
 type SessionAckControl {
@@ -67,7 +67,7 @@ type SessionAckControl {
     protocol_version: Int,
     session_id: String,
     sequence: Int,
-    completeness: String,
+    delivery_status: String,
   )
 }
 
@@ -237,7 +237,7 @@ fn transfer_events(
                           session_id: session_id,
                           sequence: last_session_sequence + 1,
                           ended_at_ms: local_auth.now_ms(),
-                          completeness: metadata.completeness,
+                          delivery_status: metadata.delivery_status,
                         )
                       case next_session_end(finished, identity, end) {
                         Error(reason) -> Error(reason)
@@ -484,8 +484,8 @@ pub fn receive_session_ack(
   source: String,
   expected: relay_session.End,
 ) -> Result(Bool, String) {
-  let expected_completeness =
-    relay_session.completeness_name(expected.completeness)
+  let expected_delivery_status =
+    relay_session.delivery_status_name(expected.delivery_status)
   case string.byte_size(source) > max_control_frame_bytes {
     True -> Error("control_frame_too_large")
     False ->
@@ -496,7 +496,7 @@ pub fn receive_session_ack(
               if ack.protocol_version == relay_channel.protocol_version
               && ack.session_id == expected.session_id
               && ack.sequence == expected.sequence
-              && ack.completeness == expected_completeness
+              && ack.delivery_status == expected_delivery_status
             -> Ok(True)
             _ -> Error("invalid_session_ack")
           }
@@ -810,8 +810,8 @@ fn receive_credit(
 
 fn receive_stop(source: String) -> Result(ChannelState, String) {
   case json.parse(source, stop_decoder()) {
-    Ok(stop) if stop.completeness != "" && stop.reason != "" ->
-      Ok(Stopped(stop.completeness <> ":" <> stop.reason))
+    Ok(stop) if stop.delivery_status != "" && stop.reason != "" ->
+      Ok(Stopped(stop.delivery_status <> ":" <> stop.reason))
     _ -> Error("invalid_control")
   }
 }
@@ -825,12 +825,12 @@ fn session_ack_decoder() -> decode.Decoder(SessionAckControl) {
   use protocol_version <- decode.field("protocol_version", decode.int)
   use session_id <- decode.field("session_id", decode.string)
   use sequence <- decode.field("sequence", decode.int)
-  use completeness <- decode.field("completeness", decode.string)
+  use delivery_status <- decode.field("delivery_status", decode.string)
   decode.success(SessionAckControl(
     protocol_version,
     session_id,
     sequence,
-    completeness,
+    delivery_status,
   ))
 }
 
@@ -842,9 +842,9 @@ fn credit_decoder() -> decode.Decoder(CreditControl) {
 }
 
 fn stop_decoder() -> decode.Decoder(StopControl) {
-  use completeness <- decode.field("completeness", decode.string)
+  use delivery_status <- decode.field("delivery_status", decode.string)
   use reason <- decode.field("reason", decode.string)
-  decode.success(StopControl(completeness, reason))
+  decode.success(StopControl(delivery_status, reason))
 }
 
 fn receipt_decoder() -> decode.Decoder(EnrollmentReceipt) {

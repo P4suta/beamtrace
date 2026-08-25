@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
 export function fetchLive(onSuccess, onError) {
-  fetch("/api/v1/live?limit=200", {
+  fetch("/api/v2/live?limit=200", {
     method: "GET",
     credentials: "same-origin",
     headers: { accept: "application/json" },

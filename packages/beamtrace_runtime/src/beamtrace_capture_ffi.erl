@@ -4,14 +4,20 @@
 -export([
     collect_remote/9,
     collect_remote_spec/13,
+    collect_remote_spec/14,
     collect_distributed/9,
     collect_distributed_spec/13,
+    collect_distributed_spec/14,
     probe_remote/2,
     sample_remote/4,
     search_remote/4,
     wait_remote_armed/3,
     wait_remote_available/3
 ]).
+
+-ifdef(TEST).
+-export([new_collect_state/3, track_batch/5, validate_receipt/4]).
+-endif.
 
 -define(IDLE_AFTER_ROOT_MS, 250).
 -define(DISTRIBUTED_IDLE_AFTER_ROOT_MS, 1000).
@@ -207,6 +213,39 @@ collect_distributed_spec(
     Privacy,
     Preset
 ) ->
+    collect_distributed_spec(
+        NodeBinaries,
+        CookieBinary,
+        ModuleBinary,
+        FunctionBinary,
+        Arity,
+        CaptureWindowMs,
+        10000,
+        MaxEvents,
+        MaxBytes,
+        MaxAgentMailbox,
+        MaxRoots,
+        Predicate,
+        Privacy,
+        Preset
+    ).
+
+collect_distributed_spec(
+    NodeBinaries,
+    CookieBinary,
+    ModuleBinary,
+    FunctionBinary,
+    Arity,
+    CaptureWindowMs,
+    DrainTimeoutMs,
+    MaxEvents,
+    MaxBytes,
+    MaxAgentMailbox,
+    MaxRoots,
+    Predicate,
+    Privacy,
+    Preset
+) ->
     case {validate_distributed_inputs(
         NodeBinaries,
         CookieBinary,
@@ -214,7 +253,7 @@ collect_distributed_spec(
         FunctionBinary,
         Arity,
         CaptureWindowMs
-    ), capture_options(MaxRoots, Predicate, Privacy, Preset)} of
+    ), capture_options(MaxRoots, DrainTimeoutMs, Predicate, Privacy, Preset)} of
         {ok, {ok, ExtraOptions}} ->
             Nodes = [binary_to_atom(NodeBinary, utf8) || NodeBinary <- NodeBinaries],
             Cookie = binary_to_atom(CookieBinary, utf8),
@@ -269,7 +308,14 @@ run_distributed(
     }, ExtraOptions),
     case prepare_nodes(Connections, Options, []) of
         {ok, Prepared} ->
-            try setup_distributed(Prepared, MFA, Label, CaptureId, WindowMs)
+            try setup_distributed(
+                Prepared,
+                MFA,
+                Label,
+                CaptureId,
+                WindowMs,
+                maps:get(drain_timeout_ms, Options, 10000)
+            )
             after
                 cleanup_prepared(Prepared)
             end;
@@ -298,7 +344,7 @@ prepare_nodes([{Node, _OwnsConnection} | Rest], Options, Accumulator) ->
             {error, Reason}
     end.
 
-setup_distributed(Prepared, MFA, Label, CaptureId, WindowMs) ->
+setup_distributed(Prepared, MFA, Label, CaptureId, WindowMs, DrainTimeoutMs) ->
     case grant_all(Prepared) of
         ok ->
             Root = hd(Prepared),
@@ -306,13 +352,14 @@ setup_distributed(Prepared, MFA, Label, CaptureId, WindowMs) ->
             case listen_all(Passives, Label) of
                 ok ->
                     {RootNode, _RootDigest, RootAgent, _RootDisposition} = Root,
+                    Nodes = [Node || {Node, _Digest, _Agent, _Disposition} <- Prepared],
+                    BeforeClocks = clock_probe_phase(Nodes),
                     case beamtrace_relay:arm_agent(RootNode, RootAgent, MFA) of
                         {ok, armed} ->
-                            Nodes = [Node || {Node, _Digest, _Agent, _Disposition} <- Prepared],
                             monitor_nodes(Nodes, true),
                             try
                                 Deadline = erlang:monotonic_time(millisecond) + WindowMs,
-                                collect_batches_multi(
+                                Collected = collect_batches_multi(
                                     Nodes,
                                     Prepared,
                                     CaptureId,
@@ -321,7 +368,16 @@ setup_distributed(Prepared, MFA, Label, CaptureId, WindowMs) ->
                                     false,
                                     [],
                                     [],
-                                    #{}
+                                    new_collect_state(
+                                        DrainTimeoutMs,
+                                        WindowMs,
+                                        ?DISTRIBUTED_IDLE_AFTER_ROOT_MS
+                                    )
+                                ),
+                                attach_clock_phases(
+                                    Collected,
+                                    BeforeClocks,
+                                    clock_probe_phase(Nodes)
                                 )
                             after
                                 monitor_nodes(Nodes, false)
@@ -363,16 +419,33 @@ collect_batches_multi(
     Now = erlang:monotonic_time(millisecond),
     Wait = wait_time(Now, Deadline, IdleDeadline, SeenRoot),
     case Wait =< 0 of
-        true -> finish_collect_multi(SeenRoot, Acc, Missing);
+        true ->
+            case SeenRoot of
+                false -> {error, <<"trigger_timeout">>};
+                true ->
+                    {EndKind, EndDetail} = end_reason(
+                        Now, Deadline, IdleDeadline, CreditDebt
+                    ),
+                    seal_multi(
+                        Prepared, CaptureId, EndKind, EndDetail,
+                        Acc, Missing, CreditDebt
+                    )
+            end;
         false ->
             receive
                 beamtrace_cancel ->
-                    {ok, {flatten(Acc), <<"truncated:cancelled">>}};
-                {beamtrace_batch, CaptureId, _Sequence, Batch} ->
-                    Raw = raw_events(Batch),
+                    seal_multi(
+                        Prepared, CaptureId, <<"user_stopped">>, <<>>,
+                        Acc, Missing, CreditDebt
+                    );
+                {beamtrace_batch, CaptureId, BatchNode, Sequence, Batch} ->
+                    {Accepted, TrackedDebt} = track_multi_batch(
+                        BatchNode, Sequence, Batch, CreditDebt
+                    ),
+                    Raw = case Accepted of true -> raw_events(Batch); false -> [] end,
                     HasRoot = lists:any(fun is_root/1, Raw),
                     Seen = SeenRoot orelse HasRoot,
-                    case replenish_multi_credit(Batch, Prepared, CreditDebt) of
+                    case replenish_multi_credit(Batch, Prepared, TrackedDebt) of
                         {ok, NextDebt} ->
                             NewIdle = case Seen of
                                 true -> erlang:monotonic_time(millisecond)
@@ -391,11 +464,58 @@ collect_batches_multi(
                                 NextDebt
                             );
                         {error, _Reason} ->
-                            {ok, {flatten([Raw | Acc]),
-                                <<"truncated:credit_replenish_failed">>}}
+                            seal_multi(
+                                Prepared, CaptureId,
+                                <<"agent_failure">>, <<"credit_replenish_failed">>,
+                                [Raw | Acc], Missing,
+                                add_multi_issue(TrackedDebt, raw_issue(
+                                    <<"legacy_unverified">>, BatchNode,
+                                    <<"credit_replenish_failed">>, 0, 0
+                                ))
+                            )
                     end;
+                {beamtrace_stop, CaptureId, _BatchNode, {budget_reached, Reason}} ->
+                    seal_multi(
+                        Prepared, CaptureId,
+                        <<"budget_reached">>, atom_binary(Reason),
+                        Acc, Missing, CreditDebt
+                    );
+                {beamtrace_stop, CaptureId, {budget_reached, Reason}} ->
+                    %% Protocol-v1 migration input did not identify the node.
+                    seal_multi(
+                        Prepared, CaptureId,
+                        <<"budget_reached">>, atom_binary(Reason),
+                        Acc, Missing, CreditDebt
+                    );
+                {beamtrace_stop, CaptureId, BatchNode, safety_ttl} ->
+                    FailedNode = binary_to_atom(BatchNode, utf8),
+                    seal_multi(
+                        Prepared, CaptureId,
+                        <<"agent_failure">>, <<"safety_ttl">>,
+                        Acc, lists:usort([FailedNode | Missing]),
+                        CreditDebt
+                    );
+                {beamtrace_stop, CaptureId, safety_ttl} ->
+                    %% Protocol-v1 migration input cannot identify which agent
+                    %% expired, so the outcome must remain explicitly
+                    %% unverified.
+                    seal_multi(
+                        Prepared, CaptureId,
+                        <<"agent_failure">>, <<"safety_ttl">>,
+                        Acc, Missing,
+                        add_multi_issue(CreditDebt, raw_issue(
+                            <<"legacy_unverified">>, <<>>,
+                            <<"safety_ttl_without_node">>, 0, 0
+                        ))
+                    );
                 {beamtrace_stop, CaptureId, {truncated, Reason}} ->
-                    {ok, {flatten(Acc), <<"truncated:", (atom_binary(Reason))/binary>>}};
+                    %% Protocol-v1 migration input. New agents emit
+                    %% {budget_reached, Reason}.
+                    seal_multi(
+                        Prepared, CaptureId,
+                        <<"budget_reached">>, atom_binary(Reason),
+                        Acc, Missing, CreditDebt
+                    );
                 {nodedown, Node} ->
                     NextMissing = case lists:member(Node, Nodes) of
                         true -> lists:usort([Node | Missing]);
@@ -425,14 +545,20 @@ collect_batches_multi(
                         CreditDebt
                     )
             after Wait ->
-                finish_collect_multi(SeenRoot, Acc, Missing)
+                case SeenRoot of
+                    false -> {error, <<"trigger_timeout">>};
+                    true ->
+                        Current = erlang:monotonic_time(millisecond),
+                        {EndKind, EndDetail} = end_reason(
+                            Current, Deadline, IdleDeadline, CreditDebt
+                        ),
+                        seal_multi(
+                            Prepared, CaptureId, EndKind, EndDetail,
+                            Acc, Missing, CreditDebt
+                        )
+                end
             end
     end.
-
-finish_collect_multi(_SeenRoot, Acc, [Missing | _]) ->
-    {ok, {flatten(Acc), <<"partial_node:", (atom_to_binary(Missing, utf8))/binary>>}};
-finish_collect_multi(true, Acc, []) -> {ok, {flatten(Acc), <<"complete">>}};
-finish_collect_multi(false, _Acc, []) -> {error, <<"trigger_timeout">>}.
 
 cleanup_prepared(Prepared) ->
     lists:foreach(fun({Node, Digest, Agent, Disposition}) ->
@@ -441,6 +567,133 @@ cleanup_prepared(Prepared) ->
         ok
     end, Prepared),
     ok.
+
+track_multi_batch(NodeBinary, Sequence, Batch, State) ->
+    Key = {tracking, NodeBinary},
+    NodeState = maps:get(Key, State, new_collect_state(
+        drain_timeout(State),
+        capture_window(State),
+        quiet_period(State)
+    )),
+    {Accepted, Tracked} = track_batch(NodeBinary, NodeBinary, Sequence, Batch, NodeState),
+    Issues = maps:get(issues, State, []) ++ maps:get(issues, Tracked, []),
+    {Accepted, State#{Key => Tracked#{issues => []}, issues => Issues}}.
+
+seal_multi(Prepared, CaptureId, EndKind, EndDetail, Acc, Missing, State) ->
+    Parent = self(),
+    Reference = make_ref(),
+    DrainTimeoutMs = drain_timeout(State),
+    Pending = [Node || {Node, _Digest, _Agent, _Disposition} <- Prepared,
+        not lists:member(Node, Missing)],
+    _ = [spawn(fun() ->
+        Parent ! {beamtrace_seal_result, Reference, Node,
+            beamtrace_relay:seal_agent(Node, Agent, EndKind, DrainTimeoutMs)}
+    end) || {Node, _Digest, Agent, _Disposition} <- Prepared,
+            lists:member(Node, Pending)],
+    WithMissing = lists:foldl(fun(Node, Current) ->
+        add_multi_issue(Current, raw_issue(
+            <<"missing_node">>, atom_to_binary(Node, utf8), <<>>, 0, 0
+        ))
+    end, State, Missing),
+    drain_multi(
+        CaptureId, Reference, Pending, EndKind, EndDetail,
+        Acc, WithMissing, [],
+        erlang:monotonic_time(millisecond) + DrainTimeoutMs + 2000
+    ).
+
+drain_multi(
+    _CaptureId, _Reference, [], EndKind, EndDetail,
+    Acc, State, Receipts, _Deadline
+) ->
+    finish_multi(flatten(Acc), EndKind, EndDetail, State, Receipts);
+drain_multi(
+    CaptureId, Reference, Pending, EndKind, EndDetail,
+    Acc, State, Receipts, Deadline
+) ->
+    Remaining = erlang:max(0, Deadline - erlang:monotonic_time(millisecond)),
+    receive
+        {beamtrace_batch, CaptureId, BatchNode, Sequence, Batch} ->
+            {Accepted, Tracked} = track_multi_batch(BatchNode, Sequence, Batch, State),
+            Raw = case Accepted of true -> raw_events(Batch); false -> [] end,
+            drain_multi(
+                CaptureId, Reference, Pending, EndKind, EndDetail,
+                [Raw | Acc], Tracked, Receipts, Deadline
+            );
+        {beamtrace_receipt, CaptureId, NodeBinary, Receipt, Status} ->
+            Node = binary_to_atom(NodeBinary, utf8),
+            NodeState = maps:get(
+                {tracking, NodeBinary},
+                State,
+                new_collect_state(
+                    drain_timeout(State),
+                    capture_window(State),
+                    quiet_period(State)
+                )
+            ),
+            CheckedNode = validate_receipt(NodeBinary, Receipt, Status, NodeState),
+            NextState = merge_multi_issues(State, CheckedNode),
+            drain_multi(
+                CaptureId, Reference, lists:delete(Node, Pending),
+                EndKind, EndDetail, Acc, NextState,
+                [{NodeBinary, Receipt} | Receipts], Deadline
+            );
+        {beamtrace_seal_result, Reference, Node, {error, Reason}} ->
+            NodeBinary = atom_to_binary(Node, utf8),
+            Next = add_multi_issue(State, raw_issue(
+                <<"drain_timeout">>, NodeBinary, reason_binary(Reason), 0,
+                drain_timeout(State)
+            )),
+            drain_multi(
+                CaptureId, Reference, lists:delete(Node, Pending),
+                EndKind, EndDetail, Acc, Next, Receipts, Deadline
+            );
+        {beamtrace_seal_result, Reference, _Node, {ok, _Receipt, _Status}} ->
+            drain_multi(
+                CaptureId, Reference, Pending, EndKind, EndDetail,
+                Acc, State, Receipts, Deadline
+            );
+        {nodedown, Node} ->
+            NodeBinary = atom_to_binary(Node, utf8),
+            Next = add_multi_issue(State, raw_issue(
+                <<"missing_node">>, NodeBinary, <<>>, 0, 0
+            )),
+            drain_multi(
+                CaptureId, Reference, lists:delete(Node, Pending),
+                EndKind, EndDetail, Acc, Next, Receipts, Deadline
+            )
+    after Remaining ->
+        TimedOut = lists:foldl(fun(Node, Current) ->
+            add_multi_issue(Current, raw_issue(
+                <<"drain_timeout">>, atom_to_binary(Node, utf8), <<>>, 0,
+                drain_timeout(State)
+            ))
+        end, State, Pending),
+        finish_multi(flatten(Acc), EndKind, EndDetail, TimedOut, Receipts)
+    end.
+
+add_multi_issue(State, Issue) ->
+    State#{issues => [Issue | maps:get(issues, State, [])]}.
+
+merge_multi_issues(State, NodeState) ->
+    lists:foldl(fun(Issue, Current) -> add_multi_issue(Current, Issue) end,
+        State, maps:get(issues, NodeState, [])).
+
+finish_multi(Events, EndKind, EndDetail, State, Receipts) ->
+    RawReceipts = [{raw_node_receipt,
+        NodeBinary,
+        maps:get(final_batch_sequence, Receipt, 0),
+        maps:get(event_count, Receipt, 0),
+        maps:get(byte_count, Receipt, 0)}
+        || {NodeBinary, Receipt} <- Receipts],
+    Clocks = [{node_clock,
+        NodeBinary,
+        maps:get(origin_local_ns, Receipt, 0),
+        none,
+        none}
+        || {NodeBinary, Receipt} <- Receipts],
+    Outcome = {raw_outcome, EndKind, EndDetail,
+        lists:reverse(maps:get(issues, State, [])), RawReceipts},
+    {ok, {Events, Outcome, {clock_calibration, 0, Clocks}}}.
 
 monitor_nodes(Nodes, Enabled) ->
     lists:foreach(fun(Node) -> monitor_node(Node, Enabled) end, Nodes).
@@ -555,6 +808,39 @@ collect_remote_spec(
     Privacy,
     Preset
 ) ->
+    collect_remote_spec(
+        NodeBinary,
+        CookieBinary,
+        ModuleBinary,
+        FunctionBinary,
+        Arity,
+        CaptureWindowMs,
+        10000,
+        MaxEvents,
+        MaxBytes,
+        MaxAgentMailbox,
+        MaxRoots,
+        Predicate,
+        Privacy,
+        Preset
+    ).
+
+collect_remote_spec(
+    NodeBinary,
+    CookieBinary,
+    ModuleBinary,
+    FunctionBinary,
+    Arity,
+    CaptureWindowMs,
+    DrainTimeoutMs,
+    MaxEvents,
+    MaxBytes,
+    MaxAgentMailbox,
+    MaxRoots,
+    Predicate,
+    Privacy,
+    Preset
+) ->
     case {validate_inputs(
         NodeBinary,
         CookieBinary,
@@ -562,7 +848,7 @@ collect_remote_spec(
         FunctionBinary,
         Arity,
         CaptureWindowMs
-    ), capture_options(MaxRoots, Predicate, Privacy, Preset)} of
+    ), capture_options(MaxRoots, DrainTimeoutMs, Predicate, Privacy, Preset)} of
         {ok, {ok, ExtraOptions}} ->
             Node = binary_to_atom(NodeBinary, utf8),
             Module = binary_to_atom(ModuleBinary, utf8),
@@ -620,13 +906,14 @@ run_injected(Node, MFA, WindowMs, Digest, Disposition, CaptureId, Options) ->
     case beamtrace_relay:start_agent(Node, self(), Options) of
         {ok, Agent} ->
             try
+                BeforeClocks = clock_probe_phase([Node]),
                 case beamtrace_relay:grant(Node, Agent, initial_batch_credits()) of
                     ok ->
                         case beamtrace_relay:arm_agent(Node, Agent, MFA) of
                             {ok, armed} ->
                                 monitor_node(Node, true),
                                 Deadline = erlang:monotonic_time(millisecond) + WindowMs,
-                                collect_batches(
+                                Collected = collect_batches(
                                     Node,
                                     Agent,
                                     CaptureId,
@@ -634,7 +921,16 @@ run_injected(Node, MFA, WindowMs, Digest, Disposition, CaptureId, Options) ->
                                     undefined,
                                     false,
                                     [],
-                                    0
+                                    new_collect_state(
+                                        maps:get(drain_timeout_ms, Options, 10000),
+                                        WindowMs,
+                                        ?IDLE_AFTER_ROOT_MS
+                                    )
+                                ),
+                                attach_clock_phases(
+                                    Collected,
+                                    BeforeClocks,
+                                    clock_probe_phase([Node])
                                 );
                             {error, {system_tracer_occupied, _}} ->
                                 {error, <<"system_tracer_occupied">>};
@@ -664,20 +960,36 @@ maybe_unload_unstarted(Node, Digest, loaded) ->
 maybe_unload_unstarted(_Node, _Digest, reused) ->
     ok.
 
-collect_batches(Node, Agent, CaptureId, Deadline, IdleDeadline, SeenRoot, Acc, CreditDebt) ->
+collect_batches(Node, Agent, CaptureId, Deadline, IdleDeadline, SeenRoot, Acc, CollectState) ->
     Now = erlang:monotonic_time(millisecond),
     Wait = wait_time(Now, Deadline, IdleDeadline, SeenRoot),
     case Wait =< 0 of
-        true -> finish_collect(SeenRoot, Acc);
+        true ->
+            case SeenRoot of
+                false -> {error, <<"trigger_timeout">>};
+                true ->
+                    {EndKind, EndDetail} = end_reason(
+                        Now, Deadline, IdleDeadline, CollectState
+                    ),
+                    seal_single(Node, Agent, CaptureId, EndKind, EndDetail, Acc, CollectState)
+            end;
         false ->
             receive
                 beamtrace_cancel ->
-                    {ok, {flatten(Acc), <<"truncated:cancelled">>}};
-                {beamtrace_batch, CaptureId, _Sequence, Batch} ->
-                    Raw = raw_events(Batch),
+                    seal_single(Node, Agent, CaptureId, <<"user_stopped">>, <<>>, Acc,
+                        CollectState);
+                {beamtrace_batch, CaptureId, BatchNode, Sequence, Batch} ->
+                    {Accepted, TrackedState} = track_batch(
+                        atom_to_binary(Node, utf8), BatchNode, Sequence, Batch, CollectState
+                    ),
+                    Raw = case Accepted of
+                        true -> raw_events(Batch);
+                        false -> []
+                    end,
                     HasRoot = lists:any(fun is_root/1, Raw),
                     Seen = SeenRoot orelse HasRoot,
-                    case replenish_credit(Node, Agent, CreditDebt + 1) of
+                    Debt = maps:get(debt, TrackedState, 0) + 1,
+                    case replenish_credit(Node, Agent, Debt) of
                         {ok, NextDebt} ->
                             NewIdle = case Seen of
                                 true -> erlang:monotonic_time(millisecond)
@@ -692,16 +1004,58 @@ collect_batches(Node, Agent, CaptureId, Deadline, IdleDeadline, SeenRoot, Acc, C
                                 NewIdle,
                                 Seen,
                                 [Raw | Acc],
-                                NextDebt
+                                TrackedState#{debt => NextDebt}
                             );
                         {error, _Reason} ->
-                            {ok, {flatten([Raw | Acc]),
-                                <<"truncated:credit_replenish_failed">>}}
+                            seal_single(
+                                Node, Agent, CaptureId,
+                                <<"agent_failure">>, <<"credit_replenish_failed">>,
+                                [Raw | Acc],
+                                add_issue(TrackedState, raw_issue(
+                                    <<"legacy_unverified">>, BatchNode,
+                                    <<"credit_replenish_failed">>, 0, 0
+                                ))
+                            )
                     end;
+                {beamtrace_stop, CaptureId, _BatchNode, {budget_reached, Reason}} ->
+                    seal_single(
+                        Node, Agent, CaptureId,
+                        <<"budget_reached">>, atom_binary(Reason), Acc, CollectState
+                    );
+                {beamtrace_stop, CaptureId, {budget_reached, Reason}} ->
+                    %% Protocol-v1 migration input.
+                    seal_single(
+                        Node, Agent, CaptureId,
+                        <<"budget_reached">>, atom_binary(Reason), Acc, CollectState
+                    );
                 {beamtrace_stop, CaptureId, {truncated, Reason}} ->
-                    {ok, {flatten(Acc), <<"truncated:", (atom_binary(Reason))/binary>>}};
+                    %% Protocol-v1 migration input.
+                    seal_single(
+                        Node, Agent, CaptureId,
+                        <<"budget_reached">>, atom_binary(Reason), Acc, CollectState
+                    );
+                {beamtrace_stop, CaptureId, BatchNode, safety_ttl} ->
+                    finish_unsealed(
+                        flatten(Acc), <<"agent_failure">>, <<"safety_ttl">>,
+                        add_issue(CollectState, raw_issue(
+                            <<"missing_node">>, BatchNode, <<>>, 0, 0
+                        ))
+                    );
+                {beamtrace_stop, CaptureId, safety_ttl} ->
+                    %% Protocol-v1 migration input.
+                    finish_unsealed(
+                        flatten(Acc), <<"agent_failure">>, <<"safety_ttl">>,
+                        add_issue(CollectState, raw_issue(
+                            <<"missing_node">>, atom_to_binary(Node, utf8), <<>>, 0, 0
+                        ))
+                    );
                 {nodedown, Node} ->
-                    {ok, {flatten(Acc), <<"partial_node:", (atom_to_binary(Node, utf8))/binary>>}};
+                    finish_unsealed(
+                        flatten(Acc), <<"agent_failure">>, <<"node_down">>,
+                        add_issue(CollectState, raw_issue(
+                            <<"missing_node">>, atom_to_binary(Node, utf8), <<>>, 0, 0
+                        ))
+                    );
                 _Other ->
                     collect_batches(
                         Node,
@@ -711,15 +1065,22 @@ collect_batches(Node, Agent, CaptureId, Deadline, IdleDeadline, SeenRoot, Acc, C
                         IdleDeadline,
                         SeenRoot,
                         Acc,
-                        CreditDebt
+                        CollectState
                     )
             after Wait ->
-                finish_collect(SeenRoot, Acc)
+                case SeenRoot of
+                    false -> {error, <<"trigger_timeout">>};
+                    true ->
+                        Current = erlang:monotonic_time(millisecond),
+                        {EndKind, EndDetail} = end_reason(
+                            Current, Deadline, IdleDeadline, CollectState
+                        ),
+                        seal_single(
+                            Node, Agent, CaptureId, EndKind, EndDetail, Acc, CollectState
+                        )
+                end
             end
     end.
-
-finish_collect(true, Acc) -> {ok, {flatten(Acc), <<"complete">>}};
-finish_collect(false, _Acc) -> {error, <<"trigger_timeout">>}.
 
 replenish_credit(Node, Agent, Debt) ->
     case Debt >= refill_batch_count() of
@@ -730,6 +1091,236 @@ replenish_credit(Node, Agent, Debt) ->
             end;
         false -> {ok, Debt}
     end.
+
+new_collect_state(DrainTimeoutMs, WindowMs, QuietPeriodMs) ->
+    #{debt => 0, last_sequence => 0, event_count => 0, byte_count => 0,
+      issues => [], drain_timeout_ms => DrainTimeoutMs,
+      capture_window_ms => WindowMs, quiet_period_ms => QuietPeriodMs}.
+
+drain_timeout(State) ->
+    maps:get(drain_timeout_ms, State, 10000).
+
+capture_window(State) ->
+    maps:get(capture_window_ms, State, 0).
+
+quiet_period(State) ->
+    maps:get(quiet_period_ms, State, ?IDLE_AFTER_ROOT_MS).
+
+track_batch(ExpectedNode, BatchNode, Sequence, Batch, State) ->
+    Last = maps:get(last_sequence, State, 0),
+    Expected = Last + 1,
+    case BatchNode =:= ExpectedNode of
+        false ->
+            {false, add_issue(State, raw_issue(
+                <<"legacy_unverified">>, BatchNode, <<"unexpected_batch_node">>, 0, 0
+            ))};
+        true when Sequence =< Last ->
+            {false, add_issue(State, raw_issue(
+                <<"duplicate_batch">>, BatchNode, <<>>, 0, Sequence
+            ))};
+        true ->
+            Events = accepted_batch_events(Batch),
+            Bytes = lists:sum([erlang:external_size(Event) || Event <- Events]),
+            WithGap = case Sequence =:= Expected of
+                true -> State;
+                false -> add_issue(State, raw_issue(
+                    <<"batch_sequence_gap">>, BatchNode, <<>>, Expected, Sequence
+                ))
+            end,
+            {true, WithGap#{
+                last_sequence => Sequence,
+                event_count => maps:get(event_count, WithGap, 0) + length(Events),
+                byte_count => maps:get(byte_count, WithGap, 0) + Bytes
+            }}
+    end.
+
+accepted_batch_events(Batch) ->
+    [Event || Event <- Batch, is_map(Event), maps:is_key(id, Event)].
+
+raw_issue(Kind, Node, Field, Expected, Actual) ->
+    {raw_capture_issue, Kind, Node, Field, Expected, Actual}.
+
+add_issue(State, Issue) ->
+    State#{issues => [Issue | maps:get(issues, State, [])]}.
+
+end_reason(Now, Deadline, IdleDeadline, State)
+        when is_integer(IdleDeadline), IdleDeadline =< Deadline, Now >= IdleDeadline ->
+    {<<"quiet_period">>, integer_to_binary(quiet_period(State))};
+end_reason(_Now, _Deadline, _IdleDeadline, State) ->
+    {<<"time_window">>, integer_to_binary(capture_window(State))}.
+
+seal_single(Node, Agent, CaptureId, EndKind, EndDetail, Acc, State) ->
+    DrainTimeoutMs = drain_timeout(State),
+    case beamtrace_relay:seal_agent(Node, Agent, EndKind, DrainTimeoutMs) of
+        {ok, Receipt, SealStatus} ->
+            drain_single(
+                Node, CaptureId, EndKind, EndDetail, Acc, State,
+                Receipt, SealStatus,
+                erlang:monotonic_time(millisecond) + DrainTimeoutMs + 1000
+            );
+        {error, Reason} ->
+            NodeBinary = atom_to_binary(Node, utf8),
+            finish_unsealed(
+                flatten(Acc), <<"agent_failure">>, reason_binary(Reason),
+                add_issue(State, raw_issue(
+                    <<"drain_timeout">>, NodeBinary, <<>>, 0, DrainTimeoutMs
+                ))
+            )
+    end.
+
+drain_single(
+    Node, CaptureId, EndKind, EndDetail, Acc, State,
+    ReplyReceipt, ReplyStatus, Deadline
+) ->
+    Remaining = erlang:max(0, Deadline - erlang:monotonic_time(millisecond)),
+    receive
+        {beamtrace_batch, CaptureId, BatchNode, Sequence, Batch} ->
+            {Accepted, Tracked} = track_batch(
+                atom_to_binary(Node, utf8), BatchNode, Sequence, Batch, State
+            ),
+            Raw = case Accepted of true -> raw_events(Batch); false -> [] end,
+            drain_single(
+                Node, CaptureId, EndKind, EndDetail, [Raw | Acc], Tracked,
+                ReplyReceipt, ReplyStatus, Deadline
+            );
+        {beamtrace_receipt, CaptureId, NodeBinary, Receipt, Status} ->
+            FinalState = validate_receipt(NodeBinary, Receipt, Status, State),
+            finish_verified(
+                flatten(Acc), EndKind, EndDetail, FinalState, Receipt
+            )
+    after Remaining ->
+        NodeBinary = atom_to_binary(Node, utf8),
+        FinalState = validate_receipt(
+            NodeBinary, ReplyReceipt, ReplyStatus,
+            add_issue(State, raw_issue(
+                <<"drain_timeout">>, NodeBinary, <<>>, 0, drain_timeout(State)
+            ))
+        ),
+        finish_verified(flatten(Acc), EndKind, EndDetail, FinalState, ReplyReceipt)
+    end.
+
+validate_receipt(NodeBinary, Receipt, Status, State) ->
+    Checks = [
+        {<<"final_batch_sequence">>, maps:get(last_sequence, State, 0),
+            maps:get(final_batch_sequence, Receipt, -1)},
+        {<<"event_count">>, maps:get(event_count, State, 0),
+            maps:get(event_count, Receipt, -1)},
+        {<<"byte_count">>, maps:get(byte_count, State, 0),
+            maps:get(byte_count, Receipt, -1)}
+    ],
+    Checked = lists:foldl(fun({Field, Expected, Actual}, Acc) ->
+        case Expected =:= Actual of
+            true -> Acc;
+            false -> add_issue(Acc, raw_issue(
+                <<"receipt_mismatch">>, NodeBinary, Field, Expected, Actual
+            ))
+        end
+    end, State, Checks),
+    case Status of
+        verified -> Checked;
+        drain_timeout -> add_issue(Checked, raw_issue(
+            <<"drain_timeout">>, NodeBinary, <<>>, 0, drain_timeout(State)
+        ));
+        _ -> add_issue(Checked, raw_issue(
+            <<"legacy_unverified">>, NodeBinary, <<"unknown_seal_status">>, 0, 0
+        ))
+    end.
+
+finish_verified(Events, EndKind, EndDetail, State, Receipt) ->
+    NodeBinary = maps:get(node, Receipt, <<"unknown@node">>),
+    RawReceipt = {raw_node_receipt,
+        NodeBinary,
+        maps:get(final_batch_sequence, Receipt, 0),
+        maps:get(event_count, Receipt, 0),
+        maps:get(byte_count, Receipt, 0)},
+    Origin = maps:get(origin_local_ns, Receipt, 0),
+    Calibration = {clock_calibration, 0, [
+        {node_clock, NodeBinary, Origin, none, none}
+    ]},
+    Outcome = {raw_outcome, EndKind, EndDetail,
+        lists:reverse(maps:get(issues, State, [])), [RawReceipt]},
+    {ok, {Events, Outcome, Calibration}}.
+
+finish_unsealed(Events, EndKind, EndDetail, State) ->
+    Outcome = {raw_outcome, EndKind, EndDetail,
+        lists:reverse(maps:get(issues, State, [])), []},
+    {ok, {Events, Outcome, {clock_calibration, 0, []}}}.
+
+clock_probe_phase(Nodes) ->
+    Parent = self(),
+    Reference = make_ref(),
+    Anchor = erlang:system_time(nanosecond),
+    Deadline = erlang:monotonic_time(millisecond) + 2000,
+    _ = [spawn(fun() ->
+        Parent ! {beamtrace_clock_probe, Reference, Node,
+            best_clock_sample(Node, Deadline, 7, none)}
+    end) || Node <- Nodes],
+    {Anchor, gather_clock_samples(Reference, Nodes, Deadline, #{})}.
+
+gather_clock_samples(_Reference, [], _Deadline, Acc) -> Acc;
+gather_clock_samples(Reference, Pending, Deadline, Acc) ->
+    Remaining = erlang:max(0, Deadline - erlang:monotonic_time(millisecond)),
+    receive
+        {beamtrace_clock_probe, Reference, Node, Sample} ->
+            gather_clock_samples(
+                Reference,
+                lists:delete(Node, Pending),
+                Deadline,
+                maps:put(Node, Sample, Acc)
+            )
+    after Remaining -> Acc
+    end.
+
+best_clock_sample(_Node, _Deadline, 0, Best) -> Best;
+best_clock_sample(Node, Deadline, Remaining, Best) ->
+    case erlang:monotonic_time(millisecond) >= Deadline of
+        true -> Best;
+        false ->
+            Sample = clock_sample(Node),
+            best_clock_sample(
+                Node,
+                Deadline,
+                Remaining - 1,
+                minimum_rtt_sample(Best, Sample)
+            )
+    end.
+
+clock_sample(Node) ->
+    StartedMono = erlang:monotonic_time(nanosecond),
+    StartedUnix = erlang:system_time(nanosecond),
+    try erpc:call(Node, erlang, monotonic_time, [nanosecond], 500) of
+        Local when is_integer(Local) ->
+            FinishedMono = erlang:monotonic_time(nanosecond),
+            FinishedUnix = erlang:system_time(nanosecond),
+            Rtt = erlang:max(0, FinishedMono - StartedMono),
+            {some, {clock_sample,
+                Local,
+                StartedUnix + (FinishedUnix - StartedUnix) div 2,
+                (Rtt + 1) div 2,
+                Rtt}}
+    catch
+        _:_ -> none
+    end.
+
+minimum_rtt_sample(none, Sample) -> Sample;
+minimum_rtt_sample(Best, none) -> Best;
+minimum_rtt_sample({some, {clock_sample, _, _, _, BestRtt}} = Best,
+                   {some, {clock_sample, _, _, _, CandidateRtt}} = Candidate) ->
+    case CandidateRtt < BestRtt of
+        true -> Candidate;
+        false -> Best
+    end.
+
+attach_clock_phases({ok, {Events, Outcome, {clock_calibration, _OldAnchor, Nodes}}},
+                    {Anchor, Before}, {_AfterAnchor, After}) ->
+    CalibratedNodes = [
+        {node_clock, NodeBinary, Origin,
+            maps:get(binary_to_atom(NodeBinary, utf8), Before, none),
+            maps:get(binary_to_atom(NodeBinary, utf8), After, none)}
+        || {node_clock, NodeBinary, Origin, _OldBefore, _OldAfter} <- Nodes
+    ],
+    {ok, {Events, Outcome, {clock_calibration, Anchor, CalibratedNodes}}};
+attach_clock_phases(Error, _Before, _After) -> Error.
 
 initial_batch_credits() ->
     'beamtrace_runtime@credit_policy':initial_window().
@@ -778,15 +1369,17 @@ raw_event(Event) ->
     Physical = maps:get(physical, Process, #{}),
     Metadata = maps:get(metadata, Process, #{}),
     Peer = peer_view(Kind, Event),
-    {raw_event_with_term,
+    {raw_event_v2,
         as_binary(maps:get(id, Event, <<"event-unknown">>)),
         as_binary(maps:get(root_id, Event, <<"root-unknown">>)),
         as_binary(maps:get(node, Event, <<"unknown@node">>)),
         as_binary(maps:get(pid, Physical, <<"<unknown>">>)),
-        maps:get(local_timestamp_ns, Event, 0),
+        maps:get(local_offset_ns, Event, 0),
+        maps:get(local_order, Event, 0),
         atom_binary(Kind),
         as_binary(maps:get(node, Peer, <<>>)),
         as_binary(maps:get(pid, Peer, <<>>)),
+        integer_value(maps:get(previous_serial, Event, 0)),
         integer_value(maps:get(serial, Event, 0)),
         atom_binary(maps:get(semantic, Event, Kind)),
         raw_process_metadata(Metadata),
@@ -906,8 +1499,8 @@ peer_view(spawn, Event) -> maps:get(child, Event, #{});
 peer_view(link, Event) -> maps:get(peer, Event, #{});
 peer_view(_Kind, _Event) -> #{}.
 
-is_root({raw_event_with_term, _Id, _Root, _Node, _Pid, _At, <<"root">>,
-        _PN, _PP, _Serial, _Semantic, _Metadata, _Term}) ->
+is_root({raw_event_v2, _Id, _Root, _Node, _Pid, _At, _Order, <<"root">>,
+        _PN, _PP, _Previous, _Current, _Semantic, _Metadata, _Term}) ->
     true;
 is_root({raw_event_with_metadata, _Id, _Root, _Node, _Pid, _At, <<"root">>,
         _PN, _PP, _Serial, _Semantic, _Metadata}) ->
@@ -1057,8 +1650,10 @@ validate_node_cookie(Node, Cookie)
 validate_node_cookie(_Node, _Cookie) ->
     {error, invalid_attach_arguments}.
 
-capture_options(MaxRoots, Predicate, Privacy, Preset)
-        when is_integer(MaxRoots), MaxRoots > 0, MaxRoots =< 1000 ->
+capture_options(MaxRoots, DrainTimeoutMs, Predicate, Privacy, Preset)
+        when is_integer(MaxRoots), MaxRoots > 0, MaxRoots =< 1000,
+             is_integer(DrainTimeoutMs), DrainTimeoutMs >= 1000,
+             DrainTimeoutMs =< 60000 ->
     case {
         normalize_root_filter(Predicate, 0),
         normalize_privacy(Privacy),
@@ -1067,6 +1662,7 @@ capture_options(MaxRoots, Predicate, Privacy, Preset)
         {{ok, RootFilter}, {ok, PrivacyOptions}, {ok, NormalizedPreset}} ->
             {ok, #{
                 max_roots => MaxRoots,
+                drain_timeout_ms => DrainTimeoutMs,
                 root_filter => RootFilter,
                 privacy => PrivacyOptions,
                 preset => NormalizedPreset
@@ -1075,8 +1671,11 @@ capture_options(MaxRoots, Predicate, Privacy, Preset)
         {_, {error, Reason}, _} -> {error, Reason};
         {_, _, {error, Reason}} -> {error, Reason}
     end;
-capture_options(_MaxRoots, _Predicate, _Privacy, _Preset) ->
-    {error, invalid_root_budget}.
+capture_options(MaxRoots, _DrainTimeoutMs, _Predicate, _Privacy, _Preset)
+        when not is_integer(MaxRoots); MaxRoots =< 0; MaxRoots > 1000 ->
+    {error, invalid_root_budget};
+capture_options(_MaxRoots, _DrainTimeoutMs, _Predicate, _Privacy, _Preset) ->
+    {error, invalid_drain_timeout}.
 
 normalize_root_filter(_Predicate, Depth) when Depth > 32 ->
     {error, root_filter_too_deep};

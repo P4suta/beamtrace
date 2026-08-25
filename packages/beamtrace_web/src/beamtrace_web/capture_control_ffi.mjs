@@ -42,12 +42,13 @@ export function armCapture(
   onError,
 ) {
   complete(
-    request("/api/v1/sessions/current/arm", {
+    request("/api/v2/sessions/current/arm", {
       method: "POST",
       body: JSON.stringify({
         trigger: trigger.trim(),
         where: whereAql.trim() || null,
         capture_window_ms: 30_000,
+        drain_timeout_ms: 10_000,
         max_events: 100_000,
         max_bytes: 64_000_000,
         max_agent_mailbox: 10_000,
@@ -65,10 +66,10 @@ export function armCapture(
 
 export function fetchCaptureStatus(onSuccess, onError) {
   complete(
-    request("/api/v1/sessions/current", { method: "GET" }).then((body) => {
+    request("/api/v2/sessions/current", { method: "GET" }).then((body) => {
       try {
         const status = JSON.parse(body).status;
-        if (status === "ready" || status === "failed" || status === "idle") {
+        if (status === "ready" || status === "sealed" || status === "failed" || status === "idle") {
           captureActive = false;
         }
       } catch {
@@ -92,7 +93,7 @@ export function searchMfas(query, onSuccess, onError) {
   mfaSearchTimer = globalThis.setTimeout(() => {
     mfaSearchController = new AbortController();
     request(
-      `/api/v1/targets/current/mfas?q=${encodeURIComponent(normalized)}&limit=20`,
+      `/api/v2/targets/current/mfas?q=${encodeURIComponent(normalized)}&limit=20`,
       { method: "GET", signal: mfaSearchController.signal },
     )
       .then(onSuccess)
@@ -106,7 +107,7 @@ export function searchMfas(query, onSuccess, onError) {
 
 export function cancelCapture(onSuccess, onError) {
   complete(
-    request("/api/v1/sessions/current/cancel", { method: "POST" }),
+    request("/api/v2/sessions/current/cancel", { method: "POST" }),
     onSuccess,
     onError,
   );
@@ -114,7 +115,7 @@ export function cancelCapture(onSuccess, onError) {
 
 export function saveCapture(path, onSuccess, onError) {
   complete(
-    request("/api/v1/sessions/current/save", {
+    request("/api/v2/sessions/current/save", {
       method: "POST",
       body: JSON.stringify({ path }),
     }),
@@ -131,7 +132,7 @@ export function installPageCleanup() {
   globalThis.addEventListener("pagehide", () => {
     if (!captureActive) return;
     captureActive = false;
-    fetch("/api/v1/sessions/current/cancel", {
+    fetch("/api/v2/sessions/current/cancel", {
       method: "POST",
       credentials: "same-origin",
       keepalive: true,

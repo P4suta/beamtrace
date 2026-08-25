@@ -29,7 +29,7 @@ pub fn live_ticks_update_a_separate_bounded_snapshot_without_losing_capture_test
       "<0.42.0>",
       "orders worker",
       "mailbox_growth · mailbox is growing above its baseline",
-      "Inferred 80% · EWMA exceeded baseline with hysteresis",
+      "Inferred · ewma_hysteresis_v2 · EWMA exceeded baseline with hysteresis",
       7,
       True,
     ),
@@ -38,7 +38,9 @@ pub fn live_ticks_update_a_separate_bounded_snapshot_without_losing_capture_test
     session.Driver(
       attach: fn(_) { Ok(Nil) },
       arm: fn(_) { Ok(Nil) },
-      poll: fn() { session.SessionReady(captured, "complete") },
+      poll: fn() {
+        session.SessionReady(captured, "quiet 250ms · delivery verified")
+      },
       save: fn(_) { Ok(Nil) },
       cancel: fn() { Ok(Nil) },
       live_poll: fn() {
@@ -103,13 +105,15 @@ pub fn arm_failure_is_never_presented_as_success_test() {
   state.notice |> should.equal("system_tracer_occupied")
 }
 
-pub fn ticks_load_the_completed_causal_chain_and_completeness_test() {
+pub fn ticks_load_the_sealed_chain_and_observation_outcome_test() {
   let rows = [model.Event("root", "checkout", "call", "Exact", 0, False)]
   let state =
     session.handle(
       driver(
         arm: fn(_) { Ok(Nil) },
-        poll: fn() { session.SessionReady(rows, "complete") },
+        poll: fn() {
+          session.SessionReady(rows, "quiet 250ms · delivery verified")
+        },
         save: fn(_) { Ok(Nil) },
       ),
       backend.Tick,
@@ -117,14 +121,18 @@ pub fn ticks_load_the_completed_causal_chain_and_completeness_test() {
     )
 
   state.events |> should.equal(rows)
-  state.capture_phase |> should.equal(model.CaptureReady(1, "complete"))
-  state.notice |> should.equal("Capture complete")
+  state.capture_phase
+  |> should.equal(model.CaptureReady(1, "quiet 250ms · delivery verified"))
+  state.notice |> should.equal("Capture sealed; observation outcome recorded")
 }
 
 pub fn save_notice_reflects_the_real_backend_result_test() {
   let state =
     model.attached([], "app@localhost")
-    |> model.update(model.CaptureCompleted([], "complete"))
+    |> model.update(model.CaptureCompleted(
+      [],
+      "quiet 250ms · delivery verified",
+    ))
     |> model.update(model.FocusSave)
 
   let saved =

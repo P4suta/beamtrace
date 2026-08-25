@@ -13,6 +13,7 @@ pub type ArmSpec {
     trigger: types.Mfa,
     where_aql: Option(String),
     capture_window_ms: Int,
+    drain_timeout_ms: Int,
     budget: capture.Budget,
     max_roots: Int,
     preset: types.Preset,
@@ -23,7 +24,7 @@ pub type Status {
   Idle
   Armed
   Cancelling
-  Ready(event_count: Int, completeness: String)
+  Ready(event_count: Int, outcome_summary: String)
   Failed(reason: String)
 }
 
@@ -217,6 +218,7 @@ fn capture_nodes(
         max_events: spec.budget.max_events,
         max_bytes: spec.budget.max_bytes,
         max_duration_ms: spec.capture_window_ms,
+        drain_timeout_ms: spec.drain_timeout_ms,
         max_agent_mailbox: spec.budget.max_agent_mailbox,
         max_roots: spec.max_roots,
       ),
@@ -229,17 +231,19 @@ fn capture_nodes(
 fn valid_spec(spec: ArmSpec) -> Result(Nil, String) {
   case
     spec.capture_window_ms > 0 && spec.capture_window_ms <= 300_000,
+    spec.drain_timeout_ms >= 1000 && spec.drain_timeout_ms <= 60_000,
     spec.budget.max_events > 0,
     spec.budget.max_bytes > 0,
     spec.budget.max_agent_mailbox > 0,
     spec.max_roots > 0 && spec.max_roots <= 1000
   {
-    False, _, _, _, _ -> Error("invalid_capture_window")
-    _, False, _, _, _ -> Error("invalid_event_budget")
-    _, _, False, _, _ -> Error("invalid_byte_budget")
-    _, _, _, False, _ -> Error("invalid_mailbox_budget")
-    _, _, _, _, False -> Error("invalid_root_budget")
-    True, True, True, True, True -> Ok(Nil)
+    False, _, _, _, _, _ -> Error("invalid_capture_window")
+    _, False, _, _, _, _ -> Error("invalid_drain_timeout")
+    _, _, False, _, _, _ -> Error("invalid_event_budget")
+    _, _, _, False, _, _ -> Error("invalid_byte_budget")
+    _, _, _, _, False, _ -> Error("invalid_mailbox_budget")
+    _, _, _, _, _, False -> Error("invalid_root_budget")
+    True, True, True, True, True, True -> Ok(Nil)
   }
 }
 

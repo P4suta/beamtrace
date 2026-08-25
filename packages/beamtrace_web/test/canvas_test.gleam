@@ -17,6 +17,7 @@ fn row(id: String, internal: Bool) {
     },
     timestamp_ns: 100,
     duration_ns: 10,
+    time: workspace.ExactTime("100"),
     evidence: workspace.Exact,
     anomalous: False,
     internal: internal,

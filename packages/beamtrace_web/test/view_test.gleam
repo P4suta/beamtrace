@@ -14,6 +14,7 @@ fn rendered_workspace() -> String {
       kind: "call",
       timestamp_ns: 1000,
       duration_ns: 800,
+      time: workspace.ExactTime("1000"),
       evidence: workspace.Exact,
       anomalous: False,
       internal: False,
@@ -39,13 +40,12 @@ pub fn team_workspace_renders_trace_policy_locks_and_admin_hold_action_test() {
   let trace =
     workspace.TeamTrace(
       "trace-raw",
-      "incomplete",
       "app@host",
       "shop",
       "checkout",
       1,
       "raw",
-      "incomplete",
+      "partial",
       12,
       1000,
       False,
@@ -144,7 +144,10 @@ pub fn live_workspace_has_real_accessible_process_data_and_no_fake_lanes_test() 
           "orders worker",
           "mailbox_growth",
           "mailbox is growing above its baseline",
-          workspace.Inferred("EWMA exceeded baseline with hysteresis", 0.8),
+          workspace.Inferred(
+            "ewma_hysteresis",
+            "EWMA exceeded baseline with hysteresis",
+          ),
         ),
       ],
       supervision: [],
@@ -172,11 +175,25 @@ pub fn compare_workspace_renders_paths_alignment_and_percentiles_test() {
       "left.beamtrace",
       3,
       [
-        workspace.CompareRun("slow.beamtrace", 1, 0, 0, [
-          workspace.CompareItem("matched", "left-send", "right-send", 90, ""),
+        workspace.CompareRun("slow.beamtrace", 1, 0, 0, 0, [], [
+          workspace.CompareItem(
+            "matched",
+            "left-send",
+            "right-send",
+            workspace.ExactTime("90"),
+            "",
+          ),
         ]),
       ],
-      [workspace.BranchStatistic("orders|send:tag:work", 10, 100, 2, 3, 0.66)],
+      [
+        workspace.BranchStatistic(
+          "orders|send:tag:work",
+          workspace.TimeSummary(workspace.ExactTime("10"), 2, 0),
+          workspace.TimeSummary(workspace.ExactTime("100"), 2, 0),
+          2,
+          3,
+        ),
+      ],
     )
   let html =
     workspace.init([])
@@ -191,7 +208,7 @@ pub fn compare_workspace_renders_paths_alignment_and_percentiles_test() {
   |> string.contains("Accessible trace alignment table")
   |> should.be_true()
   html |> string.contains("slow.beamtrace") |> should.be_true()
-  html |> string.contains("+90 ns") |> should.be_true()
-  html |> string.contains("p95 100 ns") |> should.be_true()
+  html |> string.contains("90 ns exact") |> should.be_true()
+  html |> string.contains("p95 100 ns exact") |> should.be_true()
   html |> string.contains("2/3 runs") |> should.be_true()
 }

@@ -4,13 +4,7 @@
 -include_lib("kernel/include/file.hrl").
 -include_lib("stdlib/include/zip.hrl").
 
--export([
-    write_container/3,
-    read_container/1,
-    read_window/3,
-    search_archive/4,
-    list_entries/1
-]).
+-export([write_container/5, read_container/1, list_entries/1]).
 
 -define(MAX_ENTRIES, 10000).
 -define(MAX_UNCOMPRESSED_BYTES, 1073741824).
@@ -18,41 +12,65 @@
 -define(MAX_ENTRY_BYTES, 67108864).
 -define(SEGMENT_EVENTS, 1000).
 
-write_container(PathBinary, Manifest, EventLines)
-        when is_binary(PathBinary), is_binary(Manifest), is_list(EventLines) ->
+write_container(PathBinary, Manifest, EventLines, GraphSegments, Clocks)
+        when is_binary(PathBinary), is_binary(Manifest), is_list(EventLines),
+             is_list(GraphSegments), is_binary(Clocks) ->
     Path = unicode:characters_to_list(PathBinary),
     case filelib:ensure_dir(Path) of
-        ok -> write_container_file(Path, Manifest, EventLines);
+        ok -> write_container_file(Path, Manifest, EventLines, GraphSegments, Clocks);
         {error, Reason} -> {error, error_binary({ensure_directory, Reason})}
+    end;
+write_container(_Path, _Manifest, _Events, _Graphs, _Clocks) ->
+    {error, <<"invalid_container">>}.
+
+write_container_file(Path, Manifest, EventLines, GraphSegments, Clocks) ->
+    EventEntries = event_entries(EventLines),
+    case graph_entries(GraphSegments, length(EventEntries)) of
+        {error, Reason} -> {error, Reason};
+        {ok, GraphEntries} ->
+            Index = index_json(2, EventEntries),
+            Annotations = <<"{\"schema_version\":2,\"annotations\":[]}">>,
+            DataEntries =
+                [{"manifest.json", Manifest}]
+                ++ EventEntries
+                ++ GraphEntries
+                ++ [
+                    {"clocks.json", Clocks},
+                    {"indexes/events.idx", Index},
+                    {"annotations.json", Annotations}
+                ],
+            Checksums = checksums_json(DataEntries),
+            Entries = DataEntries ++ [{"checksums.json", Checksums}],
+            Temporary = Path ++ ".tmp." ++ integer_to_list(
+                erlang:unique_integer([positive, monotonic])
+            ),
+            case zip:create(Temporary, Entries, []) of
+                {ok, _} -> atomic_replace(Temporary, Path);
+                {error, ZipReason} ->
+                    _ = file:delete(Temporary),
+                    {error, error_binary({zip_create, ZipReason})}
+            end
     end.
 
-write_container_file(Path, Manifest, EventLines) ->
-    EventEntries = event_entries(EventLines),
-    Processes = <<>>,
-    Annotations = <<"[]">>,
-    Index = index_json(EventEntries),
-    DataEntries = [
-        {"manifest.json", Manifest}
-    ] ++ EventEntries ++ [
-        {"processes.ndjson", Processes},
-        {"annotations.json", Annotations},
-        {"indexes/events.idx", Index}
-    ],
-    Checksums = checksums_json(DataEntries),
-    Entries = DataEntries ++ [{"checksums.json", Checksums}],
-    Temporary = Path ++ ".tmp." ++ integer_to_list(erlang:unique_integer([positive])),
-    case zip:create(Temporary, Entries, []) of
-        {ok, _} ->
-            _ = file:delete(Path),
-            case file:rename(Temporary, Path) of
-                ok -> {ok, nil};
-                {error, Reason} ->
-                    _ = file:delete(Temporary),
-                    {error, error_binary({rename, Reason})}
-            end;
+%% `file:rename/2` is an atomic replacement on the supported Unix targets. We
+%% deliberately do not unlink the destination first: any failure leaves the
+%% previous archive intact.
+atomic_replace(Temporary, Path) ->
+    _ = sync_file(Temporary),
+    case file:rename(Temporary, Path) of
+        ok -> {ok, nil};
         {error, Reason} ->
             _ = file:delete(Temporary),
-            {error, error_binary({zip_create, Reason})}
+            {error, error_binary({atomic_replace, Reason})}
+    end.
+
+sync_file(Path) ->
+    case file:open(Path, [read, raw, binary]) of
+        {ok, Device} ->
+            Result = file:sync(Device),
+            _ = file:close(Device),
+            Result;
+        Error -> Error
     end.
 
 event_entries([]) -> [{"events/000001.ndjson", <<>>}];
@@ -64,12 +82,27 @@ event_entries(EventLines, Sequence, Accumulator) ->
     Name = lists:flatten(io_lib:format("events/~6..0B.ndjson", [Sequence])),
     event_entries(Rest, Sequence + 1, [{Name, ndjson(Chunk)} | Accumulator]).
 
+graph_entries(GraphSegments, ExpectedCount)
+        when length(GraphSegments) =:= ExpectedCount ->
+    case lists:all(fun is_binary/1, GraphSegments) of
+        true ->
+            {ok, lists:zipwith(fun(Sequence, Data) ->
+                Name = lists:flatten(io_lib:format("graph/~6..0B.json", [Sequence])),
+                {Name, Data}
+            end, lists:seq(1, ExpectedCount), GraphSegments)};
+        false -> {error, <<"invalid_container">>}
+    end;
+graph_entries(_GraphSegments, _ExpectedCount) ->
+    {error, <<"graph_segment_count_mismatch">>}.
+
 take_lines(Rest, 0, Accumulator) -> {lists:reverse(Accumulator), Rest};
 take_lines([], _Remaining, Accumulator) -> {lists:reverse(Accumulator), []};
-take_lines([Line | Rest], Remaining, Accumulator) ->
-    take_lines(Rest, Remaining - 1, [Line | Accumulator]).
+take_lines([Line | Rest], Remaining, Accumulator) when is_binary(Line) ->
+    take_lines(Rest, Remaining - 1, [Line | Accumulator]);
+take_lines([_Invalid | _Rest], _Remaining, _Accumulator) ->
+    erlang:error(invalid_event_line).
 
-index_json(EventEntries) ->
+index_json(Version, EventEntries) ->
     {Items, _NextFirst} = lists:mapfoldl(fun({Name, Data}, First) ->
         Count = length(split_ndjson(Data)),
         Item = [
@@ -84,7 +117,9 @@ index_json(EventEntries) ->
         {Item, First + Count}
     end, 0, EventEntries),
     iolist_to_binary([
-        <<"{\"schema_version\":1,\"segments\":[">>,
+        <<"{\"schema_version\":" >>,
+        integer_to_binary(Version),
+        <<",\"segments\":[">>,
         lists:join(<<",">>, Items),
         <<"]}">>
     ]).
@@ -92,239 +127,39 @@ index_json(EventEntries) ->
 read_container(PathBinary) when is_binary(PathBinary) ->
     Path = unicode:characters_to_list(PathBinary),
     case validated_table(Path) of
-        {ok, _Files} ->
+        {ok, Files} ->
             case zip:extract(Path, [memory]) of
-                {ok, Extracted} -> decode_extracted(Extracted);
+                {ok, Extracted} -> decode_extracted(Files, Extracted);
                 {error, _Reason} -> {error, <<"invalid_container">>}
             end;
         Error -> Error
-    end.
+    end;
+read_container(_Path) -> {error, <<"invalid_container">>}.
 
 list_entries(PathBinary) when is_binary(PathBinary) ->
     Path = unicode:characters_to_list(PathBinary),
     case validated_table(Path) of
         {ok, Files} ->
-            {ok, [unicode:characters_to_binary(File#zip_file.name) || File <- Files]};
-        Error -> Error
-    end.
-
-read_window(PathBinary, Start, Limit)
-        when is_binary(PathBinary), is_integer(Start), is_integer(Limit),
-             Start >= 0, Limit >= 1, Limit =< 1000 ->
-    Path = unicode:characters_to_list(PathBinary),
-    case validated_table(Path) of
-        {ok, Files} -> read_window_files(Path, Files, Start, Limit);
-        Error -> Error
-    end;
-read_window(_PathBinary, _Start, _Limit) ->
-    {error, <<"invalid_window">>}.
-
-search_archive(PathBinary, Query, Start, Limit)
-        when is_binary(PathBinary), is_binary(Query), is_integer(Start),
-             is_integer(Limit), byte_size(Query) > 0, byte_size(Query) =< 256,
-             Start >= 0, Limit >= 1, Limit =< 1000 ->
-    Path = unicode:characters_to_list(PathBinary),
-    case fold_text(Query) of
-        {ok, FoldedQuery} ->
-            case validated_table(Path) of
-                {ok, Files} ->
-                    case canonical_event_names(Files) of
-                        {ok, EventNames} ->
-                            search_event_names(
-                                Path,
-                                EventNames,
-                                FoldedQuery,
-                                Start,
-                                Limit,
-                                0,
-                                0,
-                                []
-                            );
+            case zip:extract(Path, [memory]) of
+                {ok, Extracted} ->
+                    case decode_extracted(Files, Extracted) of
+                        {ok, _Payload} ->
+                            {ok, [unicode:characters_to_binary(File#zip_file.name)
+                                  || File <- Files]};
                         Error -> Error
                     end;
-                Error -> Error
+                {error, _Reason} -> {error, <<"invalid_container">>}
             end;
-        error -> {error, <<"invalid_search">>}
+        Error -> Error
     end;
-search_archive(_PathBinary, _Query, _Start, _Limit) ->
-    {error, <<"invalid_search">>}.
-
-search_event_names(
-    _Path,
-    [],
-    _Query,
-    _Start,
-    _Limit,
-    MatchCount,
-    _CollectedCount,
-    Accumulator
-) ->
-    {ok, {lists:reverse(Accumulator), MatchCount}};
-search_event_names(
-    Path,
-    [Name | Rest],
-    Query,
-    Start,
-    Limit,
-    MatchCount,
-    CollectedCount,
-    Accumulator
-) ->
-    case extract_verified(Path, [Name]) of
-        {ok, ByName} ->
-            case search_lines(
-                data_lines(Name, ByName),
-                Query,
-                Start,
-                Limit,
-                MatchCount,
-                CollectedCount,
-                Accumulator
-            ) of
-                {ok, {NextMatchCount, NextCollectedCount, NextAccumulator}} ->
-                    search_event_names(
-                        Path,
-                        Rest,
-                        Query,
-                        Start,
-                        Limit,
-                        NextMatchCount,
-                        NextCollectedCount,
-                        NextAccumulator
-                    );
-                Error -> Error
-            end;
-        Error -> Error
-    end.
-
-search_lines([], _Query, _Start, _Limit, MatchCount, CollectedCount, Accumulator) ->
-    {ok, {MatchCount, CollectedCount, Accumulator}};
-search_lines(
-    [Line | Rest], Query, Start, Limit, MatchCount, CollectedCount, Accumulator
-) ->
-    case fold_text(Line) of
-        error -> {error, <<"invalid_container">>};
-        {ok, FoldedLine} ->
-            case binary:match(FoldedLine, Query) of
-                nomatch ->
-                    search_lines(
-                        Rest,
-                        Query,
-                        Start,
-                        Limit,
-                        MatchCount,
-                        CollectedCount,
-                        Accumulator
-                    );
-                _Match ->
-                    Include = MatchCount >= Start andalso CollectedCount < Limit,
-                    NextAccumulator = case Include of
-                        true -> [Line | Accumulator];
-                        false -> Accumulator
-                    end,
-                    NextCollectedCount = case Include of
-                        true -> CollectedCount + 1;
-                        false -> CollectedCount
-                    end,
-                    search_lines(
-                        Rest,
-                        Query,
-                        Start,
-                        Limit,
-                        MatchCount + 1,
-                        NextCollectedCount,
-                        NextAccumulator
-                    )
-            end
-    end.
-
-fold_text(Binary) ->
-    try
-        Characters = unicode:characters_to_list(Binary),
-        {ok, unicode:characters_to_binary(string:casefold(Characters))}
-    catch
-        _:_ -> error
-    end.
-
-read_window_files(Path, Files, Start, Limit) ->
-    case canonical_event_names(Files) of
-        {ok, EventNames} ->
-            LastName = lists:last(EventNames),
-            case extract_verified(Path, [LastName]) of
-                {ok, LastByName} ->
-                    LastLines = data_lines(LastName, LastByName),
-                    Total = (length(EventNames) - 1) * ?SEGMENT_EVENTS + length(LastLines),
-                    read_requested_window(Path, EventNames, Start, Limit, Total);
-                Error -> Error
-            end;
-        Error -> Error
-    end.
-
-read_requested_window(_Path, _EventNames, Start, _Limit, Total) when Start >= Total ->
-    {ok, {[], Total}};
-read_requested_window(Path, EventNames, Start, Limit, Total) ->
-    EndExclusive = erlang:min(Start + Limit, Total),
-    FirstSegment = Start div ?SEGMENT_EVENTS + 1,
-    LastSegment = (EndExclusive - 1) div ?SEGMENT_EVENTS + 1,
-    RequestedNames = lists:sublist(
-        EventNames,
-        FirstSegment,
-        LastSegment - FirstSegment + 1
-    ),
-    case extract_verified(Path, RequestedNames) of
-        {ok, ByName} ->
-            Lines = lists:append([data_lines(Name, ByName) || Name <- RequestedNames]),
-            Offset = Start rem ?SEGMENT_EVENTS,
-            Window = lists:sublist(drop_lines(Offset, Lines), EndExclusive - Start),
-            {ok, {Window, Total}};
-        Error -> Error
-    end.
-
-canonical_event_names(Files) ->
-    Names = lists:sort([
-        File#zip_file.name || File <- Files,
-            is_event_segment(unicode:characters_to_binary(File#zip_file.name))
-    ]),
-    Expected = [
-        lists:flatten(io_lib:format("events/~6..0B.ndjson", [Sequence]))
-        || Sequence <- lists:seq(1, length(Names))
-    ],
-    case Names =/= [] andalso Names =:= Expected of
-        true -> {ok, Names};
-        false -> {error, <<"invalid_container">>}
-    end.
-
-extract_verified(Path, Names) ->
-    Wanted = lists:usort(["checksums.json" | Names]),
-    case zip:extract(Path, [memory, {file_list, Wanted}]) of
-        {ok, Extracted} ->
-            ByName = maps:from_list([
-                {unicode:characters_to_binary(Name), Data}
-                || {Name, Data} <- Extracted,
-                   is_binary(Data)
-            ]),
-            case verify_checksums(ByName) of
-                true -> {ok, ByName};
-                false -> {error, <<"checksum_mismatch">>}
-            end;
-        {error, _Reason} -> {error, <<"invalid_container">>}
-    end.
-
-data_lines(Name, ByName) ->
-    BinaryName = unicode:characters_to_binary(Name),
-    split_ndjson(maps:get(BinaryName, ByName, <<>>)).
-
-drop_lines(0, Lines) -> Lines;
-drop_lines(_Count, []) -> [];
-drop_lines(Count, [_ | Rest]) -> drop_lines(Count - 1, Rest).
+list_entries(_Path) -> {error, <<"invalid_container">>}.
 
 validated_table(Path) ->
     case zip:table(Path) of
         {ok, Entries} ->
             Files = [Entry || Entry <- Entries, is_record(Entry, zip_file)],
             validate_files(Files);
-        {error, _Reason} ->
-            {error, <<"invalid_container">>}
+        {error, _Reason} -> {error, <<"invalid_container">>}
     end.
 
 validate_files(Files) when length(Files) > ?MAX_ENTRIES ->
@@ -339,22 +174,14 @@ validate_files(Files) ->
         Error -> Error
     end.
 
-validate_sizes(Files) ->
-    Total = lists:sum([(File#zip_file.info)#file_info.size || File <- Files]),
-    OversizedEntry = lists:any(fun(File) ->
-        (File#zip_file.info)#file_info.size > ?MAX_ENTRY_BYTES
-    end, Files),
-    case Total > ?MAX_UNCOMPRESSED_BYTES orelse OversizedEntry orelse has_suspicious_ratio(Files) of
-        true -> {error, <<"zip_bomb">>};
-        false -> {ok, Files}
-    end.
-
 validate_names([]) -> ok;
 validate_names([File | Rest]) ->
     Name = File#zip_file.name,
-    case safe_entry_name(Name) of
+    Info = File#zip_file.info,
+    case safe_entry_name(Name) andalso Info#file_info.type =:= regular of
         true -> validate_names(Rest);
-        false -> {error, <<"unsafe_entry:", (unicode:characters_to_binary(Name))/binary>>}
+        false ->
+            {error, <<"unsafe_entry:", (unicode:characters_to_binary(Name))/binary>>}
     end.
 
 validate_unique_names([], _Seen) -> ok;
@@ -363,8 +190,19 @@ validate_unique_names([File | Rest], Seen) ->
     case maps:is_key(Name, Seen) of
         true ->
             {error, <<"duplicate_entry:", (unicode:characters_to_binary(Name))/binary>>};
-        false ->
-            validate_unique_names(Rest, maps:put(Name, true, Seen))
+        false -> validate_unique_names(Rest, maps:put(Name, true, Seen))
+    end.
+
+validate_sizes(Files) ->
+    Total = lists:sum([(File#zip_file.info)#file_info.size || File <- Files]),
+    OversizedEntry = lists:any(fun(File) ->
+        (File#zip_file.info)#file_info.size > ?MAX_ENTRY_BYTES
+    end, Files),
+    case Total > ?MAX_UNCOMPRESSED_BYTES
+         orelse OversizedEntry
+         orelse has_suspicious_ratio(Files) of
+        true -> {error, <<"zip_bomb">>};
+        false -> {ok, Files}
     end.
 
 safe_entry_name(Name) ->
@@ -381,62 +219,233 @@ has_suspicious_ratio(Files) ->
         Size = (File#zip_file.info)#file_info.size,
         Compressed = File#zip_file.comp_size,
         Size > 1048576 andalso (
-            Compressed =:= 0 orelse Size div erlang:max(Compressed, 1) > ?MAX_COMPRESSION_RATIO
+            Compressed =:= 0
+            orelse Size div erlang:max(Compressed, 1) > ?MAX_COMPRESSION_RATIO
         )
     end, Files).
 
-decode_extracted(Extracted) ->
+decode_extracted(Files, Extracted) ->
     ByName = maps:from_list([
         {unicode:characters_to_binary(Name), Data}
         || {Name, Data} <- Extracted,
            is_binary(Data)
     ]),
-    EventNames = lists:sort([
-        Name || Name <- maps:keys(ByName),
-            is_event_segment(Name)
-    ]),
-    case {maps:find(<<"manifest.json">>, ByName), EventNames} of
-        {{ok, Manifest}, [_ | _]} ->
-            case verify_checksums(ByName) of
-                true ->
-                    Events = lists:append([
-                        split_ndjson(maps:get(Name, ByName)) || Name <- EventNames
-                    ]),
-                    {ok, {Manifest, Events}};
-                false -> {error, <<"checksum_mismatch">>}
+    case map_size(ByName) =:= length(Files) of
+        false -> {error, <<"invalid_container">>};
+        true ->
+            case maps:find(<<"manifest.json">>, ByName) of
+                error -> {error, <<"invalid_container">>};
+                {ok, Manifest} -> dispatch_schema(Manifest, ByName)
+            end
+    end.
+
+%% Manifest schema dispatch happens before interpreting any version-specific
+%% archive entry.
+dispatch_schema(Manifest, ByName) ->
+    case manifest_schema(Manifest) of
+        {ok, 1} -> decode_v1(Manifest, ByName);
+        {ok, 2} -> decode_v2(Manifest, ByName);
+        {ok, Version} ->
+            {error, <<"unknown_schema_version:", (integer_to_binary(Version))/binary>>};
+        error -> {error, <<"invalid_container">>}
+    end.
+
+manifest_schema(Manifest) ->
+    try json:decode(Manifest) of
+        Object when is_map(Object), map_size(Object) > 0 ->
+            case maps:get(<<"schema_version">>, Object, undefined) of
+                Version when is_integer(Version) -> {ok, Version};
+                _ -> error
             end;
-        _ ->
-            {error, <<"invalid_container">>}
+        _ -> error
+    catch
+        _:_ -> error
     end.
 
-is_event_segment(Name) ->
-    case Name of
-        <<"events/", _/binary>> ->
-            byte_size(Name) > byte_size(<<"events/.ndjson">>)
-                andalso binary:part(Name, byte_size(Name) - 7, 7) =:= <<".ndjson">>;
-        _ -> false
+decode_v1(Manifest, ByName) ->
+    case canonical_segments(ByName, <<"events/">>, <<".ndjson">>) of
+        {error, _} = Error -> Error;
+        {ok, EventNames} ->
+            DataNames = [<<"manifest.json">>]
+                ++ EventNames
+                ++ [
+                    <<"processes.ndjson">>,
+                    <<"annotations.json">>,
+                    <<"indexes/events.idx">>
+                ],
+            case exact_entries(ByName, DataNames)
+                 andalso canonical_event_segments(ByName, EventNames)
+                 andalso maps:get(<<"processes.ndjson">>, ByName, invalid) =:= <<>>
+                 andalso maps:get(<<"annotations.json">>, ByName, invalid) =:= <<"[]">>
+                 andalso maps:get(<<"indexes/events.idx">>, ByName, invalid)
+                     =:= index_json(1, named_data(EventNames, ByName)) of
+                false -> {error, <<"invalid_container">>};
+                true ->
+                    case verify_all_checksums(ByName, DataNames) of
+                        ok ->
+                            Events = lists:append([
+                                split_ndjson(maps:get(Name, ByName))
+                                || Name <- EventNames
+                            ]),
+                            {ok, {Manifest, Events, [], <<>>}};
+                        Error -> Error
+                    end
+            end
     end.
 
-verify_checksums(ByName) ->
+decode_v2(Manifest, ByName) ->
+    case {
+        canonical_segments(ByName, <<"events/">>, <<".ndjson">>),
+        canonical_segments(ByName, <<"graph/">>, <<".json">>)
+    } of
+        {{ok, EventNames}, {ok, GraphNames}}
+                when length(EventNames) =:= length(GraphNames) ->
+            DataNames = [<<"manifest.json">>]
+                ++ EventNames
+                ++ GraphNames
+                ++ [
+                    <<"clocks.json">>,
+                    <<"indexes/events.idx">>,
+                    <<"annotations.json">>
+                ],
+            case exact_entries(ByName, DataNames)
+                 andalso canonical_event_segments(ByName, EventNames)
+                 andalso maps:get(<<"indexes/events.idx">>, ByName, invalid)
+                     =:= index_json(2, named_data(EventNames, ByName))
+                 andalso maps:get(<<"annotations.json">>, ByName, invalid)
+                     =:= <<"{\"schema_version\":2,\"annotations\":[]}">> of
+                false -> {error, <<"invalid_container">>};
+                true ->
+                    case verify_all_checksums(ByName, DataNames) of
+                        ok ->
+                            Events = lists:append([
+                                split_ndjson(maps:get(Name, ByName))
+                                || Name <- EventNames
+                            ]),
+                            Graphs = [maps:get(Name, ByName) || Name <- GraphNames],
+                            Clocks = maps:get(<<"clocks.json">>, ByName),
+                            {ok, {Manifest, Events, Graphs, Clocks}};
+                        Error -> Error
+                    end
+            end;
+        _ -> {error, <<"invalid_container">>}
+    end.
+
+canonical_segments(ByName, Prefix, Suffix) ->
+    Names = lists:sort([
+        Name || Name <- maps:keys(ByName),
+            has_prefix_suffix(Name, Prefix, Suffix)
+    ]),
+    Expected = segment_names(Prefix, Suffix, length(Names)),
+    case Names =/= [] andalso Names =:= Expected of
+        true -> {ok, Names};
+        false -> {error, <<"invalid_container">>}
+    end.
+
+segment_names(Prefix, Suffix, Count) ->
+    [
+        iolist_to_binary([
+            Prefix,
+            io_lib:format("~6..0B", [Sequence]),
+            Suffix
+        ])
+        || Sequence <- lists:seq(1, Count)
+    ].
+
+has_prefix_suffix(Name, Prefix, Suffix) ->
+    PrefixSize = byte_size(Prefix),
+    SuffixSize = byte_size(Suffix),
+    byte_size(Name) > PrefixSize + SuffixSize
+        andalso binary:part(Name, 0, PrefixSize) =:= Prefix
+        andalso binary:part(Name, byte_size(Name) - SuffixSize, SuffixSize) =:= Suffix.
+
+canonical_event_segments(ByName, Names) ->
+    canonical_event_segments(ByName, Names, length(Names)).
+
+canonical_event_segments(_ByName, [], _Total) -> false;
+canonical_event_segments(ByName, Names, Total) ->
+    lists:all(fun({Name, Position}) ->
+        Data = maps:get(Name, ByName),
+        Lines = split_ndjson(Data),
+        Count = length(Lines),
+        CanonicalCount = case Position < Total of
+            true -> Count =:= ?SEGMENT_EVENTS;
+            false -> Count >= 0 andalso Count =< ?SEGMENT_EVENTS
+        end,
+        CanonicalCount andalso Data =:= ndjson(Lines)
+    end, lists:zip(Names, lists:seq(1, Total))).
+
+exact_entries(ByName, DataNames) ->
+    Actual = lists:sort(maps:keys(ByName)),
+    Expected = lists:sort([<<"checksums.json">> | DataNames]),
+    Actual =:= Expected.
+
+named_data(Names, ByName) ->
+    [{unicode:characters_to_list(Name), maps:get(Name, ByName)} || Name <- Names].
+
+verify_all_checksums(ByName, DataNames) ->
     case maps:find(<<"checksums.json">>, ByName) of
-        error -> false;
-        {ok, Checksums} ->
-            maps:fold(fun(Name, Data, Valid) ->
-                case Name =:= <<"checksums.json">> of
-                    true -> Valid;
-                    false ->
-                        Digest = sha256_hex(Data),
-                        Expected = iolist_to_binary([
-                            <<"{\"path\":\"">>,
-                            Name,
-                            <<"\",\"sha256\":\"">>,
-                            Digest,
-                            <<"\"}">>
-                        ]),
-                        Valid andalso binary:match(Checksums, Expected) =/= nomatch
-                end
-            end, true, ByName)
+        error -> {error, <<"invalid_checksums">>};
+        {ok, Source} ->
+            case parse_checksums(Source, DataNames) of
+                ok ->
+                    Entries = [
+                        {unicode:characters_to_list(Name), maps:get(Name, ByName)}
+                        || Name <- DataNames
+                    ],
+                    case Source =:= checksums_json(Entries) of
+                        true -> ok;
+                        false -> {error, <<"checksum_mismatch">>}
+                    end;
+                error -> {error, <<"invalid_checksums">>}
+            end
     end.
+
+parse_checksums(Source, ExpectedNames) ->
+    try json:decode(Source) of
+        Object when is_map(Object), map_size(Object) =:= 2 ->
+            case {
+                maps:get(<<"algorithm">>, Object, undefined),
+                maps:get(<<"files">>, Object, undefined)
+            } of
+                {<<"sha256">>, Files} when is_list(Files) ->
+                    case parse_checksum_files(Files, #{}, []) of
+                        {ok, Paths} when Paths =:= ExpectedNames -> ok;
+                        _ -> error
+                    end;
+                _ -> error
+            end;
+        _ -> error
+    catch
+        _:_ -> error
+    end.
+
+parse_checksum_files([], _Seen, Accumulator) ->
+    {ok, lists:reverse(Accumulator)};
+parse_checksum_files([Entry | Rest], Seen, Accumulator)
+        when is_map(Entry), map_size(Entry) =:= 2 ->
+    Path = maps:get(<<"path">>, Entry, undefined),
+    Digest = maps:get(<<"sha256">>, Entry, undefined),
+    case is_binary(Path)
+         andalso is_binary(Digest)
+         andalso valid_sha256(Digest)
+         andalso not maps:is_key(Path, Seen) of
+        true ->
+            parse_checksum_files(
+                Rest,
+                maps:put(Path, true, Seen),
+                [Path | Accumulator]
+            );
+        false -> error
+    end;
+parse_checksum_files(_Files, _Seen, _Accumulator) -> error.
+
+valid_sha256(Digest) when byte_size(Digest) =:= 64 ->
+    lists:all(fun(Character) ->
+        (Character >= $0 andalso Character =< $9)
+        orelse (Character >= $a andalso Character =< $f)
+    end, binary_to_list(Digest));
+valid_sha256(_Digest) -> false.
 
 checksums_json(Entries) ->
     Items = [
@@ -449,12 +458,16 @@ checksums_json(Entries) ->
         ]
         || {Name, Data} <- Entries
     ],
-    iolist_to_binary([<<"{\"algorithm\":\"sha256\",\"files\":[">>,
-        lists:join(<<",">>, Items), <<"]}">>]).
+    iolist_to_binary([
+        <<"{\"algorithm\":\"sha256\",\"files\":[">>,
+        lists:join(<<",">>, Items),
+        <<"]}">>
+    ]).
 
 sha256_hex(Data) ->
     Digest = crypto:hash(sha256, Data),
-    << <<(hex_digit(Byte bsr 4)), (hex_digit(Byte band 16#0f))>> || <<Byte>> <= Digest >>.
+    << <<(hex_digit(Byte bsr 4)), (hex_digit(Byte band 16#0f))>>
+       || <<Byte>> <= Digest >>.
 
 hex_digit(Value) when Value < 10 -> $0 + Value;
 hex_digit(Value) -> $a + Value - 10.

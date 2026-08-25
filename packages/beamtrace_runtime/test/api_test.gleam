@@ -1,4 +1,3 @@
-import beamtrace/codec
 import beamtrace/types
 import beamtrace_runtime/annotations
 import beamtrace_runtime/api
@@ -32,6 +31,7 @@ import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
 import sqlight
+import v2_fixture
 import wisp/simulate
 
 pub type TestSigner
@@ -91,7 +91,7 @@ pub fn capabilities_explicitly_exclude_mutating_rpc_test() {
 }
 
 pub fn unknown_api_version_is_not_found_test() {
-  simulate.request(http.Get, "/api/v2/health")
+  simulate.request(http.Get, "/api/v9/health")
   |> api.handle(api.test_context())
   |> fn(response) { response.status }
   |> should.equal(404)
@@ -179,20 +179,11 @@ pub fn event_pages_require_authentication_and_enforce_a_bounded_limit_test() {
       root_id: "root-api",
       node: "fixture@host",
       process: process,
-      local_timestamp_ns: 10,
+      local_instant: v2_fixture.instant(10),
       kind: types.Stop("complete"),
       evidence: types.Exact,
     )
-  let manifest =
-    codec.Manifest(
-      schema_version: 1,
-      tool_version: "0.1.0",
-      capture_id: "capture-api",
-      nodes: ["fixture@host"],
-      completeness: types.Complete,
-      privacy: types.Metadata,
-      checksums: [],
-    )
+  let manifest = v2_fixture.manifest("capture-api", ["fixture@host"])
   storage.save(path, manifest, [event]) |> should.equal(Ok(Nil))
 
   let #(store, token) = local_auth.new_at(1000, 60_000)
@@ -208,7 +199,7 @@ pub fn event_pages_require_authentication_and_enforce_a_bounded_limit_test() {
       None,
       None,
     )
-  let url = "/api/v1/sessions/current/events?start=0&limit=1"
+  let url = "/api/v2/sessions/current/events?start=0&limit=1"
 
   simulate.request(http.Get, url)
   |> api.handle_at(context, 1002)
@@ -227,7 +218,7 @@ pub fn event_pages_require_authentication_and_enforce_a_bounded_limit_test() {
   let no_matches =
     simulate.request(
       http.Get,
-      "/api/v1/sessions/current/events?start=0&limit=1&q=no-such-event",
+      "/api/v2/sessions/current/events?start=0&limit=1&q=no-such-event",
     )
     |> request.set_header("cookie", "beamtrace_session=" <> session.id)
     |> api.handle_at(context, 1002)
@@ -238,7 +229,7 @@ pub fn event_pages_require_authentication_and_enforce_a_bounded_limit_test() {
 
   simulate.request(
     http.Get,
-    "/api/v1/sessions/current/events?start=0&limit=1001",
+    "/api/v2/sessions/current/events?start=0&limit=1001",
   )
   |> request.set_header("cookie", "beamtrace_session=" <> session.id)
   |> api.handle_at(context, 1002)
@@ -248,18 +239,18 @@ pub fn event_pages_require_authentication_and_enforce_a_bounded_limit_test() {
 }
 
 pub fn local_capture_api_arms_pages_and_saves_a_real_session_test() {
-  let captured =
-    capture.CaptureResult(
-      events: [session_event("captured-root")],
-      completeness: types.Complete,
-    )
+  let captured = v2_fixture.capture_result([session_event("captured-root")])
   let capture_store =
     capture_session.new_with_backends_for_nodes(
       ["app@host"],
       fn(spec) {
-        case spec.max_roots == 3, spec.preset == types.GenServer {
-          True, True -> Ok(captured)
-          _, _ -> Error("capture_spec_not_forwarded")
+        case
+          spec.max_roots == 3,
+          spec.preset == types.GenServer,
+          spec.drain_timeout_ms == 1500
+        {
+          True, True, True -> Ok(captured)
+          _, _, _ -> Error("capture_spec_not_forwarded")
         }
       },
       fn(node, _query, _limit) {
@@ -281,17 +272,17 @@ pub fn local_capture_api_arms_pages_and_saves_a_real_session_test() {
     )
   let body =
     "{\"trigger\":\"shop:checkout/1\",\"where\":null,"
-    <> "\"capture_window_ms\":1000,\"max_events\":1000,"
+    <> "\"capture_window_ms\":1000,\"drain_timeout_ms\":1500,\"max_events\":1000,"
     <> "\"max_bytes\":1000000,\"max_agent_mailbox\":100,"
     <> "\"max_roots\":3,\"preset\":\"gen-server\"}"
 
-  simulate.request(http.Get, "/api/v1/targets/current/mfas?q=check&limit=20")
+  simulate.request(http.Get, "/api/v2/targets/current/mfas?q=check&limit=20")
   |> api.handle_at(context, 1002)
   |> fn(response) { response.status }
   |> should.equal(401)
 
   let candidates =
-    simulate.request(http.Get, "/api/v1/targets/current/mfas?q=check&limit=20")
+    simulate.request(http.Get, "/api/v2/targets/current/mfas?q=check&limit=20")
     |> request.set_header("cookie", "beamtrace_session=" <> session.id)
     |> api.handle_at(context, 1002)
   candidates.status |> should.equal(200)
@@ -299,7 +290,7 @@ pub fn local_capture_api_arms_pages_and_saves_a_real_session_test() {
   |> string.contains("\"mfa\":\"shop:checkout/1\"")
   |> should.be_true()
 
-  simulate.request(http.Post, "/api/v1/sessions/current/arm")
+  simulate.request(http.Post, "/api/v2/sessions/current/arm")
   |> simulate.string_body(body)
   |> request.set_header("content-type", "application/json")
   |> api.handle_at(context, 1002)
@@ -311,8 +302,21 @@ pub fn local_capture_api_arms_pages_and_saves_a_real_session_test() {
     <> "\"capture_window_ms\":1000,\"max_events\":1000,"
     <> "\"max_bytes\":1000000,\"max_agent_mailbox\":100,"
     <> "\"max_roots\":3,\"preset\":\"magic\"}"
-  simulate.request(http.Post, "/api/v1/sessions/current/arm")
+  simulate.request(http.Post, "/api/v2/sessions/current/arm")
   |> simulate.string_body(invalid_preset)
+  |> request.set_header("content-type", "application/json")
+  |> request.set_header("cookie", "beamtrace_session=" <> session.id)
+  |> api.handle_at(context, 1002)
+  |> fn(response) { response.status }
+  |> should.equal(400)
+
+  let invalid_drain =
+    "{\"trigger\":\"shop:checkout/1\",\"where\":null,"
+    <> "\"capture_window_ms\":1000,\"drain_timeout_ms\":999,\"max_events\":1000,"
+    <> "\"max_bytes\":1000000,\"max_agent_mailbox\":100,"
+    <> "\"max_roots\":3,\"preset\":\"generic\"}"
+  simulate.request(http.Post, "/api/v2/sessions/current/arm")
+  |> simulate.string_body(invalid_drain)
   |> request.set_header("content-type", "application/json")
   |> request.set_header("cookie", "beamtrace_session=" <> session.id)
   |> api.handle_at(context, 1002)
@@ -324,7 +328,7 @@ pub fn local_capture_api_arms_pages_and_saves_a_real_session_test() {
     <> "\"capture_window_ms\":1000,\"max_events\":1000,"
     <> "\"max_bytes\":1000000,\"max_agent_mailbox\":100,"
     <> "\"max_roots\":0,\"preset\":\"generic\"}"
-  simulate.request(http.Post, "/api/v1/sessions/current/arm")
+  simulate.request(http.Post, "/api/v2/sessions/current/arm")
   |> simulate.string_body(invalid_roots)
   |> request.set_header("content-type", "application/json")
   |> request.set_header("cookie", "beamtrace_session=" <> session.id)
@@ -333,41 +337,47 @@ pub fn local_capture_api_arms_pages_and_saves_a_real_session_test() {
   |> should.equal(400)
 
   let armed =
-    simulate.request(http.Post, "/api/v1/sessions/current/arm")
+    simulate.request(http.Post, "/api/v2/sessions/current/arm")
     |> simulate.string_body(body)
     |> request.set_header("content-type", "application/json")
     |> request.set_header("cookie", "beamtrace_session=" <> session.id)
     |> api.handle_at(context, 1002)
   armed.status |> should.equal(202)
-  simulate.read_body(armed)
+  let armed_body = simulate.read_body(armed)
+  armed_body
   |> string.contains("\"status\":\"armed\"")
   |> should.be_true()
   capture_session.await(capture_store, 1000) |> should.equal(Ok(captured))
 
   let status =
-    simulate.request(http.Get, "/api/v1/sessions/current")
+    simulate.request(http.Get, "/api/v2/sessions/current")
     |> request.set_header("cookie", "beamtrace_session=" <> session.id)
     |> api.handle_at(context, 1003)
   status.status |> should.equal(200)
-  simulate.read_body(status)
-  |> string.contains("\"status\":\"ready\"")
+  let status_body = simulate.read_body(status)
+  status_body
+  |> string.contains("\"status\":\"sealed\"")
+  |> should.be_true()
+  status_body
+  |> string.contains("\"delivery_verified\":true")
   |> should.be_true()
 
   let events =
     simulate.request(
       http.Get,
-      "/api/v1/sessions/current/events?start=0&limit=10",
+      "/api/v2/sessions/current/events?start=0&limit=10",
     )
     |> request.set_header("cookie", "beamtrace_session=" <> session.id)
     |> api.handle_at(context, 1003)
   events.status |> should.equal(200)
-  simulate.read_body(events)
+  let events_body = simulate.read_body(events)
+  events_body
   |> string.contains("\"id\":\"captured-root\"")
   |> should.be_true()
 
   let path = "build/beamtrace-api-session-save.beamtrace"
   let saved =
-    simulate.request(http.Post, "/api/v1/sessions/current/save")
+    simulate.request(http.Post, "/api/v2/sessions/current/save")
     |> simulate.string_body("{\"path\":\"" <> path <> "\"}")
     |> request.set_header("content-type", "application/json")
     |> request.set_header("cookie", "beamtrace_session=" <> session.id)
@@ -500,7 +510,7 @@ pub fn live_api_is_authenticated_shared_bounded_and_explains_inferences_test() {
   |> string.contains("\"kind\":\"mailbox_growth\"")
   |> should.be_true()
   rotated
-  |> string.contains("\"status\":\"inferred\"")
+  |> string.contains("\"evidence\":{\"kind\":\"inferred\"")
   |> should.be_true()
   rotated |> string.contains("\"supervision\"") |> should.be_true()
   rotated
@@ -514,16 +524,7 @@ pub fn live_api_is_authenticated_shared_bounded_and_explains_inferences_test() {
 pub fn compare_api_loads_multiple_local_traces_and_returns_visual_alignment_data_test() {
   let left = "build/api-compare-left.beamtrace"
   let right = "build/api-compare-right.beamtrace"
-  let manifest =
-    codec.Manifest(
-      1,
-      "0.1.0",
-      "api-compare",
-      ["app@host"],
-      types.Complete,
-      types.Metadata,
-      [],
-    )
+  let manifest = v2_fixture.manifest("api-compare", ["app@host"])
   storage.save(left, manifest, [session_event("left-root")])
   |> should.equal(Ok(Nil))
   storage.save(right, manifest, [
@@ -531,7 +532,7 @@ pub fn compare_api_loads_multiple_local_traces_and_returns_visual_alignment_data
     types.TraceEvent(
       ..session_event("right-extra"),
       kind: types.Stop("extra branch"),
-      local_timestamp_ns: 20,
+      local_instant: v2_fixture.instant(20),
     ),
   ])
   |> should.equal(Ok(Nil))
@@ -606,7 +607,7 @@ fn session_event(id: String) -> types.TraceEvent {
     root_id: id,
     node: "app@host",
     process: types.ProcessIdentity(physical, None, []),
-    local_timestamp_ns: 1,
+    local_instant: v2_fixture.instant(1),
     kind: types.Root(types.Mfa("shop", "checkout", 1), []),
     evidence: types.Exact,
   )
@@ -684,13 +685,13 @@ pub fn team_trace_library_lists_locks_reads_holds_and_audits_test() {
   let context =
     team_trace_context(sessions, annotation_store, audit_log, metadata, backend)
 
-  simulate.request(http.Get, "/api/v1/traces")
+  simulate.request(http.Get, "/api/v2/traces")
   |> api.handle_at(context, 3000)
   |> fn(response) { response.status }
   |> should.equal(401)
 
   let listed =
-    trace_request(http.Get, "/api/v1/traces?limit=1", viewer)
+    trace_request(http.Get, "/api/v2/traces?limit=1", viewer)
     |> api.handle_at(context, 3000)
   listed.status |> should.equal(200)
   let list_body = simulate.read_body(listed)
@@ -698,19 +699,19 @@ pub fn team_trace_library_lists_locks_reads_holds_and_audits_test() {
   list_body |> string.contains("\"locked\":true") |> should.be_true()
   list_body |> string.contains("\"next_cursor\":\"") |> should.be_true()
   let final_page =
-    trace_request(http.Get, "/api/v1/traces?limit=1&cursor=MQ", viewer)
+    trace_request(http.Get, "/api/v2/traces?limit=1&cursor=MQ", viewer)
     |> api.handle_at(context, 3000)
   final_page.status |> should.equal(200)
   simulate.read_body(final_page)
   |> string.contains("\"next_cursor\":null")
   |> should.be_true()
-  trace_request(http.Get, "/api/v1/traces?cursor=eA", viewer)
+  trace_request(http.Get, "/api/v2/traces?cursor=eA", viewer)
   |> api.handle_at(context, 3000)
   |> fn(response) { response.status }
   |> should.equal(400)
 
   let detail =
-    trace_request(http.Get, "/api/v1/traces/" <> raw_id, viewer)
+    trace_request(http.Get, "/api/v2/traces/" <> raw_id, viewer)
     |> api.handle_at(context, 3000)
   detail.status |> should.equal(200)
   simulate.read_body(detail)
@@ -720,7 +721,7 @@ pub fn team_trace_library_lists_locks_reads_holds_and_audits_test() {
   let metadata_events =
     trace_request(
       http.Get,
-      "/api/v1/traces/" <> metadata_id <> "/events",
+      "/api/v2/traces/" <> metadata_id <> "/events",
       viewer,
     )
     |> api.handle_at(context, 3001)
@@ -732,7 +733,7 @@ pub fn team_trace_library_lists_locks_reads_holds_and_audits_test() {
   [viewer, investigator, raw_only]
   |> list.each(fn(session) {
     let denied =
-      trace_request(http.Get, "/api/v1/traces/" <> raw_id <> "/events", session)
+      trace_request(http.Get, "/api/v2/traces/" <> raw_id <> "/events", session)
       |> api.handle_at(context, 3002)
     denied.status |> should.equal(403)
     simulate.read_body(denied)
@@ -744,7 +745,7 @@ pub fn team_trace_library_lists_locks_reads_holds_and_audits_test() {
     let allowed =
       trace_request(
         http.Get,
-        "/api/v1/traces/" <> raw_id <> "/events?limit=200",
+        "/api/v2/traces/" <> raw_id <> "/events?limit=200",
         session,
       )
       |> api.handle_at(context, 3003)
@@ -860,7 +861,7 @@ pub fn raw_trace_acl_runs_before_filesystem_or_s3_fetch_test() {
         metadata,
         backend,
       )
-    trace_request(http.Get, "/api/v1/traces/" <> trace_id <> "/events", viewer)
+    trace_request(http.Get, "/api/v2/traces/" <> trace_id <> "/events", viewer)
     |> api.handle_at(context, 5002)
     |> fn(response) { response.status }
     |> should.equal(403)
@@ -921,13 +922,13 @@ pub fn migrated_unknown_trace_is_incomplete_restart_safe_and_raw_locked_test() {
   sqlight.close(connection) |> should.equal(Ok(Nil))
 
   // Opening performs the v1 -> session-scoped migration. Reopen once more to
-  // prove the conservative privacy/completeness state is durable.
+  // prove the conservative privacy/delivery state is durable.
   let assert Ok(migrated) = team_store.open(database)
   team_store.close(migrated) |> should.equal(Ok(Nil))
   let assert Ok(metadata) = team_store.open(database)
   let assert Ok(Some(trace)) = team_store.trace_session(metadata, trace_id)
   trace.privacy |> should.equal("unknown")
-  trace.completeness |> should.equal("incomplete")
+  trace.delivery_status |> should.equal("failed")
   trace.active |> should.be_false()
 
   let sessions = team_auth.new()
@@ -956,7 +957,7 @@ pub fn migrated_unknown_trace_is_incomplete_restart_safe_and_raw_locked_test() {
     )
 
   let detail =
-    trace_request(http.Get, "/api/v1/traces/" <> trace_id, viewer)
+    trace_request(http.Get, "/api/v2/traces/" <> trace_id, viewer)
     |> api.handle_at(filesystem_context, 2000)
   detail.status |> should.equal(200)
   simulate.read_body(detail)
@@ -968,7 +969,7 @@ pub fn migrated_unknown_trace_is_incomplete_restart_safe_and_raw_locked_test() {
     let denied =
       trace_request(
         http.Get,
-        "/api/v1/traces/" <> trace_id <> "/events",
+        "/api/v2/traces/" <> trace_id <> "/events",
         session,
       )
       |> api.handle_at(filesystem_context, 2001)
@@ -982,7 +983,7 @@ pub fn migrated_unknown_trace_is_incomplete_restart_safe_and_raw_locked_test() {
     let allowed =
       trace_request(
         http.Get,
-        "/api/v1/traces/" <> trace_id <> "/events",
+        "/api/v2/traces/" <> trace_id <> "/events",
         session,
       )
       |> api.handle_at(filesystem_context, 2002)
@@ -1001,7 +1002,7 @@ pub fn migrated_unknown_trace_is_incomplete_restart_safe_and_raw_locked_test() {
     )
   let s3_context =
     team_trace_context(sessions, annotation_store, audit_log, metadata, s3)
-  trace_request(http.Get, "/api/v1/traces/" <> trace_id <> "/events", viewer)
+  trace_request(http.Get, "/api/v2/traces/" <> trace_id <> "/events", viewer)
   |> api.handle_at(s3_context, 2003)
   |> fn(response) { response.status }
   |> should.equal(403)
@@ -1564,7 +1565,7 @@ fn seed_trace(
       store,
       trace_id,
       relay_id,
-      "complete",
+      "delivered",
       timestamp_ms + 3,
       timestamp_ms + 4,
     )
@@ -1592,7 +1593,7 @@ fn trace_start(
     received_at_ms: timestamp_ms + 1,
     ended_at_ms: 0,
     last_received_at_ms: timestamp_ms + 1,
-    completeness: "active",
+    delivery_status: "active",
     event_count: 0,
     legal_hold: False,
     active: True,
@@ -1641,7 +1642,7 @@ fn trace_hold_request(
   session: team_auth.Session,
   csrf_token: String,
 ) {
-  trace_request(method, "/api/v1/traces/" <> trace_id <> "/hold", session)
+  trace_request(method, "/api/v2/traces/" <> trace_id <> "/hold", session)
   |> request.set_header("origin", "https://hub.example")
   |> request.set_header("x-beamtrace-csrf", csrf_token)
   |> request.set_header(

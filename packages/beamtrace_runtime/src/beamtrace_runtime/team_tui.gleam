@@ -31,7 +31,7 @@ fn page_decoder() -> decode.Decoder(List(model.TeamTrace)) {
 
 fn trace_decoder() -> decode.Decoder(model.TeamTrace) {
   use id <- decode.field("id", decode.string)
-  use status <- decode.field("status", decode.string)
+  use delivery_status <- decode.field("delivery_status", decode.string)
   use node <- decode.field("node", decode.string)
   use mfa <- decode.field("mfa", mfa_decoder())
   use privacy <- decode.field("privacy", decode.string)
@@ -40,7 +40,7 @@ fn trace_decoder() -> decode.Decoder(model.TeamTrace) {
   use locked <- decode.field("locked", decode.bool)
   decode.success(model.TeamTrace(
     id,
-    status,
+    delivery_status,
     node,
     mfa.0 <> ":" <> mfa.1 <> "/" <> int.to_string(mfa.2),
     privacy,

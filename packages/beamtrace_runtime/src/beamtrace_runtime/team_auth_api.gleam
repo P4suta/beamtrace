@@ -453,7 +453,8 @@ fn decode_enrollment_payload(
     Error(_) -> Error("invalid_json")
     Ok(payload) ->
       case
-        payload.protocol_version == relay_channel.protocol_version,
+        payload.protocol_version == relay_channel.protocol_version
+        || payload.protocol_version == 2,
         payload.algorithm == "Ed25519",
         bit_array.base64_url_decode(payload.public_key)
       {

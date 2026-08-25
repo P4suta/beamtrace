@@ -30,8 +30,35 @@ fn event(id: String, pid: String, at: Int) -> types.TraceEvent {
     root_id: "root",
     node: "node@host",
     process: process,
-    local_timestamp_ns: at,
-    kind: types.Send(process.physical, types.Constructor("$gen_call", []), 1),
+    local_instant: types.LocalInstant(at, at),
+    kind: types.Send(
+      process.physical,
+      types.Constructor("$gen_call", []),
+      types.SequenceSerial(0, 1),
+    ),
+    evidence: types.Exact,
+  )
+}
+
+fn named_event(
+  id: String,
+  pid: String,
+  actor_name: String,
+  tag: String,
+  at: Int,
+) -> types.TraceEvent {
+  let process = actor("node@host", pid, actor_name)
+  types.TraceEvent(
+    id: id,
+    root_id: "root",
+    node: "node@host",
+    process: process,
+    local_instant: types.LocalInstant(at, at),
+    kind: types.Send(
+      process.physical,
+      types.Tag(tag),
+      types.SequenceSerial(at, at + 1),
+    ),
     evidence: types.Exact,
   )
 }
@@ -55,7 +82,11 @@ pub fn compare_ignores_pid_and_node_local_time_test() {
 
   report.items
   |> should.equal([
-    diff.Matched(left_id: "left", right_id: "right", latency_delta_ns: 0),
+    diff.Matched(
+      left_id: "left",
+      right_id: "right",
+      latency_delta: types.ExactTime(0),
+    ),
   ])
   report.added |> should.equal(0)
   report.removed |> should.equal(0)
@@ -70,7 +101,63 @@ pub fn compare_reports_relative_causal_latency_not_run_start_offset_test() {
 
   report.items
   |> should.equal([
-    diff.Matched("left-1", "right-1", 0),
-    diff.Matched("left-2", "right-2", 50),
+    diff.Matched("left-1", "right-1", types.ExactTime(0)),
+    diff.Matched("left-2", "right-2", types.ExactTime(50)),
   ])
+}
+
+pub fn bounded_myers_aligns_unique_logical_signatures_without_guessing_test() {
+  let report =
+    diff.compare(
+      [
+        named_event("left-a", "<0.1.0>", "worker", "a", 1),
+        named_event("left-c", "<0.1.0>", "worker", "c", 3),
+      ],
+      [
+        named_event("right-a", "<0.2.0>", "worker", "a", 10),
+        named_event("right-b", "<0.2.0>", "worker", "b", 20),
+        named_event("right-c", "<0.2.0>", "worker", "c", 30),
+      ],
+    )
+
+  report.added |> should.equal(1)
+  report.removed |> should.equal(0)
+  report.ambiguity_count |> should.equal(0)
+  report.first_divergence |> should.not_equal(None)
+}
+
+pub fn unrelated_unique_signatures_are_added_and_removed_not_matched_test() {
+  let report =
+    diff.compare([named_event("left", "<0.1.0>", "worker", "left", 1)], [
+      named_event("right", "<0.2.0>", "worker", "right", 1),
+    ])
+
+  report.added |> should.equal(1)
+  report.removed |> should.equal(1)
+  report.changed |> should.equal(0)
+  report.ambiguity_count |> should.equal(0)
+}
+
+pub fn repeated_unanchored_signatures_are_explicitly_ambiguous_test() {
+  let report =
+    diff.compare(
+      [
+        named_event("left-1", "<0.1.0>", "worker", "repeat", 1),
+        named_event("left-2", "<0.2.0>", "worker", "repeat", 2),
+      ],
+      [
+        named_event("right-1", "<0.3.0>", "worker", "repeat", 10),
+        named_event("right-2", "<0.4.0>", "worker", "repeat", 20),
+      ],
+    )
+
+  report.items
+  |> should.equal([
+    diff.AmbiguousRegion(
+      ["left-1", "left-2"],
+      ["right-1", "right-2"],
+      "repeated logical signatures do not have a unique alignment",
+    ),
+  ])
+  report.ambiguity_count |> should.equal(1)
 }

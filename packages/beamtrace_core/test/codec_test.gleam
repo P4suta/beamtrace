@@ -22,11 +22,11 @@ pub fn canonical_event_round_trip_test() {
       root_id: "root-1",
       node: "app@host",
       process: process,
-      local_timestamp_ns: 123,
+      local_instant: types.LocalInstant(123, 4),
       kind: types.Send(
         types.ProcessRef("app@host", "<0.43.0>"),
         types.Constructor("$gen_call", [types.Hidden]),
-        7,
+        types.SequenceSerial(6, 7),
       ),
       evidence: types.Exact,
     )
@@ -37,19 +37,23 @@ pub fn canonical_event_round_trip_test() {
   |> should.equal(Ok(event))
 }
 
-pub fn manifest_marks_truncated_capture_test() {
+pub fn manifest_records_budget_outcome_test() {
   let manifest =
     codec.Manifest(
-      schema_version: 1,
-      tool_version: "0.1.0",
+      schema_version: 2,
+      tool_version: "0.3.0",
       capture_id: "capture-1",
       nodes: ["app@host"],
-      completeness: types.Truncated("byte budget"),
+      outcome: types.CaptureOutcome(
+        end: types.BudgetReached("bytes"),
+        issues: [types.DroppedEvents("app@host", 2)],
+        receipts: [types.NodeReceipt("app@host", 3, 20, 4096)],
+      ),
       privacy: types.Metadata,
-      checksums: [],
     )
 
   let encoded = codec.encode_manifest(manifest)
-  encoded |> string.contains("\"kind\":\"truncated\"") |> should.be_true()
+  encoded |> string.contains("\"kind\":\"budget_reached\"") |> should.be_true()
+  encoded |> string.contains("\"kind\":\"dropped_events\"") |> should.be_true()
   codec.decode_manifest(encoded) |> should.equal(Ok(manifest))
 }

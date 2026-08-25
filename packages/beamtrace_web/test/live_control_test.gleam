@@ -16,12 +16,14 @@ pub fn live_response_decodes_samples_findings_topology_and_evidence_test() {
     <> "\"current_function\":\"gen_server:loop/7\",\"links\":[\"<0.7.0>\"],"
     <> "\"ancestors\":[\"orders_sup\"]}],\"findings\":[{\"pid\":\"<0.42.0>\","
     <> "\"label\":\"orders worker\",\"kind\":\"mailbox_growth\","
-    <> "\"summary\":\"mailbox is growing\",\"evidence\":{\"status\":\"inferred\","
-    <> "\"reason\":\"EWMA\",\"confidence\":0.8}}],\"topology\":{"
+    <> "\"summary\":\"mailbox is growing\",\"evidence\":{\"kind\":\"inferred\","
+    <> "\"inference\":{\"method\":\"ewma_hysteresis\",\"reason\":\"EWMA\","
+    <> "\"inputs\":[]}}}],\"topology\":{"
     <> "\"supervision\":[{\"from\":\"orders_sup\",\"to\":\"<0.42.0>\","
-    <> "\"evidence\":{\"status\":\"inferred\",\"reason\":\"proc_lib\","
-    <> "\"confidence\":0.85}}],\"spawn\":[],\"links\":[{\"from\":\"<0.7.0>\","
-    <> "\"to\":\"<0.42.0>\",\"evidence\":{\"status\":\"exact\"}}]}}"
+    <> "\"evidence\":{\"kind\":\"inferred\",\"inference\":{"
+    <> "\"method\":\"proc_lib_ancestor\",\"reason\":\"proc_lib\","
+    <> "\"inputs\":[]}}}],\"spawn\":[],\"links\":[{\"from\":\"<0.7.0>\","
+    <> "\"to\":\"<0.42.0>\",\"evidence\":{\"kind\":\"exact\"}}]}}"
   let assert Ok(snapshot) = live_control.decode_snapshot(source)
   snapshot.generation |> should.equal(2)
   snapshot.rows |> list.length |> should.equal(1)
@@ -33,7 +35,7 @@ pub fn live_response_decodes_samples_findings_topology_and_evidence_test() {
       "orders worker",
       "mailbox_growth",
       "mailbox is growing",
-      workspace.Inferred("EWMA", 0.8),
+      workspace.Inferred("ewma_hysteresis", "EWMA"),
     )),
   )
   snapshot.links

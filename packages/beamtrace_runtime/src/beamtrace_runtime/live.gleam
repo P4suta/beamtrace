@@ -105,7 +105,13 @@ pub fn topology_graphs(samples: List(ProcessSample)) -> topology.Graphs {
   |> list.map(fn(sample) {
     let supervisor = case sample.ancestors {
       [parent, ..] ->
-        Some(#(parent, types.inferred("proc_lib ancestor metadata", 0.85)))
+        Some(#(
+          parent,
+          types.inferred("proc_lib_ancestor_v1", "proc_lib ancestor metadata", [
+            types.ObservedValue("process", sample.pid),
+            types.ObservedValue("ancestor", parent),
+          ]),
+        ))
       [] -> None
     }
     topology.ProcessSnapshot(
