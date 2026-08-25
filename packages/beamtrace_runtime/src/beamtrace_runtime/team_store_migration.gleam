@@ -195,7 +195,7 @@ fn ensure_relay_session_id(
            privacy, blob_key, event_count
          )
          SELECT 'legacy-' || relay_id, 'legacy', 'legacy',
-                MIN(received_at_ms), 'incomplete', 'unknown',
+                MIN(received_at_ms), 'failed', 'unknown',
                 'sessions/legacy-' || relay_id || '/manifest.json',
                 SUM(event_count)
          FROM relay_frames GROUP BY relay_id;
@@ -277,7 +277,7 @@ fn migrate_legacy_relay_sessions(
        privacy, blob_key, event_count
      )
      SELECT session_id, 'legacy', 'legacy', MIN(received_at_ms),
-            'incomplete', 'unknown',
+            'failed', 'unknown',
             'sessions/' || session_id || '/manifest.json', SUM(event_count)
      FROM relay_frames
      WHERE session_id LIKE 'legacy-%'

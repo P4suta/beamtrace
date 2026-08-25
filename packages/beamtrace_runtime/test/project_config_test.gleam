@@ -71,6 +71,7 @@ pub fn capture_profile_supplies_node_and_positional_node_remains_highest_precede
       "capture",
       "--profile",
       "dev",
+      "--acknowledge-seq-trace-reset",
     ])
   let assert Ok(cli.Capture(node: profile_node, ..)) =
     cli.parse(profile_arguments)
@@ -84,6 +85,7 @@ pub fn capture_profile_supplies_node_and_positional_node_remains_highest_precede
       "dev",
       "--out",
       "explicit.beamtrace",
+      "--acknowledge-seq-trace-reset",
     ])
   let assert Ok(cli.Capture(node: explicit_node, out: explicit_out, ..)) =
     cli.parse(explicit_arguments)

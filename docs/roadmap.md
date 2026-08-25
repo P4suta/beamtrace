@@ -5,20 +5,20 @@
 
 - dependency-free injected agent, isolated trace session, meta trigger, exact cleanup
 - shortname/longname single- and multi-node capture with partial-order events
-- metadata shaping, budgets, credit flow, truncation and gap semantics
-- canonical event codec, AQL parsing/evaluation, causal DAG, identity, diagnostics, anomaly, diff
+- metadata shaping, budgets, credit flow, seal/drain barriers, batch receipts, and explicit integrity issues
+- schema-v2 canonical event/outcome/time/evidence codecs, AQL, indexed causal DAG, identity, diagnostics, anomaly, and bounded diff
 - CLI capture/open/compare/export/doctor/record, zero-setup demo, project profiles, and HTTPS relay enrollment
-- safe segmented `.beamtrace`, paged reader/API, HTML/JSONL/Mermaid/OTLP exports
+- safe segmented `.beamtrace` v2 with paired graph segments, calibrated clocks, strict checksums, v1 migration, paged API, and interval-aware HTML/JSONL/Mermaid/OTLP exports
 - bounded Live process sampling without mailbox contents
 - Web workspace, Canvas window, accessible event table and inspector
 - TUI attach/arm/search/save interaction model
 - OIDC discovery/callback verification, CSRF, RBAC, and team HTTP middleware
-- production session-scoped relay v2, SQLite WAL metadata/segment indexes, filesystem blobs, event-aware quotas, legal hold, startup/hourly retention, and audit-chain contracts
+- production relay v3 with declared event schema and separate delivery status, relay-v2 migration input, SQLite WAL metadata/segment indexes, filesystem blobs, event-aware quotas, legal hold, startup/hourly retention, and audit-chain contracts
 - persistent signed outbound relay WebSocket, one-time Ed25519 enrollment, credit-based batches, and canonical metadata privacy validation
 - relay producer capture from attached target nodes, including bounded audited raw grants
 - shared live-session fan-out and full multi-trace visual Compare workspace
 - HTTPS S3-compatible SigV4 blobs with conditional writes, verified reads, retention, and real MinIO TLS acceptance
-- indexed search over unloaded segments and PID/clock-independent multi-run p50/p95/occurrence statistics
+- indexed search, causal-neighborhood compare with explicit ambiguity/frontier paths, and interval p50/p95 with valid/missing sample counts
 - real Chromium acceptance over one million logical events, keyboard/axe checks, PTY harness, and package smoke tests
 - self-contained native archive packaging with bundled ERTS and SQLite NIF, SPDX SBOM/checksums, OCI image, Hex tarball, Homebrew/Scoop metadata, and GitHub release provenance
 - official MCP 2026-07-28 lifecycle/tool schemas tested against the exact 2.0.0 client

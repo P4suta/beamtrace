@@ -7,7 +7,7 @@ pub fn team_trace_pages_decode_locked_policy_fields_and_opaque_cursor_test() {
   let source =
     "{\"traces\":[{\"id\":\"trace-raw\",\"status\":\"incomplete\","
     <> "\"node\":\"app@host\",\"mfa\":{\"module\":\"shop\",\"function\":\"checkout\",\"arity\":1},"
-    <> "\"privacy\":\"raw\",\"completeness\":\"incomplete\",\"event_count\":12,"
+    <> "\"privacy\":\"raw\",\"delivery_status\":\"partial\",\"event_count\":12,"
     <> "\"received_at_ms\":1000,\"legal_hold\":true,\"locked\":true}],"
     <> "\"next_cursor\":\"NTA\"}"
   let assert Ok(page) = team_control.decode_traces(source)
@@ -15,6 +15,7 @@ pub fn team_trace_pages_decode_locked_policy_fields_and_opaque_cursor_test() {
   let assert [trace] = page.traces
   trace.id |> should.equal("trace-raw")
   trace.privacy |> should.equal("raw")
+  trace.delivery_status |> should.equal("partial")
   trace.locked |> should.be_true()
   trace.legal_hold |> should.be_true()
 }

@@ -4,7 +4,7 @@
 [![TDD](https://github.com/P4suta/beamtrace/actions/workflows/ci.yml/badge.svg)](https://github.com/P4suta/beamtrace/actions/workflows/ci.yml)
 [![Security](https://github.com/P4suta/beamtrace/actions/workflows/security.yml/badge.svg)](https://github.com/P4suta/beamtrace/actions/workflows/security.yml)
 
-BeamTrace is an open-source causal workbench for Gleam, Elixir, and Erlang systems on the BEAM. It attaches to an existing OTP 27–29 node without application changes, arms a selected MFA, and records the bounded message chain caused by one operation.
+BeamTrace is an open-source causal workbench for Gleam, Elixir, and Erlang systems on the BEAM. It attaches to an OTP 27–29 node without application changes, arms a selected MFA, and produces a bounded, delivery-verified causal observation of one operation.
 
 The command is `beamtrace`, and its portable trace archive uses the `.beamtrace` extension.
 
@@ -12,10 +12,10 @@ The project is alpha software. Exact single-node and distributed capture, metada
 
 ## Why BeamTrace
 
-- **Capture** — arm `Module:function/arity`, perform one operation, and keep the complete matching root chain rather than an unrelated system-wide message stream.
-- **Live** — inspect bounded process samples and diagnose mailbox, reductions, memory, restart, fan-in, and dangling-call signals without reading every mailbox.
+- **Capture** — arm `Module:function/arity`, perform one operation, then seal agents, pass delivery barriers, drain queues, and retain receipts and integrity issues with the observed causal graph.
 - **Compare** — align traces by logical process and causal shape instead of PID or wall-clock identity.
-- **Honest evidence** — every edge is `Exact` or `Inferred(reason, confidence)`. Missing nodes, dropped events, ports, ETS, and external I/O remain explicit boundaries.
+- **Live** — inspect bounded process samples and diagnose mailbox, reductions, memory, restart, fan-in, and dangling-call signals without reading every mailbox.
+- **Honest evidence** — every edge is `Exact` or `Inferred(method, reason, inputs)`. Missing nodes, dropped events, ports, ETS, external I/O, and ambiguous matches remain explicit issues or boundaries; BeamTrace displays no uncalibrated probabilities.
 
 BeamTrace does not expose an RPC shell, process killing, state mutation, or an ETS browser.
 
@@ -78,17 +78,20 @@ See [team mode](docs/team-mode.md) for OIDC, relay, raw-capture, and S3 configur
 - Raw and conservatively classified `unknown` content can be read only by an Admin or a subject holding both Investigator and Raw Capture roles. Authorization happens before any memory, filesystem, or S3 blob fetch, and allowed and denied reads are audited.
 - The S3-compatible adapter uses HTTPS path-style requests and SigV4 credentials from process environment only. It intentionally does not accept credentials in BeamTrace configuration or implement a general cloud credential-provider chain.
 - Causal order crosses nodes through sequence serials. Clock offsets retain uncertainty and are never presented as a perfectly synchronized global clock.
+- Quiet time starts sealing; it is not a completeness claim. A capture outcome separately records why observation ended, all integrity issues, and each node receipt.
 - Package-manager registry publication and the first signed release remain release operations, not runtime implementation gaps.
 
 ## CLI
 
 ```text
-beamtrace attach <node> [--web|--tui] [--port PORT]
-beamtrace capture [<node>] [--profile NAME] --trigger Module:function/arity [--where AQL] --out file.beamtrace
+beamtrace attach <node> [--web|--tui] [--port PORT] --acknowledge-seq-trace-reset
+beamtrace capture [<node>] [--profile NAME] --trigger Module:function/arity [--where AQL] --out file.beamtrace --acknowledge-seq-trace-reset
 beamtrace record [--profile NAME] [--node NODE] [options] -- <gleam|mix|rebar3|erl command>
 beamtrace open <file.beamtrace> [--web|--tui] [--port PORT]
 beamtrace compare <left.beamtrace> <right.beamtrace>
 beamtrace export <file.beamtrace> --format html|jsonl|mermaid|otlp
+beamtrace validate <file.beamtrace> [--json]
+beamtrace migrate <v1.beamtrace> --output <v2.beamtrace>
 beamtrace serve [--port PORT]
 beamtrace demo [--web|--tui|--no-ui] [--out PATH] [--port PORT]
 beamtrace relay <https-hub-url> --enroll <one-time-token> [--node NODE --trigger MFA]
@@ -100,7 +103,7 @@ beamtrace doctor [--json]
 beamtrace mcp
 ```
 
-Exit codes are `0` success, `1` comparison/diagnostic policy failure, `2` usage/connect/configuration error, `3` incomplete capture, and `4` permission or safety refusal.
+Exit codes are `0` success, `1` comparison/diagnostic policy failure, `2` usage/connect/configuration error, `3` capture integrity issue, and `4` permission or safety refusal.
 
 `record` resolves the requested executable once and launches it without a shell, preserving every argument boundary and mise/asdf shim path. Direct Erlang gates its VM immediately. `gleam run`, `mix run`, and `rebar3 shell` first perform a bounded compile only when the trigger BEAM is absent, then gate the final project VM; Gleam recording requires the Erlang target and adds it when omitted. All paths use a private one-time OS temp directory and remove it after success, failure, timeout, or termination.
 
@@ -112,14 +115,15 @@ Team TUI loading uses the same bounded `/api/v1/traces` response as the Web sele
 - Exact capture refuses to replace an occupied system tracer.
 - Metadata mode exports term tags, shapes, sizes, and salted fingerprints—not scalar or binary values.
 - Raw grants are token-hashed at rest, relay-bound, atomically budgeted, and removed from canonical stored payloads.
-- Exact capture truncates on backpressure; Live drops old samples only with an explicit `Gap`.
+- Exact capture stops at a configured budget and records that observation end; Live drops old samples only with an explicit `Gap`.
 - Trace archives reject unsafe paths, duplicate entries, suspicious compression ratios, oversized entries, and checksum mismatches before import.
 - Local Web mode binds loopback and exchanges a one-time URL for an HttpOnly, SameSite cookie.
+- `/api/v2` returns structured outcomes, evidence inputs, interval time, and real graph edges. `/api/v1` is a one-release deprecated projection and refuses events whose uncertainty or inference cannot be represented honestly.
 - `/api/v1/health` reports liveness and `/api/v1/ready` is installed only after initialization and bind succeed. URLs, bootstrap tokens, and enrollment codes are never printed before a successful bind.
 - Human and JSON logs omit distribution cookies, session tokens, raw payloads, OIDC material, and S3 credentials.
 - There is no telemetry, CDN, external font, or external request in exported HTML.
 
-Read [the threat model](docs/threat-model.md) before deploying a relay or enabling raw capture.
+Read the [v0.3 migration guide](docs/migration-v0.3.md), [format specification](docs/trace-format.md), [conformance procedure](docs/conformance.md), and [threat model](docs/threat-model.md) before deploying a relay or enabling raw capture.
 
 ## Development
 

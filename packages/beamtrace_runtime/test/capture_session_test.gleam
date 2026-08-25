@@ -6,10 +6,10 @@ import beamtrace_runtime/live
 import gleam/erlang/process
 import gleam/option.{None}
 import gleeunit/should
+import v2_fixture
 
 pub fn arm_runs_capture_off_the_caller_and_exposes_the_completed_result_test() {
-  let expected =
-    capture.CaptureResult(events: [event("root")], completeness: types.Complete)
+  let expected = v2_fixture.capture_result([event("root")])
   let session =
     capture_session.new_with_backend(fn(spec) {
       spec.trigger |> should.equal(types.Mfa("shop", "checkout", 1))
@@ -22,7 +22,10 @@ pub fn arm_runs_capture_off_the_caller_and_exposes_the_completed_result_test() {
 
   capture_session.await(session, 1000) |> should.equal(Ok(expected))
   capture_session.status(session)
-  |> should.equal(capture_session.Ready(1, "complete"))
+  |> should.equal(capture_session.Ready(
+    1,
+    "sealed_after_quiet_period:250:delivery_verified",
+  ))
   capture_session.close(session)
 }
 
@@ -30,7 +33,7 @@ pub fn a_second_arm_is_rejected_while_capture_is_running_test() {
   let session =
     capture_session.new_with_backend(fn(_spec) {
       process.sleep(100)
-      Ok(capture.CaptureResult([], types.Complete))
+      Ok(v2_fixture.capture_result([]))
     })
 
   capture_session.arm(session, arm_spec()) |> should.equal(Ok(Nil))
@@ -60,7 +63,7 @@ pub fn session_scopes_mfa_search_to_its_owned_nodes_test() {
   let session =
     capture_session.new_with_backends_for_nodes(
       ["app@host"],
-      fn(_) { Ok(capture.CaptureResult([], types.Complete)) },
+      fn(_) { Ok(v2_fixture.capture_result([])) },
       fn(node, query, limit) {
         node |> should.equal("app@host")
         query |> should.equal("checkout")
@@ -88,7 +91,7 @@ pub fn live_samples_are_shared_within_ttl_and_rotate_bounded_shards_test() {
   let session =
     capture_session.new_with_live_backend_for_nodes(
       ["app@host"],
-      fn(_) { Ok(capture.CaptureResult([], types.Complete)) },
+      fn(_) { Ok(v2_fixture.capture_result([])) },
       fn(_node, offset, limit) {
         limit |> should.equal(20)
         case offset {
@@ -136,6 +139,7 @@ fn arm_spec() -> capture_session.ArmSpec {
     trigger: types.Mfa("shop", "checkout", 1),
     where_aql: None,
     capture_window_ms: 1000,
+    drain_timeout_ms: 10_000,
     budget: capture.default_budget(),
     max_roots: 1,
     preset: types.Generic,
@@ -149,7 +153,7 @@ fn event(id: String) -> types.TraceEvent {
     root_id: "root",
     node: "app@host",
     process: types.ProcessIdentity(process, None, []),
-    local_timestamp_ns: 1,
+    local_instant: v2_fixture.instant(1),
     kind: types.Root(types.Mfa("shop", "checkout", 1), []),
     evidence: types.Exact,
   )

@@ -81,7 +81,7 @@ validated_url(BaseBinary) ->
         Fragment = maps:get(fragment, Parsed, undefined),
         case valid_origin(Scheme, Host, Path, UserInfo, Query, Fragment) of
             true ->
-                Url = Base0 ++ "/api/v1/traces?limit=100",
+                Url = Base0 ++ "/api/v2/traces?limit=100",
                 {ok, {Url, Host, Scheme}};
             false -> {error, <<"team server URL is not a secure origin">>}
         end

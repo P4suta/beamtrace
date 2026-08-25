@@ -16,20 +16,22 @@
     capture_agent_status/1,
     listen_agent/3,
     grant/3,
+    seal_agent/4,
     stop_agent/2,
     unload/3,
     unload_unstarted/2
 ]).
 
 -define(RPC_TIMEOUT, 10000).
--define(AGENT_PROTOCOL_VERSION, 1).
--define(AGENT_MODULE_HASH, <<"b7a54d1c-beamtrace-agent-v2">>).
+-define(AGENT_PROTOCOL_VERSION, 2).
+-define(AGENT_MODULE_HASH, <<"d62f3f5a-beamtrace-agent-v3-seal-receipt">>).
 -define(REQUIRED_AGENT_EXPORTS, [
     {version, 0},
     {start, 2},
     {arm, 2},
     {listen, 2},
     {grant, 2},
+    {seal, 3},
     {stop, 1}
 ]).
 
@@ -312,7 +314,7 @@ verify_loaded(Node, ExpectedDigest, Disposition) ->
     case remote_loaded_identity(Node) of
         {loaded, ExpectedDigest, Version} when is_map(Version) ->
             case maps:get(protocol, Version, undefined) of
-                1 -> {ok, Disposition, ExpectedDigest};
+                ?AGENT_PROTOCOL_VERSION -> {ok, Disposition, ExpectedDigest};
                 Protocol -> {error, {protocol_mismatch, Protocol}}
             end;
         {loaded_version, Version} ->
@@ -366,6 +368,21 @@ grant(Node, Agent, Credits)
     case safe_erpc(Node, beamtrace_agent, grant, [Agent, Credits]) of
         {ok, Result} -> Result;
         {error, Reason} -> {error, {agent_grant_failed, Reason}}
+    end.
+
+seal_agent(Node, Agent, Reason, DrainTimeoutMs)
+        when is_atom(Node), is_pid(Agent),
+             is_integer(DrainTimeoutMs), DrainTimeoutMs >= 1000,
+             DrainTimeoutMs =< 60000 ->
+    case safe_erpc_timeout(
+        Node,
+        beamtrace_agent,
+        seal,
+        [Agent, Reason, DrainTimeoutMs],
+        DrainTimeoutMs + 2000
+    ) of
+        {ok, Result} -> Result;
+        {error, Reason} -> {error, {agent_seal_failed, Reason}}
     end.
 
 stop_agent(Node, Agent) when is_atom(Node), is_pid(Agent) ->
@@ -489,7 +506,10 @@ parse_release(String) when is_list(String) ->
 parse_release(_Other) -> error.
 
 safe_erpc(Node, Module, Function, Arguments) ->
-    try erpc:call(Node, Module, Function, Arguments, ?RPC_TIMEOUT) of
+    safe_erpc_timeout(Node, Module, Function, Arguments, ?RPC_TIMEOUT).
+
+safe_erpc_timeout(Node, Module, Function, Arguments, Timeout) ->
+    try erpc:call(Node, Module, Function, Arguments, Timeout) of
         Value -> {ok, Value}
     catch
         Class:Reason:Stacktrace -> {error, {exception, Class, Reason, Stacktrace}}

@@ -14,7 +14,7 @@ pub fn sqlite_wal_store_persists_session_metadata_and_segment_indexes_test() {
       project: "shop'; SELECT 1; --",
       environment: "prod",
       created_at_ms: 1000,
-      completeness: "complete",
+      delivery_status: "delivered",
       privacy: "metadata",
       blob_key: "sessions/session-wal-test/capture.beamtrace",
       event_count: 1001,
@@ -52,7 +52,7 @@ pub fn sqlite_store_rejects_unsafe_or_unbounded_metadata_before_query_test() {
       project: "shop",
       environment: "prod",
       created_at_ms: 1000,
-      completeness: "complete",
+      delivery_status: "delivered",
       privacy: "metadata",
       blob_key: "../outside.beamtrace",
       event_count: 1,
@@ -93,11 +93,11 @@ pub fn relay_sessions_are_bounded_immutable_and_restart_safe_test() {
       store,
       start.id,
       relay_id,
-      "complete",
+      "delivered",
       1600,
       1700,
     )
-  finished.completeness |> should.equal("complete")
+  finished.delivery_status |> should.equal("delivered")
   finished.active |> should.be_false()
   team_store.begin_trace_session(store, start, 1)
   |> should.equal(Error("session_already_ended"))
@@ -123,7 +123,7 @@ pub fn disconnected_session_resume_obeys_global_limit_and_relay_identity_test() 
   let assert Ok(store) = team_store.open(":memory:")
   let assert Ok(_) = team_store.begin_trace_session(store, first, 1)
 
-  team_store.mark_trace_incomplete(
+  team_store.mark_trace_failed(
     store,
     first.id,
     "relay-000000000000000000000000",
@@ -132,13 +132,13 @@ pub fn disconnected_session_resume_obeys_global_limit_and_relay_identity_test() 
   |> should.equal(Ok(Nil))
   let assert Ok(Some(still_active)) = team_store.trace_session(store, first.id)
   still_active.active |> should.be_true()
-  still_active.completeness |> should.equal("active")
+  still_active.delivery_status |> should.equal("active")
 
-  team_store.mark_trace_incomplete(store, first.id, first.relay_id, 1200)
+  team_store.mark_trace_failed(store, first.id, first.relay_id, 1200)
   |> should.equal(Ok(Nil))
   let assert Ok(Some(disconnected)) = team_store.trace_session(store, first.id)
   disconnected.active |> should.be_false()
-  disconnected.completeness |> should.equal("incomplete")
+  disconnected.delivery_status |> should.equal("failed")
 
   let assert Ok(_) = team_store.begin_trace_session(store, second, 1)
   team_store.begin_trace_session(
@@ -162,7 +162,7 @@ pub fn disconnected_session_resumes_only_with_identical_immutable_metadata_test(
     )
   let assert Ok(store) = team_store.open(":memory:")
   let assert Ok(_) = team_store.begin_trace_session(store, start, 64)
-  team_store.mark_trace_incomplete(store, start.id, start.relay_id, 1200)
+  team_store.mark_trace_failed(store, start.id, start.relay_id, 1200)
   |> should.equal(Ok(Nil))
 
   team_store.begin_trace_session(
@@ -188,7 +188,7 @@ pub fn disconnected_session_resumes_only_with_identical_immutable_metadata_test(
       64,
     )
   resumed.active |> should.be_true()
-  resumed.completeness |> should.equal("active")
+  resumed.delivery_status |> should.equal("active")
   resumed.last_received_at_ms |> should.equal(1400)
   team_store.close(store) |> should.equal(Ok(Nil))
 }
@@ -233,7 +233,7 @@ pub fn retention_rechecks_hold_and_persists_blob_outbox_across_restart_test() {
       store,
       start.id,
       relay_id,
-      "complete",
+      "delivered",
       1600,
       1700,
     )
@@ -532,7 +532,7 @@ fn trace_start(id: String, relay_id: String) -> team_store.TraceSession {
     received_at_ms: 1100,
     ended_at_ms: 0,
     last_received_at_ms: 1100,
-    completeness: "active",
+    delivery_status: "active",
     event_count: 0,
     legal_hold: False,
     active: True,

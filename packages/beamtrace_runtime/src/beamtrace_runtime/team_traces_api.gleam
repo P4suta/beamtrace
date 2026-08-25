@@ -451,7 +451,7 @@ fn trace_session_json(
       "status",
       json.string(case trace.active {
         True -> "active"
-        False -> trace.completeness
+        False -> trace.delivery_status
       }),
     ),
     #("relay_id", json.string(trace.relay_id)),
@@ -469,7 +469,7 @@ fn trace_session_json(
     #("mode", json.string(trace.mode)),
     #("privacy", json.string(trace.privacy)),
     #("locked", json.bool(locked)),
-    #("completeness", json.string(trace.completeness)),
+    #("delivery_status", json.string(trace.delivery_status)),
     #("event_count", json.int(trace.event_count)),
     #("started_at_ms", json.int(trace.started_at_ms)),
     #("received_at_ms", json.int(trace.received_at_ms)),

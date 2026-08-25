@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace_web/workspace
 import gleam/dynamic/decode
+import gleam/int
 import gleam/json
 import gleam/list
 import lustre/effect.{type Effect}
@@ -9,7 +10,8 @@ type StatusPayload {
   StatusPayload(
     status: String,
     event_count: Int,
-    completeness: String,
+    outcome: String,
+    delivery_verified: Bool,
     reason: String,
   )
 }
@@ -118,8 +120,15 @@ pub fn decode_status(source: String) -> Result(workspace.CapturePhase, String) {
         "idle" -> Ok(workspace.Idle)
         "armed" -> Ok(workspace.Armed)
         "cancelling" -> Ok(workspace.Cancelling)
-        "ready" ->
-          Ok(workspace.Ready(payload.event_count, payload.completeness))
+        "ready" | "sealed" ->
+          Ok(workspace.Ready(
+            payload.event_count,
+            payload.outcome
+              <> case payload.delivery_verified {
+              True -> " · delivery verified"
+              False -> " · integrity issues present"
+            },
+          ))
         "failed" -> Ok(workspace.Failed(payload.reason))
         _ -> Error("unknown capture status")
       }
@@ -129,9 +138,46 @@ pub fn decode_status(source: String) -> Result(workspace.CapturePhase, String) {
 fn status_decoder() -> decode.Decoder(StatusPayload) {
   use status <- decode.field("status", decode.string)
   use event_count <- decode.optional_field("event_count", 0, decode.int)
-  use completeness <- decode.optional_field("completeness", "", decode.string)
+  use outcome <- decode.optional_field("outcome", "sealed", outcome_decoder())
+  use delivery_verified <- decode.optional_field(
+    "delivery_verified",
+    False,
+    decode.bool,
+  )
   use reason <- decode.optional_field("reason", "", decode.string)
-  decode.success(StatusPayload(status, event_count, completeness, reason))
+  decode.success(StatusPayload(
+    status,
+    event_count,
+    outcome,
+    delivery_verified,
+    reason,
+  ))
+}
+
+fn outcome_decoder() -> decode.Decoder(String) {
+  use end <- decode.field("end", outcome_end_decoder())
+  decode.success(end)
+}
+
+fn outcome_end_decoder() -> decode.Decoder(String) {
+  use kind <- decode.field("kind", decode.string)
+  case kind {
+    "quiet_period" -> {
+      use quiet_ms <- decode.field("quiet_ms", decode.int)
+      decode.success(
+        "sealed after " <> int.to_string(quiet_ms) <> "ms quiet period",
+      )
+    }
+    "time_window" -> {
+      use window_ms <- decode.field("window_ms", decode.int)
+      decode.success("sealed after " <> int.to_string(window_ms) <> "ms window")
+    }
+    "user_stopped" -> decode.success("sealed after user stop")
+    "budget_reached" -> decode.success("sealed after budget limit")
+    "agent_failure" -> decode.success("sealed after agent failure")
+    "legacy_unknown" -> decode.success("legacy observation end unknown")
+    _ -> decode.failure("", expected: "observation end")
+  }
 }
 
 fn mfa_search_decoder() -> decode.Decoder(MfaSearchPayload) {

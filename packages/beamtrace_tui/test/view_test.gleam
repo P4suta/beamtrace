@@ -36,7 +36,7 @@ pub fn headless_live_render_uses_sampled_processes_and_inference_evidence_test()
           "<0.42.0>",
           "orders worker",
           "mailbox_growth · mailbox is growing",
-          "Inferred 80% · EWMA",
+          "Inferred · ewma_hysteresis_v2 · EWMA",
           2,
           True,
         ),
@@ -50,7 +50,7 @@ pub fn headless_live_render_uses_sampled_processes_and_inference_evidence_test()
 
   ansi |> string.contains("orders worker") |> should.be_true()
   ansi |> string.contains("mailbox_growth") |> should.be_true()
-  ansi |> string.contains("Inferred 80%") |> should.be_true()
+  ansi |> string.contains("Inferred · ewma_hysteresis_v2") |> should.be_true()
   ansi |> string.contains("supervision 1") |> should.be_true()
 }
 
@@ -102,7 +102,7 @@ pub fn team_trace_selector_shows_locked_rows_and_selection_test() {
   let traces = [
     model.TeamTrace(
       "trace-metadata",
-      "complete",
+      "delivered",
       "app@host",
       "shop:checkout/1",
       "metadata",
@@ -112,7 +112,7 @@ pub fn team_trace_selector_shows_locked_rows_and_selection_test() {
     ),
     model.TeamTrace(
       "trace-raw",
-      "incomplete",
+      "partial",
       "worker@host",
       "orders:run/0",
       "raw",

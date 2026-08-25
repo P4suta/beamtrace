@@ -10,7 +10,7 @@ pub type CaptureState {
   SessionIdle
   SessionArmed
   SessionCancelling
-  SessionReady(events: List(model.Event), completeness: String)
+  SessionReady(events: List(model.Event), outcome_summary: String)
   SessionFailed(reason: String)
 }
 
@@ -119,14 +119,14 @@ pub fn sync(status: CaptureState, state: model.Model) -> model.Model {
     SessionArmed, _ -> model.Model(..state, capture_phase: model.CaptureArmed)
     SessionCancelling, model.CaptureCancelling -> state
     SessionCancelling, _ -> model.update(state, model.CaptureCancellingStarted)
-    SessionReady(events, completeness), model.CaptureReady(count, current) ->
-      case count == list.length(events) && current == completeness {
+    SessionReady(events, outcome_summary), model.CaptureReady(count, current) ->
+      case count == list.length(events) && current == outcome_summary {
         True -> state
         False ->
-          model.update(state, model.CaptureCompleted(events, completeness))
+          model.update(state, model.CaptureCompleted(events, outcome_summary))
       }
-    SessionReady(events, completeness), _ ->
-      model.update(state, model.CaptureCompleted(events, completeness))
+    SessionReady(events, outcome_summary), _ ->
+      model.update(state, model.CaptureCompleted(events, outcome_summary))
     SessionFailed(reason), model.CaptureFailed(current) if reason == current ->
       state
     SessionFailed(reason), _ ->

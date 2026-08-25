@@ -20,8 +20,10 @@ pub fn mailbox_alert_uses_baseline_and_hysteresis_test() {
   detector.active |> list.length |> should.equal(1)
   let assert [alert] = detector.active
   alert.kind |> should.equal(anomaly.MailboxGrowth)
-  alert.evidence
-  |> should.equal(types.Inferred("EWMA exceeded baseline with hysteresis", 0.8))
+  let assert types.Inferred(inference) = alert.evidence
+  inference.method |> should.equal("ewma_hysteresis_v2")
+  inference.reason |> should.equal("EWMA exceeded baseline with hysteresis")
+  inference.inputs |> list.length |> should.equal(4)
 
   let detector = detector |> anomaly.observe(anomaly.Mailbox, 10.0, 5000)
   detector.active |> list.length |> should.equal(1)

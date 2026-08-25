@@ -25,7 +25,7 @@ fn event_with(term: types.TermView) -> String {
       logical: None,
       evidence: [],
     ),
-    local_timestamp_ns: 100,
+    local_instant: types.LocalInstant(100, 1),
     kind: types.Exit(term),
     evidence: types.Exact,
   ))
@@ -42,7 +42,7 @@ pub fn socket_requires_hello_then_accepts_strictly_ordered_signed_batches_test()
     |> relay_wire.encode_hello
 
   let authenticated = relay_socket.receive_text(initial, hello, 1004)
-  let assert relay_socket.Active(_, 0, 1004, 8, None) = authenticated.state
+  let assert relay_socket.Active(_, 3, 0, 1004, 8, None) = authenticated.state
   let assert [relay_socket.SendText(credit)] = authenticated.effects
   credit |> string.contains("\"type\":\"credit\"") |> should.be_true()
 
@@ -50,6 +50,7 @@ pub fn socket_requires_hello_then_accepts_strictly_ordered_signed_batches_test()
   let opened = send_session_start(authenticated.state, identity, start, 1, 1005)
   let assert relay_socket.Active(
     _,
+    3,
     1,
     1005,
     8,
@@ -69,6 +70,7 @@ pub fn socket_requires_hello_then_accepts_strictly_ordered_signed_batches_test()
   let accepted = relay_socket.receive_text(opened.state, first, 1006)
   let assert relay_socket.Active(
     _,
+    3,
     2,
     1006,
     7,
@@ -109,7 +111,7 @@ pub fn socket_accepts_signed_heartbeats_but_rejects_unknown_payload_types_test()
     relay_wire.sign_envelope(identity, 1, "{\"type\":\"heartbeat\"}")
     |> relay_wire.encode_envelope
   let alive = relay_socket.receive_text(authenticated.state, heartbeat, 1005)
-  let assert relay_socket.Active(_, 1, 1005, 8, None) = alive.state
+  let assert relay_socket.Active(_, 3, 1, 1005, 8, None) = alive.state
   alive.effects |> should.equal([])
 
   let unknown =
@@ -144,10 +146,11 @@ pub fn durable_credit_refills_only_when_the_four_batch_boundary_is_crossed_test(
   let #(four, four_credit) = durable_batch(three, identity, 5)
   four_credit
   |> should.equal(Some(
-    "{\"type\":\"credit\",\"protocol_version\":2,\"credits\":4,\"max_batch_events\":128}",
+    "{\"type\":\"credit\",\"protocol_version\":3,\"credits\":4,\"max_batch_events\":128}",
   ))
   let assert relay_socket.Active(
     _,
+    3,
     5,
     _,
     8,
@@ -198,12 +201,12 @@ pub fn session_sequence_is_contiguous_and_resets_for_the_next_session_test() {
         session_id: start.session_id,
         sequence: 2,
         ended_at_ms: 1010,
-        completeness: relay_session.Complete,
+        delivery_status: relay_session.Delivered,
       )),
     )
     |> relay_wire.encode_envelope
     |> fn(frame) { relay_socket.receive_text(first.state, frame, 1011) }
-  let assert relay_socket.Active(_, 3, _, _, None) = ended.state
+  let assert relay_socket.Active(_, 3, 3, _, _, None) = ended.state
 
   let second_start =
     relay_session.Start(
@@ -214,6 +217,7 @@ pub fn session_sequence_is_contiguous_and_resets_for_the_next_session_test() {
   let second = send_session_start(ended.state, identity, second_start, 4, 1012)
   let assert relay_socket.Active(
     _,
+    3,
     4,
     _,
     _,

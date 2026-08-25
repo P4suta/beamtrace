@@ -16,10 +16,10 @@ pub type Privacy {
   Raw
 }
 
-pub type Completeness {
-  Complete
-  Truncated
-  Incomplete
+pub type DeliveryStatus {
+  Delivered
+  Partial
+  Failed
 }
 
 pub type Start {
@@ -41,7 +41,7 @@ pub type End {
     session_id: String,
     sequence: Int,
     ended_at_ms: Int,
-    completeness: Completeness,
+    delivery_status: DeliveryStatus,
   )
 }
 
@@ -69,6 +69,7 @@ type StartWire {
     privacy: String,
     started_at_ms: Int,
     sequence: Int,
+    event_schema: Int,
   )
 }
 
@@ -81,7 +82,7 @@ type EndWire {
     session_id: String,
     sequence: Int,
     ended_at_ms: Int,
-    completeness: String,
+    delivery_status: String,
   )
 }
 
@@ -102,6 +103,7 @@ pub fn encode_start(start: Start) -> String {
     #("privacy", json.string(privacy_name(start.privacy))),
     #("started_at_ms", json.int(start.started_at_ms)),
     #("sequence", json.int(0)),
+    #("event_schema", json.int(2)),
   ])
   |> json.to_string
 }
@@ -126,7 +128,7 @@ pub fn encode_end(end: End) -> String {
     #("session_id", json.string(end.session_id)),
     #("sequence", json.int(end.sequence)),
     #("ended_at_ms", json.int(end.ended_at_ms)),
-    #("completeness", json.string(completeness_name(end.completeness))),
+    #("delivery_status", json.string(delivery_status_name(end.delivery_status))),
   ])
   |> json.to_string
 }
@@ -155,9 +157,21 @@ fn decode_start(source: String) -> Result(Message, String) {
         parse_mode(wire.mode),
         parse_privacy(wire.privacy),
         wire.started_at_ms >= 0,
-        wire.sequence == 0
+        wire.sequence == 0,
+        wire.event_schema == 1 || wire.event_schema == 2
       {
-        True, True, True, True, True, True, Ok(mode), Ok(privacy), True, True ->
+        True,
+          True,
+          True,
+          True,
+          True,
+          True,
+          Ok(mode),
+          Ok(privacy),
+          True,
+          True,
+          True
+        ->
           Ok(
             SessionStart(Start(
               wire.session_id,
@@ -171,7 +185,7 @@ fn decode_start(source: String) -> Result(Message, String) {
               wire.started_at_ms,
             )),
           )
-        _, _, _, _, _, _, _, _, _, _ -> Error("invalid_session_start")
+        _, _, _, _, _, _, _, _, _, _, _ -> Error("invalid_session_start")
       }
   }
 }
@@ -201,15 +215,15 @@ fn decode_end(source: String) -> Result(Message, String) {
         valid_session_id(wire.session_id),
         wire.sequence > 0,
         wire.ended_at_ms >= 0,
-        parse_completeness(wire.completeness)
+        parse_delivery_status(wire.delivery_status)
       {
-        True, True, True, Ok(completeness) ->
+        True, True, True, Ok(delivery_status) ->
           Ok(
             SessionEnd(End(
               wire.session_id,
               wire.sequence,
               wire.ended_at_ms,
-              completeness,
+              delivery_status,
             )),
           )
         _, _, _, _ -> Error("invalid_session_end")
@@ -231,11 +245,11 @@ pub fn privacy_name(privacy: Privacy) -> String {
   }
 }
 
-pub fn completeness_name(completeness: Completeness) -> String {
-  case completeness {
-    Complete -> "complete"
-    Truncated -> "truncated"
-    Incomplete -> "incomplete"
+pub fn delivery_status_name(status: DeliveryStatus) -> String {
+  case status {
+    Delivered -> "delivered"
+    Partial -> "partial"
+    Failed -> "failed"
   }
 }
 
@@ -255,11 +269,11 @@ fn parse_privacy(value: String) -> Result(Privacy, Nil) {
   }
 }
 
-fn parse_completeness(value: String) -> Result(Completeness, Nil) {
+fn parse_delivery_status(value: String) -> Result(DeliveryStatus, Nil) {
   case value {
-    "complete" -> Ok(Complete)
-    "truncated" -> Ok(Truncated)
-    "incomplete" -> Ok(Incomplete)
+    "delivered" | "complete" -> Ok(Delivered)
+    "partial" | "truncated" -> Ok(Partial)
+    "failed" | "incomplete" -> Ok(Failed)
     _ -> Error(Nil)
   }
 }
@@ -308,6 +322,7 @@ fn start_decoder() -> decode.Decoder(StartWire) {
   use privacy <- decode.field("privacy", decode.string)
   use started_at_ms <- decode.field("started_at_ms", decode.int)
   use sequence <- decode.field("sequence", decode.int)
+  use event_schema <- decode.optional_field("event_schema", 1, decode.int)
   decode.success(StartWire(
     session_id,
     relay_id,
@@ -319,6 +334,7 @@ fn start_decoder() -> decode.Decoder(StartWire) {
     privacy,
     started_at_ms,
     sequence,
+    event_schema,
   ))
 }
 
@@ -330,11 +346,23 @@ fn batch_decoder() -> decode.Decoder(BatchWire) {
 }
 
 fn end_decoder() -> decode.Decoder(EndWire) {
+  decode.one_of(end_decoder_v3(), or: [end_decoder_v2()])
+}
+
+fn end_decoder_v3() -> decode.Decoder(EndWire) {
   use session_id <- decode.field("session_id", decode.string)
   use sequence <- decode.field("sequence", decode.int)
   use ended_at_ms <- decode.field("ended_at_ms", decode.int)
-  use completeness <- decode.field("completeness", decode.string)
-  decode.success(EndWire(session_id, sequence, ended_at_ms, completeness))
+  use status <- decode.field("delivery_status", decode.string)
+  decode.success(EndWire(session_id, sequence, ended_at_ms, status))
+}
+
+fn end_decoder_v2() -> decode.Decoder(EndWire) {
+  use session_id <- decode.field("session_id", decode.string)
+  use sequence <- decode.field("sequence", decode.int)
+  use ended_at_ms <- decode.field("ended_at_ms", decode.int)
+  use status <- decode.field("completeness", decode.string)
+  decode.success(EndWire(session_id, sequence, ended_at_ms, status))
 }
 
 @external(erlang, "beamtrace_relay_session_ffi", "new_id")

@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-import beamtrace/codec
 import beamtrace/types
 import beamtrace_runtime
 import beamtrace_runtime/mcp
@@ -7,6 +6,7 @@ import beamtrace_runtime/storage
 import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
+import v2_fixture
 
 pub fn legacy_initialize_and_modern_discover_are_both_supported_test() {
   let #(legacy_waiting, legacy_response) =
@@ -97,20 +97,11 @@ pub fn trace_search_tool_reads_a_bounded_archive_window_test() {
       root_id: "root-mcp",
       node: "fixture@host",
       process: process,
-      local_timestamp_ns: 10,
+      local_instant: v2_fixture.instant(10),
       kind: types.Stop("needle-mcp"),
       evidence: types.Exact,
     )
-  let manifest =
-    codec.Manifest(
-      schema_version: 1,
-      tool_version: "0.1.0",
-      capture_id: "capture-mcp",
-      nodes: ["fixture@host"],
-      completeness: types.Complete,
-      privacy: types.Metadata,
-      checksums: [],
-    )
+  let manifest = v2_fixture.manifest("capture-mcp", ["fixture@host"])
   storage.save(path, manifest, [event]) |> should.equal(Ok(Nil))
 
   let assert Some(response) =
@@ -245,7 +236,7 @@ pub fn event_get_and_trace_overview_return_bounded_json_objects_test() {
       "root-overview",
       "fixture@host",
       process,
-      20,
+      v2_fixture.instant(20),
       types.Stop("done"),
       types.Exact,
     ),
@@ -254,21 +245,12 @@ pub fn event_get_and_trace_overview_return_bounded_json_objects_test() {
       "root-overview",
       "fixture@host",
       process,
-      10,
+      v2_fixture.instant(10),
       types.Metric("queue", 2.0),
       types.Exact,
     ),
   ]
-  let manifest =
-    codec.Manifest(
-      1,
-      "0.2.0",
-      "capture-overview",
-      ["fixture@host"],
-      types.Complete,
-      types.Metadata,
-      [],
-    )
+  let manifest = v2_fixture.manifest("capture-overview", ["fixture@host"])
   storage.save(path, manifest, events) |> should.equal(Ok(Nil))
 
   let assert Some(event_response) =
@@ -280,7 +262,7 @@ pub fn event_get_and_trace_overview_return_bounded_json_objects_test() {
       <> "\",\"index\":0}}}",
     )
   event_response
-  |> string.contains("\"event\":{\"schema_version\":1")
+  |> string.contains("\"event\":{\"schema_version\":2")
   |> should.be_true()
   event_response
   |> string.contains("\"event\":\"{")
@@ -296,7 +278,9 @@ pub fn event_get_and_trace_overview_return_bounded_json_objects_test() {
     )
   overview |> string.contains("\"event_count\":2") |> should.be_true()
   overview
-  |> string.contains("\"time_range\":{\"start_ns\":10,\"end_ns\":20}")
+  |> string.contains(
+    "\"node_local_time_ranges\":[{\"node\":\"fixture@host\",\"start_offset_ns\":10,\"end_offset_ns\":20}]",
+  )
   |> should.be_true()
   overview
   |> string.contains("\"event_kinds\":{\"metric\":1,\"stop\":1}")

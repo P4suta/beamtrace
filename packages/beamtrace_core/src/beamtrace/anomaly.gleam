@@ -1,4 +1,5 @@
 import beamtrace/types
+import gleam/float
 import gleam/int
 import gleam/list
 
@@ -95,7 +96,19 @@ pub fn observe(
       Alert(
         kind: anomaly_kind(metric),
         summary: summary(metric),
-        evidence: types.inferred("EWMA exceeded baseline with hysteresis", 0.8),
+        evidence: types.inferred(
+          "ewma_hysteresis_v2",
+          "EWMA exceeded baseline with hysteresis",
+          [
+            types.ObservedValue("value", float.to_string(value)),
+            types.ObservedValue("baseline", float.to_string(baseline.ewma)),
+            types.AlgorithmSetting("alpha", float.to_string(detector.alpha)),
+            types.AlgorithmSetting(
+              "open_after",
+              int.to_string(detector.open_after),
+            ),
+          ],
+        ),
         opened_at_ns: observed_at_ns,
       ),
       ..detector.active

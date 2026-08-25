@@ -53,6 +53,7 @@ pub fn consume(
 @external(erlang, "beamtrace_enrollment_store_ffi", "authenticate")
 pub fn authenticate(
   store: Store,
+  protocol_version: Int,
   relay_id: String,
   timestamp_ms: Int,
   nonce: BitArray,

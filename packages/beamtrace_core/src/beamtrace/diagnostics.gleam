@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace/types
+import gleam/dict.{type Dict}
 import gleam/int
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{Some}
+import gleam/order
+import gleam/result
+import gleam/string
 
 pub type FindingKind {
   HotSender
@@ -15,322 +19,483 @@ pub type FindingKind {
   CriticalPath
 }
 
+pub type FindingValue {
+  CountValue(Int)
+  TimeValue(types.TimeEstimate)
+}
+
 pub type Finding {
   Finding(
     kind: FindingKind,
     summary: String,
     evidence: types.Evidence,
     event_ids: List(String),
-    value: Int,
+    value: FindingValue,
   )
 }
 
+type CountAggregate {
+  CountAggregate(count: Int, event_ids: List(String))
+}
+
+type FanInAggregate {
+  FanInAggregate(senders: Dict(String, Bool), event_ids: List(String))
+}
+
+type CallIndex {
+  CallIndex(
+    calls: Dict(String, List(types.TraceEvent)),
+    replies: Dict(String, Bool),
+  )
+}
+
+type RestartCandidate {
+  RestartCandidate(
+    spawn: types.TraceEvent,
+    observed: types.TraceEvent,
+    actor: types.LogicalActor,
+  )
+}
+
+/// Count observed sends with one indexed scan. The diagnostic conclusion is
+/// inferred from an exact count and an explicit threshold; it is not a
+/// probability statement.
 pub fn hot_senders(
   events: List(types.TraceEvent),
   minimum_messages minimum_messages: Int,
 ) -> List(Finding) {
-  sender_keys(events, [])
-  |> list.filter_map(fn(key) {
-    let matching = list.filter(events, fn(event) { is_send_by(event, key) })
-    let count = list.length(matching)
-    case count >= minimum_messages {
+  events
+  |> list.fold(dict.new(), fn(index, event) {
+    case event.kind {
+      types.Send(_, _, _) -> {
+        let key = process_key(event.process.physical)
+        let aggregate =
+          dict.get(index, key) |> result.unwrap(CountAggregate(0, []))
+        dict.insert(
+          index,
+          key,
+          CountAggregate(aggregate.count + 1, [event.id, ..aggregate.event_ids]),
+        )
+      }
+      _ -> index
+    }
+  })
+  |> sorted_entries
+  |> list.filter_map(fn(entry) {
+    let #(key, aggregate) = entry
+    case aggregate.count >= minimum_messages {
       False -> Error(Nil)
-      True ->
+      True -> {
+        let ids = list.reverse(aggregate.event_ids)
         Ok(Finding(
           kind: HotSender,
-          summary: key <> " sent " <> int.to_string(count) <> " messages",
-          evidence: types.Exact,
-          event_ids: list.map(matching, fn(event) { event.id }),
-          value: count,
+          summary: key
+            <> " sent "
+            <> int.to_string(aggregate.count)
+            <> " observed messages",
+          evidence: threshold_evidence(
+            "observed_hot_sender_count_v2",
+            "observed send count reached the configured threshold",
+            "messages",
+            aggregate.count,
+            "minimum_messages",
+            minimum_messages,
+            ids,
+          ),
+          event_ids: ids,
+          value: CountValue(aggregate.count),
         ))
+      }
     }
   })
 }
 
+/// Aggregate unique observed senders for each receiver without repeatedly
+/// rescanning the event stream.
 pub fn fan_in(
   events: List(types.TraceEvent),
   minimum_senders minimum_senders: Int,
 ) -> List(Finding) {
-  receiver_keys(events, [])
-  |> list.filter_map(fn(key) {
-    let matching = list.filter(events, fn(event) { is_received_by(event, key) })
-    let senders = received_senders(matching, [])
-    let count = list.length(senders)
+  events
+  |> list.fold(dict.new(), fn(index, event) {
+    case event.kind {
+      types.Received(from, _, _) -> {
+        let key = process_key(event.process.physical)
+        let aggregate =
+          dict.get(index, key)
+          |> result.unwrap(FanInAggregate(dict.new(), []))
+        dict.insert(
+          index,
+          key,
+          FanInAggregate(
+            dict.insert(aggregate.senders, process_key(from), True),
+            [event.id, ..aggregate.event_ids],
+          ),
+        )
+      }
+      _ -> index
+    }
+  })
+  |> sorted_entries
+  |> list.filter_map(fn(entry) {
+    let #(key, aggregate) = entry
+    let count = dict.size(aggregate.senders)
     case count >= minimum_senders {
       False -> Error(Nil)
-      True ->
+      True -> {
+        let ids = list.reverse(aggregate.event_ids)
         Ok(Finding(
           kind: FanIn,
           summary: key
             <> " received from "
             <> int.to_string(count)
-            <> " senders",
-          evidence: types.Exact,
-          event_ids: list.map(matching, fn(event) { event.id }),
-          value: count,
+            <> " observed senders",
+          evidence: threshold_evidence(
+            "observed_fan_in_count_v2",
+            "observed unique sender count reached the configured threshold",
+            "senders",
+            count,
+            "minimum_senders",
+            minimum_senders,
+            ids,
+          ),
+          event_ids: ids,
+          value: CountValue(count),
         ))
+      }
     }
   })
 }
 
+/// Queue wait is exact only for a unique full-serial pair whose send and
+/// receive share one node-local monotonic clock. Cross-node and legacy pairs
+/// are deliberately omitted because their threshold cannot be decided here.
 pub fn queue_waits(
   events: List(types.TraceEvent),
   minimum_ns minimum_ns: Int,
 ) -> List(Finding) {
-  queue_waits_loop(events, events, minimum_ns, []) |> list.reverse
-}
-
-fn queue_waits_loop(
-  remaining: List(types.TraceEvent),
-  all: List(types.TraceEvent),
-  minimum_ns: Int,
-  accumulator: List(Finding),
-) -> List(Finding) {
-  case remaining {
-    [] -> accumulator
-    [event, ..rest] ->
-      case matching_receive(event, all) {
-        Error(_) -> queue_waits_loop(rest, all, minimum_ns, accumulator)
-        Ok(received) -> {
-          let duration = received.local_timestamp_ns - event.local_timestamp_ns
-          let accumulator = case duration >= minimum_ns && duration >= 0 {
-            False -> accumulator
-            True -> [
-              Finding(
-                kind: QueueWait,
-                summary: "message waited "
-                  <> int.to_string(duration)
-                  <> "ns before receive",
-                evidence: types.Exact,
-                event_ids: [event.id, received.id],
-                value: duration,
-              ),
-              ..accumulator
-            ]
-          }
-          queue_waits_loop(rest, all, minimum_ns, accumulator)
-        }
+  let receives =
+    list.fold(events, dict.new(), fn(index, event) {
+      case event.kind {
+        types.Received(from, _, types.SequenceSerial(_, _) as serial) ->
+          put_event(
+            index,
+            message_key(event.root_id, from, event.process.physical, serial),
+            event,
+          )
+        _ -> index
       }
-  }
-}
-
-pub fn dangling_calls(
-  events: List(types.TraceEvent),
-  now_ns now_ns: Int,
-  timeout_ns timeout_ns: Int,
-) -> List(Finding) {
+    })
   events
-  |> list.filter_map(fn(event) {
-    case
-      call_endpoints(event),
-      now_ns - event.local_timestamp_ns >= timeout_ns
-    {
-      Ok(#(caller, callee)), True ->
+  |> list.filter_map(fn(sent) {
+    case sent.kind {
+      types.Send(to, _, types.SequenceSerial(_, _) as serial) ->
         case
-          has_reverse_reply(events, caller, callee, event.local_timestamp_ns)
+          dict.get(
+            receives,
+            message_key(sent.root_id, sent.process.physical, to, serial),
+          )
         {
-          True -> Error(Nil)
-          False ->
-            Ok(Finding(
-              kind: DanglingCall,
-              summary: "call has no observed reply after "
-                <> int.to_string(now_ns - event.local_timestamp_ns)
-                <> "ns",
-              evidence: types.inferred(
-                "no reverse reply was observed before timeout",
-                0.85,
-              ),
-              event_ids: [event.id],
-              value: now_ns - event.local_timestamp_ns,
-            ))
+          Ok([received]) if received.node == sent.node -> {
+            let duration =
+              received.local_instant.offset_ns - sent.local_instant.offset_ns
+            case duration >= minimum_ns && duration >= 0 {
+              False -> Error(Nil)
+              True ->
+                Ok(Finding(
+                  kind: QueueWait,
+                  summary: "message waited "
+                    <> int.to_string(duration)
+                    <> "ns before receive",
+                  evidence: threshold_evidence(
+                    "full_serial_same_node_queue_wait_v2",
+                    "a unique full-serial pair shares one node-local clock",
+                    "duration_ns",
+                    duration,
+                    "minimum_ns",
+                    minimum_ns,
+                    [sent.id, received.id],
+                  ),
+                  event_ids: [sent.id, received.id],
+                  value: TimeValue(types.ExactTime(duration)),
+                ))
+            }
+          }
+          _ -> Error(Nil)
         }
-      _, _ -> Error(Nil)
+      _ -> Error(Nil)
     }
   })
 }
 
-/// Group a crash and subsequent supervisor spawn only when the new physical
-/// PID is later observed with the same logical actor identity. The temporal
-/// association is intentionally retained as inferred evidence.
+/// Negative evidence is reported only for a delivery-verified capture. Calls
+/// with repeated endpoints are left undecided because a reply cannot be
+/// paired uniquely without stronger protocol semantics.
+pub fn dangling_calls(
+  events: List(types.TraceEvent),
+  outcome outcome: types.CaptureOutcome,
+  now_ns now_ns: Int,
+  timeout_ns timeout_ns: Int,
+) -> List(Finding) {
+  case types.delivery_verified(outcome) {
+    False -> []
+    True -> {
+      let index =
+        list.fold(events, CallIndex(dict.new(), dict.new()), fn(index, event) {
+          case call_endpoints(event), reply_endpoints(event) {
+            Ok(#(caller, callee)), _ ->
+              CallIndex(
+                put_event(index.calls, call_key(caller, callee), event),
+                index.replies,
+              )
+            _, Ok(#(caller, callee)) ->
+              CallIndex(
+                index.calls,
+                dict.insert(index.replies, call_key(caller, callee), True),
+              )
+            _, _ -> index
+          }
+        })
+      index.calls
+      |> sorted_entries
+      |> list.filter_map(fn(entry) {
+        let #(key, calls) = entry
+        case calls, dict.has_key(index.replies, key) {
+          [call], False -> {
+            let age = now_ns - call.local_instant.offset_ns
+            case age >= timeout_ns && age >= 0 {
+              False -> Error(Nil)
+              True ->
+                Ok(Finding(
+                  kind: DanglingCall,
+                  summary: "delivery-verified call has no observed reply after "
+                    <> int.to_string(age)
+                    <> "ns",
+                  evidence: types.inferred(
+                    "delivery_verified_missing_reply_v2",
+                    "no reverse reply was observed before the timeout in a verified capture",
+                    [
+                      types.EvidenceEvent(call.id),
+                      types.ObservedValue("age_ns", int.to_string(age)),
+                      types.AlgorithmSetting(
+                        "timeout_ns",
+                        int.to_string(timeout_ns),
+                      ),
+                      types.AlgorithmSetting(
+                        "endpoint_pairing",
+                        "unique_call_endpoints",
+                      ),
+                    ],
+                  ),
+                  event_ids: [call.id],
+                  value: TimeValue(types.ExactTime(age)),
+                ))
+            }
+          }
+          _, _ -> Error(Nil)
+        }
+      })
+    }
+  }
+}
+
+/// Index process identities, spawns, and exits, then merge each logical actor
+/// stream linearly. Positive restart chains use only same-node exact deltas.
 pub fn restart_chains(
   events: List(types.TraceEvent),
   maximum_gap_ns maximum_gap_ns: Int,
 ) -> List(Finding) {
-  restart_chains_loop(events, events, maximum_gap_ns, []) |> list.reverse
+  let observations = actor_observations(events)
+  let #(exits, candidates) =
+    list.fold(events, #(dict.new(), dict.new()), fn(indexes, event) {
+      let #(exits, candidates) = indexes
+      case event.kind, event.process.logical {
+        types.Exit(_), Some(actor) -> #(
+          put_event(exits, restart_key(event.node, actor.id), event),
+          candidates,
+        )
+        types.Spawn(child, _), _ -> {
+          case dict.get(observations, process_key(child)) {
+            Ok(observed) ->
+              case observed.process.logical {
+                Some(actor)
+                  if observed.node == event.node
+                  && observed.local_instant.offset_ns
+                  >= event.local_instant.offset_ns
+                -> #(
+                  exits,
+                  put_candidate(
+                    candidates,
+                    restart_key(event.node, actor.id),
+                    RestartCandidate(event, observed, actor),
+                  ),
+                )
+                _ -> indexes
+              }
+            Error(_) -> indexes
+          }
+        }
+        _, _ -> indexes
+      }
+    })
+  dict.keys(exits)
+  |> list.sort(string.compare)
+  |> list.fold([], fn(findings, key) {
+    let actor_exits =
+      dict.get(exits, key)
+      |> result.unwrap([])
+      |> list.sort(compare_event_time)
+    let actor_candidates =
+      dict.get(candidates, key)
+      |> result.unwrap([])
+      |> list.sort(compare_candidate_time)
+    list.append(
+      findings,
+      pair_restarts(actor_exits, actor_candidates, maximum_gap_ns, []),
+    )
+  })
 }
 
-fn restart_chains_loop(
-  remaining: List(types.TraceEvent),
-  all: List(types.TraceEvent),
+fn pair_restarts(
+  exits: List(types.TraceEvent),
+  candidates: List(RestartCandidate),
   maximum_gap_ns: Int,
   accumulator: List(Finding),
 ) -> List(Finding) {
-  case remaining {
-    [] -> accumulator
-    [event, ..rest] ->
-      case event.kind, event.process.logical {
-        types.Exit(_), Some(actor) ->
-          case restart_after(event, actor, rest, all, maximum_gap_ns) {
-            Ok(finding) ->
-              restart_chains_loop(rest, all, maximum_gap_ns, [
-                finding,
-                ..accumulator
-              ])
-            Error(_) ->
-              restart_chains_loop(rest, all, maximum_gap_ns, accumulator)
-          }
-        _, _ -> restart_chains_loop(rest, all, maximum_gap_ns, accumulator)
+  case exits, candidates {
+    [], _ | _, [] -> list.reverse(accumulator)
+    [exited, ..rest_exits], [candidate, ..rest_candidates] -> {
+      let gap =
+        candidate.spawn.local_instant.offset_ns - exited.local_instant.offset_ns
+      case gap < 0, gap <= maximum_gap_ns {
+        True, _ ->
+          pair_restarts(exits, rest_candidates, maximum_gap_ns, accumulator)
+        False, True ->
+          pair_restarts(rest_exits, rest_candidates, maximum_gap_ns, [
+            restart_finding(exited, candidate, gap, maximum_gap_ns),
+            ..accumulator
+          ])
+        False, False ->
+          pair_restarts(rest_exits, candidates, maximum_gap_ns, accumulator)
       }
+    }
   }
 }
 
-fn restart_after(
+fn restart_finding(
   exited: types.TraceEvent,
-  actor: types.LogicalActor,
-  candidates: List(types.TraceEvent),
-  all: List(types.TraceEvent),
+  candidate: RestartCandidate,
+  gap: Int,
   maximum_gap_ns: Int,
-) -> Result(Finding, Nil) {
-  case candidates {
-    [] -> Error(Nil)
-    [candidate, ..rest] ->
-      case candidate.kind {
-        types.Spawn(child, _) -> {
-          let gap = candidate.local_timestamp_ns - exited.local_timestamp_ns
-          case gap >= 0 && gap <= maximum_gap_ns {
-            False -> restart_after(exited, actor, rest, all, maximum_gap_ns)
-            True ->
-              case
-                observed_as_actor(
-                  all,
-                  child,
-                  actor,
-                  candidate.local_timestamp_ns,
-                )
-              {
-                Error(_) ->
-                  restart_after(exited, actor, rest, all, maximum_gap_ns)
-                Ok(observed) ->
-                  Ok(Finding(
-                    kind: CrashChain,
-                    summary: actor.label
-                      <> " restarted with a new PID after "
-                      <> int.to_string(gap)
-                      <> "ns",
-                    evidence: types.inferred(
-                      "exit and spawn converge on the same logical actor slot",
-                      0.9,
-                    ),
-                    event_ids: [exited.id, candidate.id, observed.id],
-                    value: gap,
-                  ))
-              }
-          }
-        }
-        _ -> restart_after(exited, actor, rest, all, maximum_gap_ns)
-      }
-  }
+) -> Finding {
+  Finding(
+    kind: CrashChain,
+    summary: candidate.actor.label
+      <> " restarted with a new PID after "
+      <> int.to_string(gap)
+      <> "ns",
+    evidence: types.inferred(
+      "logical_actor_restart_v2",
+      "an exit and subsequent spawn converge on the same logical actor slot",
+      [
+        types.EvidenceEvent(exited.id),
+        types.EvidenceEvent(candidate.spawn.id),
+        types.EvidenceEvent(candidate.observed.id),
+        types.ObservedValue("gap_ns", int.to_string(gap)),
+        types.AlgorithmSetting("maximum_gap_ns", int.to_string(maximum_gap_ns)),
+      ],
+    ),
+    event_ids: [exited.id, candidate.spawn.id, candidate.observed.id],
+    value: TimeValue(types.ExactTime(gap)),
+  )
 }
 
-fn observed_as_actor(
+fn actor_observations(
   events: List(types.TraceEvent),
-  child: types.ProcessRef,
-  actor: types.LogicalActor,
-  spawned_at_ns: Int,
-) -> Result(types.TraceEvent, Nil) {
-  find_event(events, fn(event) {
+) -> Dict(String, types.TraceEvent) {
+  list.fold(events, dict.new(), fn(index, event) {
     case event.process.logical {
-      Some(observed) ->
-        event.process.physical == child
-        && observed.id == actor.id
-        && event.local_timestamp_ns >= spawned_at_ns
-      None -> False
+      Some(_) -> {
+        let key = process_key(event.process.physical)
+        case dict.get(index, key) {
+          Ok(current) ->
+            case compare_event_time(event, current) == order.Lt {
+              True -> dict.insert(index, key, event)
+              False -> index
+            }
+          Error(_) -> dict.insert(index, key, event)
+        }
+      }
+      _ -> index
     }
   })
 }
 
-fn sender_keys(events: List(types.TraceEvent), accumulator: List(String)) {
-  case events {
-    [] -> list.reverse(accumulator)
-    [event, ..rest] ->
-      case event.kind {
-        types.Send(_, _, _) ->
-          sender_keys(
-            rest,
-            add_unique(accumulator, process_key(event.process.physical)),
-          )
-        _ -> sender_keys(rest, accumulator)
-      }
+fn threshold_evidence(
+  method: String,
+  reason: String,
+  observed_name: String,
+  observed: Int,
+  setting_name: String,
+  setting: Int,
+  event_ids: List(String),
+) -> types.Evidence {
+  types.inferred(
+    method,
+    reason,
+    list.append(
+      [
+        types.ObservedValue(observed_name, int.to_string(observed)),
+        types.AlgorithmSetting(setting_name, int.to_string(setting)),
+      ],
+      list.map(event_ids, types.EvidenceEvent),
+    ),
+  )
+}
+
+fn put_event(
+  index: Dict(String, List(types.TraceEvent)),
+  key: String,
+  event: types.TraceEvent,
+) -> Dict(String, List(types.TraceEvent)) {
+  dict.insert(index, key, [event, ..dict.get(index, key) |> result.unwrap([])])
+}
+
+fn put_candidate(
+  index: Dict(String, List(RestartCandidate)),
+  key: String,
+  candidate: RestartCandidate,
+) -> Dict(String, List(RestartCandidate)) {
+  dict.insert(index, key, [
+    candidate,
+    ..dict.get(index, key)
+    |> result.unwrap([])
+  ])
+}
+
+fn sorted_entries(index: Dict(String, a)) -> List(#(String, a)) {
+  index
+  |> dict.to_list
+  |> list.sort(fn(left, right) { string.compare(left.0, right.0) })
+}
+
+fn compare_event_time(
+  left: types.TraceEvent,
+  right: types.TraceEvent,
+) -> order.Order {
+  case
+    int.compare(left.local_instant.offset_ns, right.local_instant.offset_ns)
+  {
+    order.Eq -> int.compare(left.local_instant.order, right.local_instant.order)
+    other -> other
   }
 }
 
-fn receiver_keys(events: List(types.TraceEvent), accumulator: List(String)) {
-  case events {
-    [] -> list.reverse(accumulator)
-    [event, ..rest] ->
-      case event.kind {
-        types.Received(_, _, _) ->
-          receiver_keys(
-            rest,
-            add_unique(accumulator, process_key(event.process.physical)),
-          )
-        _ -> receiver_keys(rest, accumulator)
-      }
-  }
-}
-
-fn received_senders(events: List(types.TraceEvent), accumulator: List(String)) {
-  case events {
-    [] -> list.reverse(accumulator)
-    [event, ..rest] ->
-      case event.kind {
-        types.Received(from, _, _) ->
-          received_senders(rest, add_unique(accumulator, process_key(from)))
-        _ -> received_senders(rest, accumulator)
-      }
-  }
-}
-
-fn add_unique(items: List(String), item: String) -> List(String) {
-  case list.contains(items, item) {
-    True -> items
-    False -> [item, ..items]
-  }
-}
-
-fn is_send_by(event: types.TraceEvent, key: String) -> Bool {
-  case event.kind {
-    types.Send(_, _, _) -> process_key(event.process.physical) == key
-    _ -> False
-  }
-}
-
-fn is_received_by(event: types.TraceEvent, key: String) -> Bool {
-  case event.kind {
-    types.Received(_, _, _) -> process_key(event.process.physical) == key
-    _ -> False
-  }
-}
-
-fn matching_receive(
-  sent: types.TraceEvent,
-  events: List(types.TraceEvent),
-) -> Result(types.TraceEvent, Nil) {
-  case sent.kind {
-    types.Send(to, _, serial) ->
-      find_event(events, fn(candidate) {
-        case candidate.kind {
-          types.Received(from, _, received_serial) ->
-            candidate.root_id == sent.root_id
-            && candidate.node == sent.node
-            && received_serial == serial
-            && candidate.process.physical == to
-            && from == sent.process.physical
-          _ -> False
-        }
-      })
-    _ -> Error(Nil)
-  }
+fn compare_candidate_time(
+  left: RestartCandidate,
+  right: RestartCandidate,
+) -> order.Order {
+  compare_event_time(left.spawn, right.spawn)
 }
 
 fn call_endpoints(
@@ -342,37 +507,41 @@ fn call_endpoints(
   }
 }
 
-fn has_reverse_reply(
-  events: List(types.TraceEvent),
-  caller: types.ProcessRef,
-  callee: types.ProcessRef,
-  call_at: Int,
-) -> Bool {
-  list.any(events, fn(event) {
-    case event.kind {
-      types.Send(to, types.Tag("reply"), _) ->
-        event.process.physical == callee
-        && to == caller
-        && event.local_timestamp_ns >= call_at
-      _ -> False
-    }
-  })
-}
-
-fn find_event(
-  events: List(types.TraceEvent),
-  predicate: fn(types.TraceEvent) -> Bool,
-) -> Result(types.TraceEvent, Nil) {
-  case events {
-    [] -> Error(Nil)
-    [event, ..rest] ->
-      case predicate(event) {
-        True -> Ok(event)
-        False -> find_event(rest, predicate)
-      }
+fn reply_endpoints(
+  event: types.TraceEvent,
+) -> Result(#(types.ProcessRef, types.ProcessRef), Nil) {
+  case event.kind {
+    types.Send(to, types.Tag("reply"), _) -> Ok(#(to, event.process.physical))
+    _ -> Error(Nil)
   }
 }
 
+fn call_key(caller: types.ProcessRef, callee: types.ProcessRef) -> String {
+  process_key(caller) <> "\u{1f}" <> process_key(callee)
+}
+
+fn message_key(
+  root_id: String,
+  from: types.ProcessRef,
+  to: types.ProcessRef,
+  serial: types.SequenceSerial,
+) -> String {
+  let assert types.SequenceSerial(previous, current) = serial
+  root_id
+  <> "\u{1f}"
+  <> process_key(from)
+  <> "\u{1f}"
+  <> process_key(to)
+  <> "\u{1f}"
+  <> int.to_string(previous)
+  <> ":"
+  <> int.to_string(current)
+}
+
+fn restart_key(node: String, actor_id: String) -> String {
+  node <> "\u{1f}" <> actor_id
+}
+
 fn process_key(process: types.ProcessRef) -> String {
-  process.node <> ":" <> process.pid
+  process.node <> "\u{0}" <> process.pid
 }

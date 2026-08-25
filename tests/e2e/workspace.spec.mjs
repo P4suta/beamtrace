@@ -10,7 +10,7 @@ test("million-event workspace stays windowed and supports its keyboard path", as
     if (url.hostname !== "127.0.0.1") externalRequests.push(request.url());
   });
   page.on("response", async (response) => {
-    if (response.url().includes("/api/v1/sessions/current/events")) {
+    if (response.url().includes("/api/v2/sessions/current/events")) {
       const body = await response.json();
       largestEventPage = Math.max(largestEventPage, body.events.length);
     }
@@ -22,6 +22,30 @@ test("million-event workspace stays windowed and supports its keyboard path", as
   await expect(page.locator("tbody tr")).toHaveCount(80);
   expect(largestEventPage).toBeLessThanOrEqual(200);
   expect(externalRequests).toEqual([]);
+
+  const canvas = page.locator("#causal-canvas");
+  await expect(canvas).toHaveAttribute("data-edge-count", "3");
+  await expect(canvas).toHaveAttribute(
+    "data-edge-kinds",
+    "process_order,sequential_message,spawned",
+  );
+  await expect(canvas).toHaveAttribute("data-inferred-edge-count", "1");
+  await expect(canvas).toHaveAttribute("data-boundary-count", "1");
+  await expect(canvas).toHaveAttribute("data-estimated-time-count", "1");
+  expect(Number(await canvas.getAttribute("data-edge-count"))).toBeLessThan(79);
+
+  await page.getByRole("button", { name: "event-2", exact: true }).click();
+  const eventInspector = page.getByRole("complementary", { name: "Event inspector" });
+  await expect(eventInspector).toContainText(
+    "1774000000000000200 ns estimated [1774000000000000150, 1774000000000000250]",
+  );
+  await expect(eventInspector).toContainText(
+    "Inferred · logical_actor_refinement_v2 · stable actor metadata",
+  );
+  await page.getByRole("button", { name: "event-4", exact: true }).click();
+  await expect(eventInspector).toContainText(
+    "spawned · child first event outside the visible observation",
+  );
 
   await page.getByRole("button", { name: "Live" }).click();
   await expect(page.locator("main")).toHaveAttribute("data-mode", "live");
@@ -44,7 +68,7 @@ test("Compare aligns multiple traces and renders latency and occurrence statisti
   let submittedPaths = [];
   page.on("request", (request) => {
     const url = new URL(request.url());
-    if (url.pathname === "/api/v1/compare" && request.method() === "POST") {
+    if (url.pathname === "/api/v2/compare" && request.method() === "POST") {
       submittedPaths = request.postDataJSON().paths;
     }
   });
@@ -59,10 +83,21 @@ test("Compare aligns multiple traces and renders latency and occurrence statisti
   const alignment = page.getByRole("table", { name: "Accessible trace alignment table" });
   await expect(alignment).toContainText("slow.beamtrace");
   await expect(alignment).toContainText("retry-branch");
-  await expect(alignment).toContainText("+90 ns");
+  await expect(alignment).toContainText("90 ns estimated [80, 100]");
+  await expect(alignment).toContainText("unique causal neighborhood");
   const statistics = page.getByRole("table", { name: "Multi-run branch statistics" });
-  await expect(statistics).toContainText("p50 10 ns · p95 100 ns");
+  await expect(statistics).toContainText("p50 10 ns exact · 2 valid / 1 missing");
+  await expect(statistics).toContainText(
+    "p95 100 ns estimated [95, 105] · 2 valid / 1 missing",
+  );
   await expect(statistics).toContainText("2/3 runs");
+  await expect(
+    page.getByLabel("First divergence causal path"),
+  ).toContainText("event-1 → event-3");
+  await expect(page.locator("#causal-canvas")).toHaveAttribute(
+    "data-divergence-edge-count",
+    "1",
+  );
   expect(submittedPaths).toEqual([
     "baseline.beamtrace",
     "slow.beamtrace",
@@ -85,26 +120,29 @@ test("Team trace library keeps raw content locked and pages permitted events", a
   const eventRequests = [];
   let holdRequest;
   const teamEvent = {
-    id: "team-event-7",
-    root_id: "team-root",
-    node: "orders@team",
-    process: {
-      physical: { node: "orders@team", pid: "<0.7.0>" },
-      logical: { id: "checkout-worker", label: "Checkout worker" },
-      evidence: [],
+    observation: {
+      schema_version: 2,
+      id: "team-event-7",
+      root_id: "team-root",
+      node: "orders@team",
+      process: {
+        physical: { node: "orders@team", pid: "<0.7.0>" },
+        logical: { id: "checkout-worker", label: "Checkout worker" },
+        identity_evidence: [],
+      },
+      local_instant: { offset_ns: 700, order: 7 },
+      event: { kind: "send" },
+      evidence: { kind: "exact" },
     },
-    local_timestamp_ns: 700,
-    event: { kind: "send" },
-    evidence: { kind: "exact" },
+    time: { kind: "unavailable", reason: "team archive has no clock phase" },
   };
   const traces = [
     {
       id: "trace-metadata",
-      status: "complete",
       node: "orders@team",
       mfa: { module: "orders", function: "checkout", arity: 1 },
       privacy: "metadata",
-      completeness: "complete",
+      delivery_status: "delivered",
       event_count: 1,
       received_at_ms: 1_774_000_000_000,
       legal_hold: false,
@@ -112,11 +150,10 @@ test("Team trace library keeps raw content locked and pages permitted events", a
     },
     {
       id: "trace-raw-locked",
-      status: "incomplete",
       node: "payments@team",
       mfa: { module: "payments", function: "charge", arity: 2 },
       privacy: "raw",
-      completeness: "incomplete",
+      delivery_status: "partial",
       event_count: 80,
       received_at_ms: 1_774_000_000_001,
       legal_hold: false,
@@ -124,14 +161,14 @@ test("Team trace library keeps raw content locked and pages permitted events", a
     },
   ];
 
-  await page.route(/\/api\/v1\/traces(?:[/?].*)?$/, async (route) => {
+  await page.route(/\/api\/v2\/traces(?:[/?].*)?$/, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.pathname === "/api/v1/traces") {
+    if (url.pathname === "/api/v2/traces") {
       await route.fulfill({ json: { traces, next_cursor: null } });
       return;
     }
-    if (url.pathname === "/api/v1/traces/trace-metadata/events") {
+    if (url.pathname === "/api/v2/traces/trace-metadata/events") {
       eventRequests.push(url.pathname);
       expect(url.searchParams.get("limit")).toBe("200");
       await route.fulfill({
@@ -144,7 +181,7 @@ test("Team trace library keeps raw content locked and pages permitted events", a
       return;
     }
     if (
-      url.pathname === "/api/v1/traces/trace-metadata/hold" &&
+      url.pathname === "/api/v2/traces/trace-metadata/hold" &&
       request.method() === "POST"
     ) {
       holdRequest = {
@@ -173,7 +210,7 @@ test("Team trace library keeps raw content locked and pages permitted events", a
 
   await page.getByRole("button", { name: "trace-metadata" }).click();
   await expect(page.getByRole("button", { name: "team-event-7" })).toBeVisible();
-  expect(eventRequests).toEqual(["/api/v1/traces/trace-metadata/events"]);
+  expect(eventRequests).toEqual(["/api/v2/traces/trace-metadata/events"]);
 
   await page.getByRole("button", { name: "Place legal hold" }).click();
   await expect(page.getByText("enabled", { exact: true })).toBeVisible();
@@ -190,7 +227,7 @@ test("Live polls bounded process metadata and exposes evidence in DOM", async ({
   const liveLimits = [];
   page.on("request", (request) => {
     const url = new URL(request.url());
-    if (url.pathname === "/api/v1/live") {
+    if (url.pathname === "/api/v2/live") {
       liveLimits.push(Number.parseInt(url.searchParams.get("limit"), 10));
     }
   });
@@ -256,7 +293,10 @@ test("attached workspace arms, polls, loads, and saves a real capture", async ({
   await expect(
     page
       .getByLabel("Capture controls")
-      .getByText("Ready · 1 events · complete", { exact: true }),
+      .getByText(
+        "Sealed · 1 events · sealed after 250ms quiet period · delivery verified",
+        { exact: true },
+      ),
   ).toBeVisible();
   await expect(page.getByRole("button", { name: "captured-root" })).toBeVisible();
 

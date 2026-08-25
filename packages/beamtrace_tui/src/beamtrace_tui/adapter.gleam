@@ -1,27 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace/types
 import beamtrace_tui/model
-import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 
 pub fn from_trace(events: List(types.TraceEvent)) -> List(model.Event) {
-  case events {
-    [] -> []
-    [first, ..] ->
-      list.map(events, fn(event) { from_event(event, first.local_timestamp_ns) })
-  }
+  list.map(events, from_event)
 }
 
-fn from_event(event: types.TraceEvent, origin_ns: Int) -> model.Event {
+fn from_event(event: types.TraceEvent) -> model.Event {
   model.Event(
     id: event.id,
     actor: actor_name(event.process),
     kind: kind_name(event.kind),
     evidence: evidence_name(event.evidence),
-    offset_us: int.max(0, event.local_timestamp_ns - origin_ns) / 1000,
+    offset_us: int.max(0, event.local_instant.offset_ns) / 1000,
     anomalous: anomalous(event.kind),
   )
 }
@@ -52,8 +47,8 @@ fn kind_name(kind: types.TraceEventKind) -> String {
 fn evidence_name(evidence: types.Evidence) -> String {
   case evidence {
     types.Exact -> "Exact"
-    types.Inferred(reason, confidence) ->
-      "Inferred " <> float.to_string(confidence) <> " · " <> reason
+    types.Inferred(inference) ->
+      "Inferred · " <> inference.method <> " · " <> inference.reason
   }
 }
 

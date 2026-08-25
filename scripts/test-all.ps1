@@ -12,6 +12,8 @@ $steps = @(
     'test-brand-portability.ps1',
     'test-gleam-network-retry.ps1',
     'test-core.ps1',
+    'test-format-conformance.ps1',
+    'test-performance.ps1',
     'test-core-consumer.ps1',
     'test-runtime.ps1',
     'test-mcp.ps1',

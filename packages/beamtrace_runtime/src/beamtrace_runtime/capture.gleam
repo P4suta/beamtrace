@@ -1,4 +1,5 @@
 import beamtrace/aql
+import beamtrace/dag
 import beamtrace/identity
 import beamtrace/types
 import gleam/dict.{type Dict}
@@ -33,6 +34,22 @@ pub type RawTermView {
 }
 
 pub type RawEvent {
+  RawEventV2(
+    id: String,
+    root_id: String,
+    node: String,
+    process_pid: String,
+    local_offset_ns: Int,
+    local_order: Int,
+    kind: String,
+    peer_node: String,
+    peer_pid: String,
+    previous_serial: Int,
+    current_serial: Int,
+    semantic: String,
+    metadata: RawProcessMetadata,
+    term: RawTermView,
+  )
   RawEvent(
     id: String,
     root_id: String,
@@ -74,10 +91,39 @@ pub type RawEvent {
   )
 }
 
+pub type RawCaptureIssue {
+  RawCaptureIssue(
+    kind: String,
+    node: String,
+    field: String,
+    expected: Int,
+    actual: Int,
+  )
+}
+
+pub type RawNodeReceipt {
+  RawNodeReceipt(
+    node: String,
+    final_batch_sequence: Int,
+    event_count: Int,
+    byte_count: Int,
+  )
+}
+
+pub type RawOutcome {
+  RawOutcome(
+    end_kind: String,
+    end_detail: String,
+    issues: List(RawCaptureIssue),
+    receipts: List(RawNodeReceipt),
+  )
+}
+
 pub type CaptureResult {
   CaptureResult(
     events: List(types.TraceEvent),
-    completeness: types.Completeness,
+    outcome: types.CaptureOutcome,
+    clocks: types.ClockCalibration,
   )
 }
 
@@ -141,6 +187,7 @@ pub fn execute(
         function_,
         arity,
         budget.max_duration_ms,
+        budget.drain_timeout_ms,
         budget.max_events,
         budget.max_bytes,
         budget.max_agent_mailbox,
@@ -157,6 +204,7 @@ pub fn execute(
         function_,
         arity,
         budget.max_duration_ms,
+        budget.drain_timeout_ms,
         budget.max_events,
         budget.max_bytes,
         budget.max_agent_mailbox,
@@ -167,8 +215,8 @@ pub fn execute(
       )
     [] -> Error("capture_requires_at_least_one_node")
   })
-  let #(events, completeness) = payload
-  let result = normalize(events, completeness, spec.trigger)
+  let #(events, raw_outcome, clocks) = payload
+  let result = normalize_v2(events, raw_outcome, clocks, spec.trigger)
   case prepared.residual {
     None -> Ok(result)
     Some(query) -> Ok(filter_roots(result, query, spec.trigger))
@@ -184,20 +232,22 @@ fn validate_spec(spec: types.CaptureSpec) -> Result(Nil, String) {
     budget.max_events > 0,
     budget.max_bytes > 0,
     budget.max_duration_ms > 0 && budget.max_duration_ms <= 300_000,
+    budget.drain_timeout_ms >= 1000 && budget.drain_timeout_ms <= 60_000,
     budget.max_agent_mailbox > 0,
     budget.max_roots > 0 && budget.max_roots <= 1000,
     valid_privacy(spec.privacy)
   {
-    [], _, _, _, _, _, _, _, _ -> Error("capture_requires_at_least_one_node")
-    _, False, _, _, _, _, _, _, _ -> Error("too_many_capture_nodes")
-    _, _, False, _, _, _, _, _, _ -> Error("duplicate_capture_node")
-    _, _, _, False, _, _, _, _, _ -> Error("invalid_event_budget")
-    _, _, _, _, False, _, _, _, _ -> Error("invalid_byte_budget")
-    _, _, _, _, _, False, _, _, _ -> Error("invalid_capture_window")
-    _, _, _, _, _, _, False, _, _ -> Error("invalid_mailbox_budget")
-    _, _, _, _, _, _, _, False, _ -> Error("invalid_root_budget")
-    _, _, _, _, _, _, _, _, False -> Error("invalid_privacy_policy")
-    _, True, True, True, True, True, True, True, True -> Ok(Nil)
+    [], _, _, _, _, _, _, _, _, _ -> Error("capture_requires_at_least_one_node")
+    _, False, _, _, _, _, _, _, _, _ -> Error("too_many_capture_nodes")
+    _, _, False, _, _, _, _, _, _, _ -> Error("duplicate_capture_node")
+    _, _, _, False, _, _, _, _, _, _ -> Error("invalid_event_budget")
+    _, _, _, _, False, _, _, _, _, _ -> Error("invalid_byte_budget")
+    _, _, _, _, _, False, _, _, _, _ -> Error("invalid_capture_window")
+    _, _, _, _, _, _, False, _, _, _ -> Error("invalid_drain_timeout")
+    _, _, _, _, _, _, _, False, _, _ -> Error("invalid_mailbox_budget")
+    _, _, _, _, _, _, _, _, False, _ -> Error("invalid_root_budget")
+    _, _, _, _, _, _, _, _, _, False -> Error("invalid_privacy_policy")
+    _, True, True, True, True, True, True, True, True, True -> Ok(Nil)
   }
 }
 
@@ -234,135 +284,242 @@ pub fn normalize(
   completeness: String,
   trigger: types.Mfa,
 ) -> CaptureResult {
+  normalize_v2(
+    events,
+    legacy_raw_outcome(completeness),
+    types.empty_calibration(),
+    trigger,
+  )
+}
+
+pub fn normalize_v2(
+  events: List(RawEvent),
+  outcome: RawOutcome,
+  clocks: types.ClockCalibration,
+  trigger: types.Mfa,
+) -> CaptureResult {
   let normalized =
     list.map(events, fn(event) { normalize_event(event, trigger) })
   CaptureResult(
     events: normalized |> disambiguate_roots |> propagate_process_identities,
-    completeness: parse_completeness(completeness),
+    outcome: normalize_outcome(outcome),
+    clocks: clocks,
   )
 }
 
 fn disambiguate_roots(
   events: List(types.TraceEvent),
 ) -> List(types.TraceEvent) {
-  let root_counts =
-    list.fold(events, dict.new(), fn(counts, event) {
+  let groups = root_groups(events)
+  let seeded =
+    list.map(events, fn(event) {
+      case event.kind, dict.get(groups, event.root_id) {
+        types.Root(_, _), Ok([_, _, ..]) ->
+          types.TraceEvent(..event, root_id: event.id)
+        _, _ -> event
+      }
+    })
+  case dag.build(seeded) {
+    Error(_) ->
+      mark_unattributed_roots(seeded, groups, "causal graph is cyclic")
+    Ok(graph) -> {
+      let reachable = exact_root_reachability(graph)
+      list.map(seeded, fn(event) {
+        case event.kind, dict.get(groups, event.root_id) {
+          types.Root(_, _), _ -> event
+          _, Ok(group) ->
+            case group {
+              [_, _, ..] -> {
+                let reached = dict_get_list(reachable, event.id)
+                let candidates =
+                  list.filter(group, fn(root) { list.contains(reached, root) })
+                attribute_reachable_root(event, candidates)
+              }
+              _ -> event
+            }
+          _, Error(_) -> event
+        }
+      })
+    }
+  }
+}
+
+fn root_groups(events: List(types.TraceEvent)) -> Dict(String, List(String)) {
+  list.fold(events, dict.new(), fn(groups, event) {
+    case event.kind {
+      types.Root(_, _) ->
+        dict.insert(groups, event.root_id, [
+          event.id,
+          ..dict_get_list(groups, event.root_id)
+        ])
+      _ -> groups
+    }
+  })
+}
+
+fn attribute_reachable_root(
+  event: types.TraceEvent,
+  candidates: List(String),
+) -> types.TraceEvent {
+  case candidates {
+    [root_id] -> types.TraceEvent(..event, root_id: root_id)
+    [] ->
+      types.TraceEvent(
+        ..event,
+        root_id: "unattributed:" <> event.root_id,
+        evidence: root_attribution_evidence(
+          event.id,
+          [],
+          "no exact causal path from any candidate root",
+        ),
+      )
+    [_, _, ..] ->
+      types.TraceEvent(
+        ..event,
+        root_id: "ambiguous:" <> event.root_id,
+        evidence: root_attribution_evidence(
+          event.id,
+          candidates,
+          "event is exactly reachable from multiple roots",
+        ),
+      )
+  }
+}
+
+fn root_attribution_evidence(
+  event_id: String,
+  candidates: List(String),
+  reason: String,
+) -> types.Evidence {
+  types.inferred("exact_graph_root_reachability", reason, [
+    types.EvidenceEvent(event_id),
+    types.ObservedValue("candidate_roots", string.join(candidates, ",")),
+    types.AlgorithmSetting("edge_policy", "Exact only"),
+  ])
+}
+
+fn mark_unattributed_roots(
+  events: List(types.TraceEvent),
+  groups: Dict(String, List(String)),
+  reason: String,
+) -> List(types.TraceEvent) {
+  list.map(events, fn(event) {
+    case event.kind, dict.get(groups, event.root_id) {
+      types.Root(_, _), _ -> event
+      _, Ok([_, _, ..]) ->
+        types.TraceEvent(
+          ..event,
+          root_id: "unattributed:" <> event.root_id,
+          evidence: root_attribution_evidence(event.id, [], reason),
+        )
+      _, _ -> event
+    }
+  })
+}
+
+fn exact_root_reachability(
+  graph: dag.CausalGraph,
+) -> Dict(String, List(String)) {
+  let indegree =
+    list.fold(graph.events, dict.new(), fn(index, event) {
+      dict.insert(index, event.id, 0)
+    })
+  let memberships =
+    list.fold(graph.events, dict.new(), fn(index, event) {
       case event.kind {
-        types.Root(_, _) ->
-          dict.insert(
-            counts,
-            event.root_id,
-            case dict.get(counts, event.root_id) {
-              Ok(count) -> count + 1
-              Error(_) -> 1
-            },
-          )
-        _ -> counts
+        types.Root(_, _) -> dict.insert(index, event.id, [event.id])
+        _ -> index
       }
     })
-  let #(_, reversed) =
-    list.fold(events, #(dict.new(), []), fn(state, event) {
-      let #(process_roots, accumulator) = state
-      let ambiguous = case dict.get(root_counts, event.root_id) {
-        Ok(count) -> count > 1
-        Error(_) -> False
-      }
-      case event.kind, ambiguous {
-        types.Root(_, _), True -> {
-          let root_id = event.id
+  let #(adjacency, indegree) =
+    list.fold(graph.edges, #(dict.new(), indegree), fn(indexes, edge) {
+      let #(adjacency, indegree) = indexes
+      case edge.evidence {
+        types.Exact -> {
+          let outgoing = dict_get_list(adjacency, edge.from)
+          let degree = dict_get_int(indegree, edge.to)
           #(
-            dict.insert(
-              process_roots,
-              process_key(event.process.physical),
-              root_id,
-            ),
-            [types.TraceEvent(..event, root_id: root_id), ..accumulator],
+            dict.insert(adjacency, edge.from, [edge.to, ..outgoing]),
+            dict.insert(indegree, edge.to, degree + 1),
           )
         }
-        types.Root(_, _), False -> #(
-          dict.insert(
-            process_roots,
-            process_key(event.process.physical),
-            event.root_id,
-          ),
-          [event, ..accumulator],
-        )
-        _, False -> #(
-          propagate_root_to_peer(process_roots, event, event.root_id),
-          [event, ..accumulator],
-        )
-        _, True -> {
-          let assigned = case
-            dict.get(process_roots, process_key(event.process.physical))
-          {
-            Ok(root_id) -> Ok(root_id)
-            Error(_) -> root_from_peer(process_roots, event)
-          }
-          case assigned {
-            Ok(root_id) -> #(
-              propagate_root_to_peer(process_roots, event, root_id),
-              [types.TraceEvent(..event, root_id: root_id), ..accumulator],
-            )
-            Error(_) -> #(process_roots, [
-              types.TraceEvent(
-                ..event,
-                root_id: "unattributed:" <> event.root_id,
-                evidence: types.inferred(
-                  "multiple root attribution unavailable",
-                  0.0,
-                ),
-              ),
-              ..accumulator
-            ])
-          }
-        }
+        types.Inferred(_) -> indexes
       }
     })
-  list.reverse(reversed)
+  let ready =
+    indegree
+    |> dict.to_list
+    |> list.filter_map(fn(entry) {
+      case entry.1 == 0 {
+        True -> Ok(entry.0)
+        False -> Error(Nil)
+      }
+    })
+  propagate_root_sets(ready, adjacency, indegree, memberships)
 }
 
-fn root_from_peer(
-  process_roots: Dict(String, String),
-  event: types.TraceEvent,
-) -> Result(String, Nil) {
-  case event.kind {
-    types.Received(from, _, _) -> dict_root(process_roots, from)
-    _ -> Error(Nil)
+fn propagate_root_sets(
+  ready: List(String),
+  adjacency: Dict(String, List(String)),
+  indegree: Dict(String, Int),
+  memberships: Dict(String, List(String)),
+) -> Dict(String, List(String)) {
+  case ready {
+    [] -> memberships
+    [id, ..rest] -> {
+      let roots = dict_get_list(memberships, id)
+      let #(next_indegree, next_memberships, newly_ready) =
+        list.fold(
+          dict_get_list(adjacency, id),
+          #(indegree, memberships, []),
+          fn(state, target) {
+            let #(degrees, roots_by_event, zeroes) = state
+            let degree = dict_get_int(degrees, target) - 1
+            let propagated =
+              unique_append(dict_get_list(roots_by_event, target), roots)
+            #(
+              dict.insert(degrees, target, degree),
+              dict.insert(roots_by_event, target, propagated),
+              case degree == 0 {
+                True -> [target, ..zeroes]
+                False -> zeroes
+              },
+            )
+          },
+        )
+      propagate_root_sets(
+        list.append(rest, list.reverse(newly_ready)),
+        adjacency,
+        next_indegree,
+        next_memberships,
+      )
+    }
   }
 }
 
-fn propagate_root_to_peer(
-  process_roots: Dict(String, String),
-  event: types.TraceEvent,
-  root_id: String,
-) -> Dict(String, String) {
-  let with_process =
-    dict.insert(process_roots, process_key(event.process.physical), root_id)
-  case event.kind {
-    types.Send(to, _, _) | types.Spawn(to, _) ->
-      insert_root_if_absent(with_process, to, root_id)
-    _ -> with_process
+fn unique_append(left: List(String), right: List(String)) -> List(String) {
+  list.fold(right, left, fn(values, value) {
+    case list.contains(values, value) {
+      True -> values
+      False -> [value, ..values]
+    }
+  })
+}
+
+fn dict_get_list(
+  values: Dict(String, List(String)),
+  key: String,
+) -> List(String) {
+  case dict.get(values, key) {
+    Ok(value) -> value
+    Error(_) -> []
   }
 }
 
-fn insert_root_if_absent(
-  roots: Dict(String, String),
-  process: types.ProcessRef,
-  root_id: String,
-) -> Dict(String, String) {
-  case dict_root(roots, process) {
-    Ok(_) -> roots
-    Error(_) -> dict.insert(roots, process_key(process), root_id)
-  }
-}
-
-fn dict_root(
-  roots: Dict(String, String),
-  process: types.ProcessRef,
-) -> Result(String, Nil) {
-  case dict.get(roots, process_key(process)) {
-    Ok(root_id) -> Ok(root_id)
-    Error(_) -> Error(Nil)
+fn dict_get_int(values: Dict(String, Int), key: String) -> Int {
+  case dict.get(values, key) {
+    Ok(value) -> value
+    Error(_) -> 0
   }
 }
 
@@ -396,26 +553,31 @@ fn process_key(process: types.ProcessRef) -> String {
 fn normalize_event(event: RawEvent, trigger: types.Mfa) -> types.TraceEvent {
   let physical = types.ProcessRef(event.node, event.process_pid)
   let process = case event {
+    RawEventV2(_, _, _, _, _, _, _, _, _, _, _, _, metadata, _) ->
+      identity.resolve(physical, process_metadata(metadata))
     RawEvent(_, _, _, _, _, _, _, _, _, _) ->
       types.ProcessIdentity(physical: physical, logical: None, evidence: [])
     RawEventWithMetadata(_, _, _, _, _, _, _, _, _, _, metadata)
     | RawEventWithTerm(_, _, _, _, _, _, _, _, _, _, metadata, _) ->
       identity.resolve(physical, process_metadata(metadata))
   }
-  let peer = types.ProcessRef(event.peer_node, event.peer_pid)
-  let message = shaped_term(event, types.Tag(event.semantic))
-  let kind = case event.kind {
+  let #(peer_node, peer_pid) = raw_event_peer(event)
+  let peer = types.ProcessRef(peer_node, peer_pid)
+  let semantic = raw_event_semantic(event)
+  let message = shaped_term(event, types.Tag(semantic))
+  let kind = case raw_event_kind(event) {
     "root" -> types.Root(trigger, root_arguments(event))
-    "send" -> types.Send(peer, message, event.serial)
-    "receive" -> types.Received(peer, message, event.serial)
-    "print" -> types.SystemSignal("seq_trace_print", event.serial)
+    "send" -> types.Send(peer, message, event_serial(event))
+    "receive" -> types.Received(peer, message, event_serial(event))
+    "print" ->
+      types.SystemSignal("seq_trace_print", serial_current(event_serial(event)))
     "spawn" ->
-      case parse_mfa(event.semantic) {
+      case parse_mfa(semantic) {
         Ok(initial_call) -> types.Spawn(peer, initial_call)
         Error(_) -> types.Gap(1, "invalid spawn initial call")
       }
     "exit" -> types.Exit(message)
-    "register" -> types.Register(event.semantic)
+    "register" -> types.Register(semantic)
     "link" -> types.Link(peer)
     "gap" -> types.Gap(1, "relay backpressure")
     unknown -> types.Gap(1, "unknown relay event: " <> unknown)
@@ -426,14 +588,71 @@ fn normalize_event(event: RawEvent, trigger: types.Mfa) -> types.TraceEvent {
     root_id: event.root_id,
     node: event.node,
     process: process,
-    local_timestamp_ns: event.local_timestamp_ns,
+    local_instant: event_instant(event),
     kind: kind,
     evidence: types.Exact,
   )
 }
 
+fn raw_event_peer(event: RawEvent) -> #(String, String) {
+  case event {
+    RawEventV2(_, _, _, _, _, _, _, node, pid, _, _, _, _, _)
+    | RawEvent(_, _, _, _, _, _, node, pid, _, _)
+    | RawEventWithMetadata(_, _, _, _, _, _, node, pid, _, _, _)
+    | RawEventWithTerm(_, _, _, _, _, _, node, pid, _, _, _, _) -> #(node, pid)
+  }
+}
+
+fn raw_event_kind(event: RawEvent) -> String {
+  case event {
+    RawEventV2(_, _, _, _, _, _, kind, _, _, _, _, _, _, _)
+    | RawEvent(_, _, _, _, _, kind, _, _, _, _)
+    | RawEventWithMetadata(_, _, _, _, _, kind, _, _, _, _, _)
+    | RawEventWithTerm(_, _, _, _, _, kind, _, _, _, _, _, _) -> kind
+  }
+}
+
+fn raw_event_semantic(event: RawEvent) -> String {
+  case event {
+    RawEventV2(_, _, _, _, _, _, _, _, _, _, _, semantic, _, _)
+    | RawEvent(_, _, _, _, _, _, _, _, _, semantic)
+    | RawEventWithMetadata(_, _, _, _, _, _, _, _, _, semantic, _)
+    | RawEventWithTerm(_, _, _, _, _, _, _, _, _, semantic, _, _) -> semantic
+  }
+}
+
+fn event_instant(event: RawEvent) -> types.LocalInstant {
+  case event {
+    RawEventV2(_, _, _, _, offset, order, _, _, _, _, _, _, _, _) ->
+      types.LocalInstant(offset, order)
+    RawEvent(_, _, _, _, timestamp, _, _, _, _, _)
+    | RawEventWithMetadata(_, _, _, _, timestamp, _, _, _, _, _, _)
+    | RawEventWithTerm(_, _, _, _, timestamp, _, _, _, _, _, _, _) ->
+      types.LocalInstant(timestamp, 0)
+  }
+}
+
+fn event_serial(event: RawEvent) -> types.SequenceSerial {
+  case event {
+    RawEventV2(_, _, _, _, _, _, _, _, _, previous, current, _, _, _) ->
+      types.SequenceSerial(previous, current)
+    RawEvent(_, _, _, _, _, _, _, _, serial, _)
+    | RawEventWithMetadata(_, _, _, _, _, _, _, _, serial, _, _)
+    | RawEventWithTerm(_, _, _, _, _, _, _, _, serial, _, _, _) ->
+      types.LegacySerial(serial)
+  }
+}
+
+fn serial_current(serial: types.SequenceSerial) -> Int {
+  case serial {
+    types.SequenceSerial(_, current) | types.LegacySerial(current) -> current
+  }
+}
+
 fn shaped_term(event: RawEvent, fallback: types.TermView) -> types.TermView {
   case event {
+    RawEventV2(_, _, _, _, _, _, _, _, _, _, _, _, _, term) ->
+      normalize_term(term)
     RawEventWithTerm(_, _, _, _, _, _, _, _, _, _, _, term) ->
       normalize_term(term)
     _ -> fallback
@@ -442,6 +661,8 @@ fn shaped_term(event: RawEvent, fallback: types.TermView) -> types.TermView {
 
 fn root_arguments(event: RawEvent) -> List(types.TermView) {
   case event {
+    RawEventV2(_, _, _, _, _, _, _, _, _, _, _, _, _, RawList(_, items)) ->
+      list.map(items, normalize_term)
     RawEventWithTerm(_, _, _, _, _, _, _, _, _, _, _, RawList(_, items)) ->
       list.map(items, normalize_term)
     _ -> []
@@ -515,32 +736,139 @@ fn parse_mfa(source: String) -> Result(types.Mfa, Nil) {
   }
 }
 
-pub fn parse_completeness(source: String) -> types.Completeness {
+fn legacy_raw_outcome(source: String) -> RawOutcome {
   case source {
-    "complete" -> types.Complete
+    "complete" ->
+      RawOutcome(
+        "legacy_unknown",
+        "",
+        [
+          RawCaptureIssue(
+            "legacy_unverified",
+            "",
+            "v1 completeness was not delivery verified",
+            0,
+            0,
+          ),
+        ],
+        [],
+      )
     _ ->
       case string.split_once(source, ":") {
-        Ok(#("truncated", reason)) -> types.Truncated(reason)
+        Ok(#("truncated", reason)) ->
+          RawOutcome("budget_reached", reason, [], [])
         Ok(#("gapped", count)) ->
-          case int.parse(count) {
-            Ok(value) -> types.Gapped(value)
-            Error(_) -> types.Gapped(1)
-          }
+          RawOutcome(
+            "legacy_unknown",
+            "",
+            [
+              RawCaptureIssue(
+                "legacy_unverified",
+                "",
+                "v1 reported a gap of "
+                  <> count
+                  <> " events without a verifiable node receipt",
+                0,
+                0,
+              ),
+            ],
+            [],
+          )
         Ok(#("partial_node", nodes)) ->
-          types.PartialNode(string.split(nodes, on: ","))
-        Ok(#("inferred", reason)) -> types.InferredCapture(reason)
-        _ -> types.InferredCapture("unknown completeness: " <> source)
+          RawOutcome(
+            "legacy_unknown",
+            "",
+            [
+              RawCaptureIssue(
+                "legacy_unverified",
+                "",
+                "v1 reported partial nodes without receipts: " <> nodes,
+                0,
+                0,
+              ),
+            ],
+            [],
+          )
+        Ok(#("inferred", reason)) ->
+          RawOutcome(
+            "legacy_unknown",
+            "",
+            [RawCaptureIssue("legacy_unverified", "", reason, 0, 0)],
+            [],
+          )
+        _ ->
+          RawOutcome(
+            "legacy_unknown",
+            "",
+            [RawCaptureIssue("legacy_unverified", "", source, 0, 0)],
+            [],
+          )
       }
   }
 }
 
-pub fn exit_code(completeness: types.Completeness) -> Int {
-  case completeness {
-    types.Complete -> 0
-    types.Truncated(_)
-    | types.Gapped(_)
-    | types.PartialNode(_)
-    | types.InferredCapture(_) -> 3
+fn normalize_outcome(raw: RawOutcome) -> types.CaptureOutcome {
+  types.CaptureOutcome(
+    normalize_end(raw.end_kind, raw.end_detail, raw.issues),
+    list.map(raw.issues, normalize_issue),
+    list.map(raw.receipts, fn(receipt) {
+      types.NodeReceipt(
+        receipt.node,
+        receipt.final_batch_sequence,
+        receipt.event_count,
+        receipt.byte_count,
+      )
+    }),
+  )
+}
+
+fn normalize_end(
+  kind: String,
+  detail: String,
+  issues: List(RawCaptureIssue),
+) -> types.ObservationEnd {
+  case kind {
+    "quiet_period" -> types.QuietPeriod(parse_non_negative(detail, 250))
+    "time_window" -> types.TimeWindow(parse_non_negative(detail, 0))
+    "user_stopped" -> types.UserStopped
+    "budget_reached" -> types.BudgetReached(detail)
+    "agent_failure" ->
+      case issues {
+        [issue, ..] -> types.AgentFailure(issue.node, detail)
+        [] -> types.AgentFailure("unknown@node", detail)
+      }
+    _ -> types.LegacyUnknown
+  }
+}
+
+fn normalize_issue(raw: RawCaptureIssue) -> types.CaptureIssue {
+  case raw.kind {
+    "dropped_events" -> types.DroppedEvents(raw.node, raw.expected)
+    "missing_node" -> types.MissingNode(raw.node)
+    "batch_sequence_gap" ->
+      types.BatchSequenceGap(raw.node, raw.expected, raw.actual)
+    "duplicate_batch" -> types.DuplicateBatch(raw.node, raw.actual)
+    "receipt_mismatch" ->
+      types.ReceiptMismatch(raw.node, raw.field, raw.expected, raw.actual)
+    "drain_timeout" -> types.DrainTimeout(raw.node, raw.actual)
+    _ -> types.LegacyUnverified(raw.field)
+  }
+}
+
+fn parse_non_negative(source: String, fallback: Int) -> Int {
+  case int.parse(source) {
+    Ok(value) if value >= 0 -> value
+    _ -> fallback
+  }
+}
+
+pub fn exit_code(outcome: types.CaptureOutcome) -> Int {
+  case outcome.issues, outcome.end {
+    [], types.QuietPeriod(_)
+    | [], types.TimeWindow(_)
+    | [], types.UserStopped
+    -> 0
+    _, _ -> 3
   }
 }
 
@@ -591,7 +919,7 @@ fn event_context(event: types.TraceEvent, trigger: types.Mfa) {
     #("root_id", aql.StringValue(event.root_id)),
     #("event.kind", aql.StringValue(event_kind_name(event.kind))),
     #("exact", aql.BoolValue(event.evidence == types.Exact)),
-    #("timestamp_ns", aql.IntValue(event.local_timestamp_ns)),
+    #("timestamp_ns", aql.IntValue(event.local_instant.offset_ns)),
   ]
   let process = process_context(event.process)
   let specific = case event.kind {
@@ -751,6 +1079,7 @@ pub fn remote(
         max_events: budget.max_events,
         max_bytes: budget.max_bytes,
         max_duration_ms: capture_window_ms,
+        drain_timeout_ms: 10_000,
         max_agent_mailbox: budget.max_agent_mailbox,
         max_roots: 1,
       ),
@@ -780,6 +1109,7 @@ pub fn distributed(
             max_events: budget.max_events,
             max_bytes: budget.max_bytes,
             max_duration_ms: capture_window_ms,
+            drain_timeout_ms: 10_000,
             max_agent_mailbox: budget.max_agent_mailbox,
             max_roots: 1,
           ),
@@ -841,6 +1171,7 @@ fn collect_remote_spec(
   function_: String,
   arity: Int,
   capture_window_ms: Int,
+  drain_timeout_ms: Int,
   max_events: Int,
   max_bytes: Int,
   max_agent_mailbox: Int,
@@ -848,7 +1179,7 @@ fn collect_remote_spec(
   predicate: aql.AgentPredicate,
   privacy: types.Privacy,
   preset: types.Preset,
-) -> Result(#(List(RawEvent), String), String)
+) -> Result(#(List(RawEvent), RawOutcome, types.ClockCalibration), String)
 
 @external(erlang, "beamtrace_capture_ffi", "collect_distributed_spec")
 fn collect_distributed_spec(
@@ -858,6 +1189,7 @@ fn collect_distributed_spec(
   function_: String,
   arity: Int,
   capture_window_ms: Int,
+  drain_timeout_ms: Int,
   max_events: Int,
   max_bytes: Int,
   max_agent_mailbox: Int,
@@ -865,7 +1197,7 @@ fn collect_distributed_spec(
   predicate: aql.AgentPredicate,
   privacy: types.Privacy,
   preset: types.Preset,
-) -> Result(#(List(RawEvent), String), String)
+) -> Result(#(List(RawEvent), RawOutcome, types.ClockCalibration), String)
 
 @external(erlang, "beamtrace_capture_ffi", "probe_remote")
 fn probe_remote(node: String, cookie: String) -> Result(String, String)

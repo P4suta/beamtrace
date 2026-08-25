@@ -43,11 +43,11 @@ pub fn main() {
       root_id: "checkout-1",
       node: "shop@localhost",
       process: sender,
-      local_timestamp_ns: 100,
+      local_instant: types.LocalInstant(offset_ns: 100, order: 1),
       kind: types.Send(
         to: types.ProcessRef("shop@localhost", "<0.20.0>"),
         message: types.Tag("charge"),
-        serial: 1,
+        serial: types.SequenceSerial(previous: 0, current: 1),
       ),
       evidence: types.Exact,
     )
@@ -57,12 +57,13 @@ pub fn main() {
   let assert Ok(graph) = dag.build([decoded])
   let assert [finding] =
     diagnostics.hot_senders([decoded], minimum_messages: 1)
+  let assert diagnostics.CountValue(message_count) = finding.value
 
   io.println(
     "codec=round-trip dag_boundaries="
     <> { graph.boundaries |> list.length |> int.to_string }
     <> " diagnostic_messages="
-    <> int.to_string(finding.value),
+    <> int.to_string(message_count),
   )
 }
 ```
@@ -79,7 +80,7 @@ Both commands print
 
 ## Modules
 
-- `beamtrace/types` — capture specifications, trace events, evidence, completeness, and privacy-safe term views
+- `beamtrace/types` — capture specifications, node-relative events, structured outcomes, evidence, interval time, and privacy-safe term views
 - `beamtrace/aql` — parsing, evaluation, and safe agent-side planning for BeamTrace Query Language
 - `beamtrace/dag` and `beamtrace/merge` — causal graph validation and distributed partial-order merging
 - `beamtrace/identity` — physical process and logical actor identity evidence
@@ -87,7 +88,7 @@ Both commands print
 - `beamtrace/diff` and `beamtrace/stats` — PID-independent alignment and multi-run statistics
 - `beamtrace/codec` and `beamtrace/protocol` — versioned trace and wire contracts
 
-Every causal relationship is represented as exact evidence or as an inference carrying a reason and confidence. External boundaries and missing observations remain explicit.
+Every causal relationship is represented as exact evidence or as an inference carrying a method, reason, evidence events, observed values, and algorithm settings. External boundaries, integrity issues, ambiguity, and unavailable time remain explicit; the package does not emit confidence probabilities.
 
 ## Compatibility
 

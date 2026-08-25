@@ -1,4 +1,3 @@
-import beamtrace/codec
 import beamtrace/types
 import beamtrace_runtime/storage
 import gleam/int
@@ -6,6 +5,7 @@ import gleam/list
 import gleam/option.{None}
 import gleam/string
 import gleeunit/should
+import v2_fixture
 
 fn fixture_event() {
   let process =
@@ -19,22 +19,14 @@ fn fixture_event() {
     root_id: "root-1",
     node: "fixture@host",
     process: process,
-    local_timestamp_ns: 10,
+    local_instant: v2_fixture.instant(10),
     kind: types.Stop("complete"),
     evidence: types.Exact,
   )
 }
 
 fn fixture_manifest() {
-  codec.Manifest(
-    schema_version: 1,
-    tool_version: "0.1.0",
-    capture_id: "capture-storage-test",
-    nodes: ["fixture@host"],
-    completeness: types.Complete,
-    privacy: types.Metadata,
-    checksums: [],
-  )
+  v2_fixture.manifest("capture-storage-test", ["fixture@host"])
 }
 
 pub fn agtrace_is_versioned_zip_and_round_trips_test() {
@@ -52,16 +44,29 @@ pub fn agtrace_is_versioned_zip_and_round_trips_test() {
   |> should.equal([
     "annotations.json",
     "checksums.json",
+    "clocks.json",
     "events/000001.ndjson",
+    "graph/000001.json",
     "indexes/events.idx",
     "manifest.json",
-    "processes.ndjson",
   ])
 }
 
 pub fn non_zip_and_missing_manifest_are_rejected_test() {
   storage.load("gleam.toml")
   |> should.equal(Error(storage.InvalidContainer))
+}
+
+pub fn save_rejects_event_nodes_not_declared_by_manifest_test() {
+  let invalid = v2_fixture.manifest("invalid-node-reference", ["other@host"])
+  storage.save("build/beamtrace-invalid-write.beamtrace", invalid, [
+    fixture_event(),
+  ])
+  |> should.equal(
+    Error(storage.CodecError(
+      "InvalidField(\"events.node\", \"references a node not declared by the manifest\")",
+    )),
+  )
 }
 
 pub fn large_trace_is_segmented_and_loaded_in_event_order_test() {
@@ -72,7 +77,7 @@ pub fn large_trace_is_segmented_and_loaded_in_event_order_test() {
         types.TraceEvent(
           ..fixture_event(),
           id: "event-" <> int.to_string(index),
-          local_timestamp_ns: index,
+          local_instant: v2_fixture.instant(index),
         ),
         ..events
       ]
@@ -100,7 +105,7 @@ pub fn event_window_reads_across_segments_without_loading_the_archive_test() {
         types.TraceEvent(
           ..fixture_event(),
           id: "event-" <> int.to_string(index),
-          local_timestamp_ns: index,
+          local_instant: v2_fixture.instant(index),
         ),
         ..events
       ]
@@ -137,7 +142,7 @@ pub fn full_text_search_scans_segments_but_only_materializes_the_window_test() {
         types.TraceEvent(
           ..fixture_event(),
           id: "event-" <> int.to_string(index),
-          local_timestamp_ns: index,
+          local_instant: v2_fixture.instant(index),
           kind: kind,
         ),
         ..events

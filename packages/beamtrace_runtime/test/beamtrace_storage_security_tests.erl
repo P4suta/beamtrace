@@ -39,8 +39,10 @@ checksum_tampering_is_rejected_test() ->
             {ok, nil},
             beamtrace_storage_ffi:write_container(
                 PathBinary,
-                <<"{\"schema_version\":1}">>,
-                [<<"{\"id\":\"one\"}">>]
+                <<"{\"schema_version\":2}">>,
+                [<<"{\"schema_version\":2,\"id\":\"one\"}">>],
+                [<<"{\"schema_version\":2,\"event_ids\":[\"one\"],\"edges\":[],\"boundaries\":[]}">>],
+                <<"{\"schema_version\":2,\"capture_anchor_unix_ns\":\"0\",\"nodes\":[]}">>
             )
         ),
         {ok, Extracted} = zip:extract(Path, [memory]),

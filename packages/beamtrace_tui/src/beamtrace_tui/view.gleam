@@ -289,8 +289,8 @@ fn capture_phase(phase: model.CapturePhase) -> String {
     model.CaptureArming -> "arming"
     model.CaptureArmed -> "armed"
     model.CaptureCancelling -> "cancelling"
-    model.CaptureReady(count, completeness) ->
-      "ready · " <> int.to_string(count) <> " events · " <> completeness
+    model.CaptureReady(count, outcome_summary) ->
+      "sealed · " <> int.to_string(count) <> " events · " <> outcome_summary
     model.CaptureFailed(reason) -> "failed · " <> reason
   }
 }
@@ -332,7 +332,12 @@ fn team_trace_content(state: model.Model, width: Int) -> String {
           text.truncate(marker <> trace.id, row_width, "…")
           <> "\n"
           <> text.truncate(
-            "  " <> trace.status <> " · " <> trace.node <> " " <> trace.mfa,
+            "  "
+              <> trace.delivery_status
+              <> " · "
+              <> trace.node
+              <> " "
+              <> trace.mfa,
             row_width,
             "…",
           )

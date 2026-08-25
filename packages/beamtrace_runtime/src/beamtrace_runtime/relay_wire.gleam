@@ -7,7 +7,9 @@ import gleam/int
 import gleam/json
 import gleam/string
 
-const protocol_version = 2
+pub const protocol_version = 3
+
+const migration_protocol_version = 2
 
 const max_hello_bytes = 16_384
 
@@ -26,7 +28,12 @@ pub type Hello {
 }
 
 pub type Envelope {
-  Envelope(sequence: Int, payload: String, signature: BitArray)
+  Envelope(
+    protocol_version: Int,
+    sequence: Int,
+    payload: String,
+    signature: BitArray,
+  )
 }
 
 type EncodedHello {
@@ -61,7 +68,7 @@ pub fn prepare_hello(
     nonce: nonce,
     signature: relay_channel.sign(
       identity,
-      hello_payload(relay_id, timestamp_ms, nonce),
+      hello_payload(protocol_version, relay_id, timestamp_ms, nonce),
     ),
   )
 }
@@ -99,10 +106,13 @@ pub fn authenticate(
 ) -> Result(enrollment_store.RelayRecord, String) {
   case hello.protocol_version {
     1 -> Error("upgrade_required")
-    version if version != protocol_version -> Error("unsupported_protocol")
-    _ ->
+    version
+      if version != protocol_version && version != migration_protocol_version
+    -> Error("unsupported_protocol")
+    version ->
       enrollment_store.authenticate(
         store,
+        version,
         hello.relay_id,
         hello.timestamp_ms,
         hello.nonce,
@@ -118,16 +128,20 @@ pub fn sign_envelope(
   payload: String,
 ) -> Envelope {
   Envelope(
+    protocol_version: protocol_version,
     sequence: sequence,
     payload: payload,
-    signature: relay_channel.sign(identity, envelope_payload(sequence, payload)),
+    signature: relay_channel.sign(
+      identity,
+      envelope_payload(protocol_version, sequence, payload),
+    ),
   )
 }
 
 pub fn encode_envelope(envelope: Envelope) -> String {
   json.object([
     #("type", json.string("message")),
-    #("protocol_version", json.int(protocol_version)),
+    #("protocol_version", json.int(envelope.protocol_version)),
     #("sequence", json.int(envelope.sequence)),
     #("payload", json.string(envelope.payload)),
     #(
@@ -152,10 +166,18 @@ pub fn decode_envelope(source: String) -> Result(Envelope, String) {
             bit_array.base64_url_decode(encoded.signature)
           {
             1, _, _, _ -> Error("upgrade_required")
-            version, True, True, Ok(signature) if version == protocol_version ->
+            version, True, True, Ok(signature)
+              if version == protocol_version
+              || version == migration_protocol_version
+            ->
               case bit_array.byte_size(signature) == 64 {
                 True ->
-                  Ok(Envelope(encoded.sequence, encoded.payload, signature))
+                  Ok(Envelope(
+                    encoded.protocol_version,
+                    encoded.sequence,
+                    encoded.payload,
+                    signature,
+                  ))
                 False -> Error("invalid_envelope")
               }
             _, _, _, _ -> Error("invalid_envelope")
@@ -174,7 +196,11 @@ pub fn verify_envelope(
     envelope.sequence == previous_sequence + 1,
     relay_channel.verify(
       public_key,
-      envelope_payload(envelope.sequence, envelope.payload),
+      envelope_payload(
+        envelope.protocol_version,
+        envelope.sequence,
+        envelope.payload,
+      ),
       envelope.signature,
     )
   {
@@ -193,7 +219,9 @@ fn decode_hello_parts(encoded: EncodedHello) -> Result(Hello, String) {
     bit_array.base64_url_decode(encoded.signature)
   {
     1, _, _, _ -> Error("upgrade_required")
-    version, True, Ok(nonce), Ok(signature) if version == protocol_version ->
+    version, True, Ok(nonce), Ok(signature)
+      if version == protocol_version || version == migration_protocol_version
+    ->
       case
         bit_array.byte_size(nonce) >= 16
         && bit_array.byte_size(nonce) <= 64
@@ -255,12 +283,14 @@ fn envelope_decoder() -> decode.Decoder(EncodedEnvelope) {
 }
 
 fn hello_payload(
+  version: Int,
   relay_id: String,
   timestamp_ms: Int,
   nonce: BitArray,
 ) -> BitArray {
   let source =
-    "beamtrace-relay-v2\nhello\n"
+    protocol_domain(version)
+    <> "\nhello\n"
     <> relay_id
     <> "\n"
     <> int.to_string(timestamp_ms)
@@ -269,11 +299,16 @@ fn hello_payload(
   bit_array.from_string(source)
 }
 
-fn envelope_payload(sequence: Int, payload: String) -> BitArray {
+fn envelope_payload(version: Int, sequence: Int, payload: String) -> BitArray {
   let source =
-    "beamtrace-relay-v2\nmessage\n"
+    protocol_domain(version)
+    <> "\nmessage\n"
     <> int.to_string(sequence)
     <> "\n"
     <> payload
   bit_array.from_string(source)
+}
+
+fn protocol_domain(version: Int) -> String {
+  "beamtrace-relay-v" <> int.to_string(version)
 }

@@ -18,7 +18,7 @@ fn event(term: types.TermView) -> types.TraceEvent {
       logical: None,
       evidence: [],
     ),
-    local_timestamp_ns: 100,
+    local_instant: types.LocalInstant(100, 1),
     kind: types.Exit(term),
     evidence: types.Exact,
   )
@@ -45,6 +45,7 @@ pub fn metadata_batch_is_validated_counted_and_canonicalized_test() {
   let assert Ok(decoded) = relay_payload.decode(source)
   decoded.mode |> should.equal("exact")
   decoded.event_count |> should.equal(1)
+  decoded.canonical |> string.contains("\"event_schema\":2") |> should.be_true()
   decoded.canonical |> string.contains(fingerprint) |> should.be_true()
   decoded.canonical |> string.contains(sentinel) |> should.be_false()
   relay_payload.decode(decoded.canonical) |> should.equal(Ok(decoded))

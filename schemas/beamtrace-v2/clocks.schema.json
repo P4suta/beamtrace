@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://beamtrace.dev/schema/v2/clocks.schema.json",
+  "title": "BeamTrace v2 clock calibration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "capture_anchor_unix_ns", "nodes"],
+  "properties": {
+    "schema_version": {"const": 2},
+    "capture_anchor_unix_ns": {"$ref": "#/$defs/integer_string"},
+    "nodes": {"type": "array", "maxItems": 32, "items": {"$ref": "#/$defs/node_clock"}}
+  },
+  "$defs": {
+    "integer_string": {"type": "string", "pattern": "^-?(0|[1-9][0-9]{0,18})$"},
+    "unix_integer_string": {"type": "string", "pattern": "^(0|[1-9][0-9]{0,18})$"},
+    "safe_nonnegative": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "node": {"type": "string", "minLength": 3, "maxLength": 255, "pattern": "^[^@\\u0000]+@[^@\\u0000]+$"},
+    "node_clock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node", "origin_local_ns", "before", "after"],
+      "properties": {
+        "node": {"$ref": "#/$defs/node"},
+        "origin_local_ns": {"$ref": "#/$defs/integer_string"},
+        "before": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sample"}]},
+        "after": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sample"}]}
+      }
+    },
+    "sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["local_ns", "unix_midpoint_ns", "uncertainty_ns", "rtt_ns"],
+      "properties": {
+        "local_ns": {"$ref": "#/$defs/integer_string"},
+        "unix_midpoint_ns": {"type": "string", "pattern": "^[1-9][0-9]{0,18}$"},
+        "uncertainty_ns": {"$ref": "#/$defs/safe_nonnegative"},
+        "rtt_ns": {"$ref": "#/$defs/safe_nonnegative"}
+      }
+    }
+  }
+}

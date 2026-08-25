@@ -21,11 +21,11 @@ pub fn main() {
       root_id: "checkout-1",
       node: "shop@localhost",
       process: sender,
-      local_timestamp_ns: 100,
+      local_instant: types.LocalInstant(offset_ns: 100, order: 1),
       kind: types.Send(
         to: types.ProcessRef("shop@localhost", "<0.20.0>"),
         message: types.Tag("charge"),
-        serial: 1,
+        serial: types.SequenceSerial(previous: 0, current: 1),
       ),
       evidence: types.Exact,
     )
@@ -34,11 +34,12 @@ pub fn main() {
   let assert Ok(decoded) = codec.decode_event(encoded)
   let assert Ok(graph) = dag.build([decoded])
   let assert [finding] = diagnostics.hot_senders([decoded], minimum_messages: 1)
+  let assert diagnostics.CountValue(message_count) = finding.value
 
   io.println(
     "codec=round-trip dag_boundaries="
     <> { graph.boundaries |> list.length |> int.to_string }
     <> " diagnostic_messages="
-    <> int.to_string(finding.value),
+    <> int.to_string(message_count),
   )
 }

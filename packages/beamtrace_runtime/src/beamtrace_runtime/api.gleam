@@ -133,6 +133,160 @@ pub fn handle_at(
 ) -> wisp.Response {
   let segments = request.path_segments(incoming)
   let routed = case segments, incoming.method {
+    ["api", "v2", "health"], http.Get ->
+      wisp.json_response(
+        "{\"status\":\"ok\",\"api_version\":\"v2\",\"mode\":\""
+          <> mode_name(context.mode)
+          <> "\"}",
+        200,
+      )
+    ["api", "v2", "health"], _ -> wisp.method_not_allowed([http.Get])
+    ["api", "v2", "ready"], http.Get ->
+      wisp.json_response("{\"status\":\"ready\"}", 200)
+    ["api", "v2", "ready"], _ -> wisp.method_not_allowed([http.Get])
+    ["api", "v2", "capabilities"], http.Get ->
+      wisp.json_response(
+        "{\"capture\":true,\"live_sampling\":true,\"compare\":true,"
+          <> "\"causal_graph\":true,\"calibrated_time_intervals\":true,"
+          <> "\"arbitrary_rpc\":false,\"process_kill\":false,"
+          <> "\"state_mutation\":false,\"ets_browser\":false}",
+        200,
+      )
+    ["api", "v2", "capabilities"], _ -> wisp.method_not_allowed([http.Get])
+    ["api", "v2", "live"], http.Get ->
+      local_api.live_snapshot_response(
+        incoming,
+        local_api_context(incoming, context, now_ms),
+        now_ms,
+      )
+    ["api", "v2", "live"], _ -> wisp.method_not_allowed([http.Get])
+    ["api", "v2", "compare"], http.Post ->
+      local_api.compare_response(
+        incoming,
+        local_api_context(incoming, context, now_ms),
+        now_ms,
+      )
+    ["api", "v2", "compare"], _ -> wisp.method_not_allowed([http.Post])
+    ["api", "v2", "sessions", "current"], http.Get ->
+      local_api.capture_status_v2_response(
+        incoming,
+        local_api_context(incoming, context, now_ms),
+        now_ms,
+      )
+    ["api", "v2", "sessions", "current"], _ ->
+      wisp.method_not_allowed([http.Get])
+    ["api", "v2", "sessions", "current", "arm"], http.Post ->
+      local_api.capture_arm_response(
+        incoming,
+        local_api_context(incoming, context, now_ms),
+        now_ms,
+      )
+    ["api", "v2", "sessions", "current", "arm"], _ ->
+      wisp.method_not_allowed([http.Post])
+    ["api", "v2", "sessions", "current", "cancel"], http.Post ->
+      local_api.capture_cancel_response(
+        incoming,
+        local_api_context(incoming, context, now_ms),
+        now_ms,
+      )
+    ["api", "v2", "sessions", "current", "cancel"], _ ->
+      wisp.method_not_allowed([http.Post])
+    ["api", "v2", "sessions", "current", "save"], http.Post ->
+      local_api.capture_save_response(
+        incoming,
+        local_api_context(incoming, context, now_ms),
+        now_ms,
+      )
+    ["api", "v2", "sessions", "current", "save"], _ ->
+      wisp.method_not_allowed([http.Post])
+    ["api", "v2", "sessions", "current", "events"], http.Get ->
+      local_api.event_window_response(
+        incoming,
+        local_api_context(incoming, context, now_ms),
+        now_ms,
+      )
+    ["api", "v2", "sessions", "current", "events"], _ ->
+      wisp.method_not_allowed([http.Get])
+    ["api", "v2", "sessions", "current", "graph"], http.Get ->
+      local_api.graph_response(
+        incoming,
+        local_api_context(incoming, context, now_ms),
+        now_ms,
+      )
+    ["api", "v2", "sessions", "current", "graph"], _ ->
+      wisp.method_not_allowed([http.Get])
+    ["api", "v2", "targets", "current", "mfas"], http.Get ->
+      local_api.mfa_search_response(
+        incoming,
+        local_api_context(incoming, context, now_ms),
+        now_ms,
+      )
+    ["api", "v2", "targets", "current", "mfas"], _ ->
+      wisp.method_not_allowed([http.Get])
+    ["api", "v2", "sessions", "current", "annotations"], http.Get ->
+      team_auth_api.list_annotations(
+        incoming,
+        team_auth_context(context),
+        now_ms,
+      )
+    ["api", "v2", "sessions", "current", "annotations"], http.Post ->
+      team_auth_api.create_annotation(
+        incoming,
+        team_auth_context(context),
+        now_ms,
+      )
+    ["api", "v2", "sessions", "current", "annotations"], _ ->
+      wisp.method_not_allowed([http.Get, http.Post])
+    ["api", "v2", "audit"], http.Get ->
+      team_traces_api.audit_response(
+        incoming,
+        team_traces_context(context),
+        now_ms,
+      )
+    ["api", "v2", "audit"], _ -> wisp.method_not_allowed([http.Get])
+    ["api", "v2", "raw-captures", "authorize"], http.Post ->
+      team_auth_api.raw_capture_authorization_response(
+        incoming,
+        team_auth_context(context),
+        now_ms,
+      )
+    ["api", "v2", "raw-captures", "authorize"], _ ->
+      wisp.method_not_allowed([http.Post])
+    ["api", "v2", "traces"], http.Get ->
+      team_traces_api.traces_response(
+        incoming,
+        team_traces_context(context),
+        now_ms,
+      )
+    ["api", "v2", "traces"], _ -> wisp.method_not_allowed([http.Get])
+    ["api", "v2", "traces", trace_id], http.Get ->
+      team_traces_api.trace_detail_response(
+        incoming,
+        team_traces_context(context),
+        trace_id,
+        now_ms,
+      )
+    ["api", "v2", "traces", _], _ -> wisp.method_not_allowed([http.Get])
+    ["api", "v2", "traces", trace_id, "events"], http.Get ->
+      team_traces_api.trace_events_response(
+        incoming,
+        team_traces_context(context),
+        trace_id,
+        now_ms,
+      )
+    ["api", "v2", "traces", _, "events"], _ ->
+      wisp.method_not_allowed([http.Get])
+    ["api", "v2", "traces", trace_id, "hold"], http.Post
+    | ["api", "v2", "traces", trace_id, "hold"], http.Delete
+    ->
+      team_traces_api.trace_hold_response(
+        incoming,
+        team_traces_context(context),
+        trace_id,
+        now_ms,
+      )
+    ["api", "v2", "traces", _, "hold"], _ ->
+      wisp.method_not_allowed([http.Post, http.Delete])
     ["api", "v1", "health"], http.Get ->
       wisp.json_response(
         "{\"status\":\"ok\",\"api_version\":\"v1\",\"mode\":\""
@@ -160,7 +314,7 @@ pub fn handle_at(
       )
     ["api", "v1", "live"], _ -> wisp.method_not_allowed([http.Get])
     ["api", "v1", "compare"], http.Post ->
-      local_api.compare_response(
+      local_api.compare_v1_response(
         incoming,
         local_api_context(incoming, context, now_ms),
         now_ms,
@@ -199,7 +353,7 @@ pub fn handle_at(
     ["api", "v1", "sessions", "current", "save"], _ ->
       wisp.method_not_allowed([http.Post])
     ["api", "v1", "sessions", "current", "events"], http.Get ->
-      local_api.event_window_response(
+      local_api.event_window_v1_response(
         incoming,
         local_api_context(incoming, context, now_ms),
         now_ms,
@@ -324,9 +478,20 @@ pub fn handle_at(
     _, _ -> wisp.not_found()
   }
   case segments {
+    ["api", "v1", ..] -> routed |> deprecated_v1 |> secure_api
     ["api", ..] -> secure_api(routed)
     _ -> secure_workspace(routed)
   }
+}
+
+fn deprecated_v1(response_: wisp.Response) -> wisp.Response {
+  response_
+  |> response.set_header("deprecation", "true")
+  |> response.set_header("link", "</api/v2>; rel=\"successor-version\"")
+  |> response.set_header(
+    "warning",
+    "299 BeamTrace \"API v1 is removed in v0.4\"",
+  )
 }
 
 fn team_traces_context(context: Context) -> team_traces_api.Context {

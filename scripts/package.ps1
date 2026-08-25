@@ -126,6 +126,17 @@ foreach ($application in $otpApplications) {
     }
 }
 
+# OTP installations built with a static OpenSSL may carry a multi-megabyte
+# crypto test engine. It is never loaded by a release runtime and must not be
+# shipped as application code. Keep the actual crypto NIF and all SSL modules.
+$packagedCrypto = Get-ChildItem -LiteralPath (Join-Path $runtimeRoot 'lib') `
+    -Directory -Filter 'crypto-*' | Select-Object -First 1
+if ($null -ne $packagedCrypto) {
+    Get-ChildItem -LiteralPath (Join-Path $packagedCrypto.FullName 'priv') `
+        -File -Recurse -Filter 'otp_test_engine.*' -ErrorAction SilentlyContinue |
+        Remove-Item -Force
+}
+
 $releaseSource = Join-Path $otpRoot "releases/$otpRelease"
 if (Test-Path -LiteralPath $releaseSource -PathType Container) {
     $releaseDestination = Join-Path $runtimeRoot "releases/$otpRelease"

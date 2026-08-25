@@ -19,7 +19,7 @@ two_node_partial_order_capture() ->
             schedule_trigger,
             [Target]
         ),
-        {ok, {Events, <<"complete">>}} =
+        Events = verified_events(
             beamtrace_capture_ffi:collect_distributed(
                 [atom_to_binary(NodeA, utf8), atom_to_binary(NodeB, utf8)],
                 Cookie,
@@ -30,17 +30,19 @@ two_node_partial_order_capture() ->
                 10000,
                 10000000,
                 10000
-            ),
+            )),
         EventNodes = lists:usort([EventNode ||
-            {raw_event_with_term, _Id, _Root, EventNode, _Pid, _At, _Kind,
-                _PeerNode, _PeerPid, _Serial, _Semantic, _Metadata, _Term} <- Events]),
+            {raw_event_v2, _Id, _Root, EventNode, _Pid, _At, _Order, _Kind,
+                _PeerNode, _PeerPid, _Previous, _Current, _Semantic, _Metadata,
+                _Term} <- Events]),
         ?assertEqual(
             lists:sort([atom_to_binary(NodeA, utf8), atom_to_binary(NodeB, utf8)]),
             lists:sort(EventNodes)
         ),
         Kinds = [Kind ||
-            {raw_event_with_term, _Id, _Root, _EventNode, _Pid, _At, Kind,
-                _PeerNode, _PeerPid, _Serial, _Semantic, _Metadata, _Term} <- Events],
+            {raw_event_v2, _Id, _Root, _EventNode, _Pid, _At, _Order, Kind,
+                _PeerNode, _PeerPid, _Previous, _Current, _Semantic, _Metadata,
+                _Term} <- Events],
         ?assert(lists:member(<<"root">>, Kinds)),
         ?assert(lists:member(<<"send">>, Kinds)),
         ?assert(lists:member(<<"receive">>, Kinds)),
@@ -51,6 +53,17 @@ two_node_partial_order_capture() ->
         stop_peer(PeerA),
         stop_peer(PeerB)
     end.
+
+verified_events({ok, {Events,
+        {raw_outcome, EndKind, _EndDetail, [], Receipts},
+        {clock_calibration, Anchor, Clocks}}}) ->
+    ?assert(lists:member(EndKind, [<<"quiet_period">>, <<"time_window">>])),
+    ?assertEqual(2, length(Receipts)),
+    ?assertEqual(2, length(Clocks)),
+    ?assert(is_integer(Anchor)),
+    Events;
+verified_events(Other) ->
+    error({capture_was_not_delivery_verified, Other}).
 
 start_peer(Prefix, Cookie) ->
     {ok, Peer, Node} = beamtrace_test_peer:start(Prefix, Cookie),

@@ -23,7 +23,7 @@ fn event(
     root_id: "root",
     node: process.physical.node,
     process: process,
-    local_timestamp_ns: at,
+    local_instant: types.LocalInstant(at + 1_000_001, at + 1_000_001),
     kind: kind,
     evidence: types.Exact,
   )
@@ -51,25 +51,37 @@ pub fn distributed_clock_offsets_preserve_causal_acyclicity_property_test() {
       "send-worker",
       client_at + 1,
       client,
-      types.Send(worker.physical, types.Tag("work"), 41),
+      types.Send(
+        worker.physical,
+        types.Tag("work"),
+        types.SequenceSerial(40, 41),
+      ),
     ),
     event(
       "receive-worker",
       worker_at,
       worker,
-      types.Received(client.physical, types.Tag("work"), 41),
+      types.Received(
+        client.physical,
+        types.Tag("work"),
+        types.SequenceSerial(40, 41),
+      ),
     ),
     event(
       "send-leaf",
       worker_at + 1,
       worker,
-      types.Send(leaf.physical, types.Tag("work"), 42),
+      types.Send(leaf.physical, types.Tag("work"), types.SequenceSerial(41, 42)),
     ),
     event(
       "receive-leaf",
       leaf_at,
       leaf,
-      types.Received(worker.physical, types.Tag("work"), 42),
+      types.Received(
+        worker.physical,
+        types.Tag("work"),
+        types.SequenceSerial(41, 42),
+      ),
     ),
   ]
 

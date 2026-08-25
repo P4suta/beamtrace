@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-import beamtrace/types
 import beamtrace_runtime/annotations
 import beamtrace_runtime/api
 import beamtrace_runtime/audit
 import beamtrace_runtime/audit_store
 import beamtrace_runtime/blob_store
-import beamtrace_runtime/capture
 import beamtrace_runtime/capture_session
 import beamtrace_runtime/enrollment_store
 import beamtrace_runtime/local_auth
@@ -24,6 +22,7 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
+import v2_fixture
 import wisp/simulate
 
 pub fn listener_start_failure_closes_bootstrap_store_test() {
@@ -62,7 +61,7 @@ pub fn local_server_becomes_ready_then_closes_cleanly_on_sigterm_test() {
 pub fn local_runtime_owns_and_closes_the_attached_capture_session_test() {
   let capture_store =
     capture_session.new_with_backend(fn(_spec) {
-      Ok(capture.CaptureResult([], types.Complete))
+      Ok(v2_fixture.capture_result([]))
     })
   let runtime = server.new_local(None, None, Some(capture_store))
 

@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
+import beamtrace/codec
+import beamtrace/types
 import beamtrace_runtime/blob_store
 import beamtrace_runtime/raw_grant
 import beamtrace_runtime/relay_inbox
@@ -21,7 +23,7 @@ fn event(index: Int) -> types.TraceEvent {
       logical: None,
       evidence: [],
     ),
-    local_timestamp_ns: index,
+    local_instant: types.LocalInstant(index, index),
     kind: types.Stop("complete"),
     evidence: types.Exact,
   )
@@ -49,6 +51,7 @@ pub fn durable_commit_precedes_live_inbox_visibility_test() {
   let blobs = "build/beamtrace-relay-ingest-blobs-v2"
   let relay_id = "relay-1234567890abcdef12345678"
   let payload = batch("exact", 0)
+  let assert Ok(decoded) = relay_payload.decode_for_ingest(payload)
 
   relay_ingest.accept(
     metadata,
@@ -63,7 +66,7 @@ pub fn durable_commit_precedes_live_inbox_visibility_test() {
   |> should.equal(Ok(relay_inbox.Accepted))
   relay_inbox.snapshot(inbox, relay_id)
   |> should.equal([
-    relay_inbox.Payload(1, relay_inbox.Metadata, payload, 3000),
+    relay_inbox.Payload(1, relay_inbox.Metadata, decoded.canonical, 3000),
   ])
   let assert Ok(Some(index)) = team_store.relay_frame(metadata, relay_id, 1)
   index.privacy |> should.equal("metadata")
@@ -82,7 +85,7 @@ pub fn durable_commit_precedes_live_inbox_visibility_test() {
   |> should.equal(Error("blob_conflict"))
   relay_inbox.snapshot(inbox, relay_id)
   |> should.equal([
-    relay_inbox.Payload(1, relay_inbox.Metadata, payload, 3000),
+    relay_inbox.Payload(1, relay_inbox.Metadata, decoded.canonical, 3000),
   ])
 
   relay_inbox.close(inbox)
@@ -97,6 +100,7 @@ pub fn durable_quota_rejects_before_blob_or_inbox_publication_test() {
   let policy = relay_ingest.Quota(max_events: 2, max_bytes: 1_000_000)
   let first = batch("live", 2)
   let second = batch("live", 1)
+  let assert Ok(decoded_first) = relay_payload.decode_for_ingest(first)
 
   relay_ingest.accept_with_quota(
     metadata,
@@ -124,12 +128,12 @@ pub fn durable_quota_rejects_before_blob_or_inbox_publication_test() {
   |> should.equal(Error("relay_event_quota"))
 
   team_store.relay_usage(metadata, relay_id)
-  |> should.equal(Ok(#(2, string.byte_size(first))))
+  |> should.equal(Ok(#(2, string.byte_size(decoded_first.canonical))))
   blob_store.read(blobs, "relays/relay-876543210fedcba987654321/frames/2.json")
   |> should.equal(Error("blob_not_found"))
   relay_inbox.snapshot(inbox, relay_id)
   |> should.equal([
-    relay_inbox.Payload(1, relay_inbox.Metadata, first, 4000),
+    relay_inbox.Payload(1, relay_inbox.Metadata, decoded_first.canonical, 4000),
   ])
 
   relay_inbox.close(inbox)
@@ -216,13 +220,14 @@ pub fn session_reconnect_replay_is_idempotent_before_quota_and_inbox_test() {
       received_at_ms: 6000,
       ended_at_ms: 0,
       last_received_at_ms: 6000,
-      completeness: "active",
+      delivery_status: "active",
       event_count: 0,
       legal_hold: False,
       active: True,
     )
   let assert Ok(_) = team_store.begin_trace_session(metadata, session, 64)
   let payload = batch("exact", 1)
+  let assert Ok(decoded) = relay_payload.decode_for_ingest(payload)
   let quota = relay_ingest.Quota(max_events: 1, max_bytes: 1_000_000)
 
   relay_ingest.accept_session_with_backend_quota(
@@ -253,10 +258,10 @@ pub fn session_reconnect_replay_is_idempotent_before_quota_and_inbox_test() {
   |> should.equal(Ok(relay_inbox.Accepted))
 
   team_store.trace_usage(metadata, session_id)
-  |> should.equal(Ok(#(1, string.byte_size(payload))))
+  |> should.equal(Ok(#(1, string.byte_size(decoded.canonical))))
   relay_inbox.session_snapshot(inbox, session_id)
   |> should.equal([
-    relay_inbox.Payload(1, relay_inbox.Metadata, payload, 6001),
+    relay_inbox.Payload(1, relay_inbox.Metadata, decoded.canonical, 6001),
   ])
 
   relay_ingest.accept_session_with_backend_quota(
@@ -315,7 +320,7 @@ pub fn raw_session_replay_does_not_charge_an_exhausted_grant_twice_test() {
       received_at_ms: 8000,
       ended_at_ms: 0,
       last_received_at_ms: 8000,
-      completeness: "active",
+      delivery_status: "active",
       event_count: 0,
       legal_hold: False,
       active: True,
@@ -365,6 +370,3 @@ pub fn raw_session_replay_does_not_charge_an_exhausted_grant_twice_test() {
   relay_inbox.close(inbox)
   team_store.close(metadata) |> should.equal(Ok(Nil))
 }
-
-import beamtrace/codec
-import beamtrace/types

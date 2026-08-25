@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
+import beamtrace_web/page
 import beamtrace_web/workspace
 import gleam/dynamic/decode
 import gleam/json
+import gleam/option.{None, Some}
 import gleam/string
 import lustre/effect.{type Effect}
 
@@ -48,32 +50,75 @@ fn run_decoder() -> decode.Decoder(workspace.CompareRun) {
   use added <- decode.field("added", decode.int)
   use removed <- decode.field("removed", decode.int)
   use changed <- decode.field("changed", decode.int)
+  use ambiguity_count <- decode.field("ambiguity_count", decode.int)
+  use first_divergence <- decode.field(
+    "first_divergence",
+    decode.optional(divergence_decoder()),
+  )
   use items <- decode.field("items", decode.list(item_decoder()))
-  decode.success(workspace.CompareRun(path, added, removed, changed, items))
+  decode.success(workspace.CompareRun(
+    path,
+    added,
+    removed,
+    changed,
+    ambiguity_count,
+    case first_divergence {
+      Some(path) -> path
+      None -> []
+    },
+    items,
+  ))
+}
+
+fn divergence_decoder() -> decode.Decoder(List(String)) {
+  use path <- decode.field("causal_path", decode.list(decode.string))
+  decode.success(path)
 }
 
 fn item_decoder() -> decode.Decoder(workspace.CompareItem) {
   use status <- decode.field("status", decode.string)
   use left_id <- decode.optional_field("left_id", "", decode.string)
   use right_id <- decode.optional_field("right_id", "", decode.string)
-  use latency_delta_ns <- decode.optional_field(
-    "latency_delta_ns",
-    0,
-    decode.int,
+  use latency_delta <- decode.optional_field(
+    "latency_delta",
+    workspace.TimeUnavailable("latency does not apply"),
+    page.time_estimate_decoder(),
+  )
+  use left_ids <- decode.optional_field(
+    "left_ids",
+    [],
+    decode.list(decode.string),
+  )
+  use right_ids <- decode.optional_field(
+    "right_ids",
+    [],
+    decode.list(decode.string),
   )
   use reason <- decode.optional_field("reason", "", decode.string)
   case status {
-    "matched" | "added" | "removed" | "changed" ->
+    "matched" | "added" | "removed" | "changed" | "ambiguous" ->
       decode.success(workspace.CompareItem(
         status,
-        left_id,
-        right_id,
-        latency_delta_ns,
+        case left_id, left_ids {
+          "", [_, ..] -> string.join(left_ids, ", ")
+          _, _ -> left_id
+        },
+        case right_id, right_ids {
+          "", [_, ..] -> string.join(right_ids, ", ")
+          _, _ -> right_id
+        },
+        latency_delta,
         reason,
       ))
     _ ->
       decode.failure(
-        workspace.CompareItem("", "", "", 0, ""),
+        workspace.CompareItem(
+          "",
+          "",
+          "",
+          workspace.TimeUnavailable("invalid compare item"),
+          "",
+        ),
         expected: "compare item status",
       )
   }
@@ -81,19 +126,24 @@ fn item_decoder() -> decode.Decoder(workspace.CompareItem) {
 
 fn statistic_decoder() -> decode.Decoder(workspace.BranchStatistic) {
   use signature <- decode.field("signature", decode.string)
-  use p50_ns <- decode.field("p50_ns", decode.int)
-  use p95_ns <- decode.field("p95_ns", decode.int)
+  use p50 <- decode.field("p50", time_summary_decoder())
+  use p95 <- decode.field("p95", time_summary_decoder())
   use occurrences <- decode.field("occurrences", decode.int)
   use total_runs <- decode.field("total_runs", decode.int)
-  use occurrence_rate <- decode.field("occurrence_rate", decode.float)
   decode.success(workspace.BranchStatistic(
     signature,
-    p50_ns,
-    p95_ns,
+    p50,
+    p95,
     occurrences,
     total_runs,
-    occurrence_rate,
   ))
+}
+
+fn time_summary_decoder() -> decode.Decoder(workspace.TimeSummary) {
+  use estimate <- decode.field("estimate", page.time_estimate_decoder())
+  use valid <- decode.field("valid_samples", decode.int)
+  use missing <- decode.field("missing_samples", decode.int)
+  decode.success(workspace.TimeSummary(estimate, valid, missing))
 }
 
 @external(javascript, "./compare_control_ffi.mjs", "requestCompare")

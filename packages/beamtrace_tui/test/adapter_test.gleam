@@ -18,7 +18,7 @@ pub fn canonical_trace_events_become_vertical_tui_rows_test() {
       "root",
       "app@host",
       process,
-      1000,
+      types.LocalInstant(0, 0),
       types.Root(types.Mfa("shop", "checkout", 1), []),
       types.Exact,
     )
@@ -28,9 +28,11 @@ pub fn canonical_trace_events_become_vertical_tui_rows_test() {
       "root",
       "app@host",
       process,
-      3500,
+      types.LocalInstant(2500, 1),
       types.Exit(types.Tag("badmatch")),
-      types.inferred("restart proximity", 0.92),
+      types.inferred("restart_proximity", "restart proximity", [
+        types.EvidenceEvent("root"),
+      ]),
     )
 
   adapter.from_trace([root, crashed])
@@ -40,7 +42,7 @@ pub fn canonical_trace_events_become_vertical_tui_rows_test() {
       "exit",
       "checkout",
       "exit",
-      "Inferred 0.92 · restart proximity",
+      "Inferred · restart_proximity · restart proximity",
       2,
       True,
     ),
@@ -60,7 +62,7 @@ pub fn physical_pid_is_used_only_when_no_logical_actor_exists_test() {
       "root",
       "app@host",
       process,
-      10,
+      types.LocalInstant(0, 0),
       types.Stop("complete"),
       types.Exact,
     )

@@ -12,6 +12,7 @@
     arm/2,
     listen/2,
     grant/2,
+    seal/3,
     ingest/2,
     status/1,
     stop/1,
@@ -31,13 +32,14 @@
     code_change/3
 ]).
 
--define(PROTOCOL_VERSION, 1).
--define(MODULE_HASH, <<"b7a54d1c-beamtrace-agent-v2">>).
+-define(PROTOCOL_VERSION, 2).
+-define(MODULE_HASH, <<"d62f3f5a-beamtrace-agent-v3-seal-receipt">>).
 -define(DEFAULT_MAX_EVENTS, 100000).
 -define(DEFAULT_MAX_BYTES, 64000000).
 -define(DEFAULT_MAX_MAILBOX, 10000).
 -define(DEFAULT_BATCH_SIZE, 128).
 -define(DEFAULT_DURATION_MS, 30000).
+-define(DEFAULT_DRAIN_TIMEOUT_MS, 10000).
 
 -record(state, {
     owner,
@@ -52,6 +54,7 @@
     max_roots = 1,
     root_filter = all,
     max_duration_ms = ?DEFAULT_DURATION_MS,
+    drain_timeout_ms = ?DEFAULT_DRAIN_TIMEOUT_MS,
     batch_size = ?DEFAULT_BATCH_SIZE,
     credits = 0,
     queue = {[], []},
@@ -60,7 +63,7 @@
     byte_count = 0,
     batch_sequence = 0,
     dropped_live = 0,
-    completeness = complete,
+    integrity = clean,
     session = undefined,
     trigger = undefined,
     label = undefined,
@@ -68,6 +71,12 @@
     owns_system_tracer = false,
     armed = false,
     ttl_timer = undefined
+    ,clock_origin_ns = 0
+    ,sealed = false
+    ,seal_from = undefined
+    ,seal_reason = undefined
+    ,delivery_refs = []
+    ,drain_timer = undefined
 }).
 
 start_link(Owner, Options) when is_pid(Owner), is_map(Options) ->
@@ -86,6 +95,11 @@ listen(Pid, Label) when is_pid(Pid), is_integer(Label), Label >= 0 ->
 
 grant(Pid, Credits) when is_pid(Pid), is_integer(Credits), Credits >= 0 ->
     gen_server:call(Pid, {grant, Credits}).
+
+seal(Pid, Reason, DrainTimeoutMs)
+        when is_pid(Pid), is_integer(DrainTimeoutMs),
+             DrainTimeoutMs >= 1000, DrainTimeoutMs =< 60000 ->
+    gen_server:call(Pid, {seal, Reason, DrainTimeoutMs}, DrainTimeoutMs + 2000).
 
 ingest(Pid, Event) when is_pid(Pid), is_map(Event) ->
     gen_server:call(Pid, {ingest, Event}).
@@ -139,9 +153,11 @@ init({Owner, Options}) ->
             Options,
             ?DEFAULT_DURATION_MS
         ),
+        drain_timeout_ms = drain_timeout_option(Options),
         batch_size = positive_option(batch_size, Options, ?DEFAULT_BATCH_SIZE),
         label = maps:get(trace_label, Options, undefined),
-        queue = queue:new()
+        queue = queue:new(),
+        clock_origin_ns = erlang:monotonic_time(nanosecond)
     }}.
 
 handle_call({arm, _MFA}, _From, State = #state{armed = true}) ->
@@ -168,14 +184,23 @@ handle_call({arm, MFA}, _From, State) ->
 handle_call({grant, Credits}, _From, State) ->
     Flushed = flush(State#state{credits = State#state.credits + Credits}),
     {reply, ok, Flushed};
-handle_call({ingest, _Event}, _From, State = #state{completeness = {truncated, Reason}}) ->
-    {reply, {truncated, Reason}, State};
+handle_call({seal, _Reason, _Timeout}, _From, State = #state{sealed = true}) ->
+    {reply, {error, already_sealing}, State};
+handle_call({seal, Reason, Timeout}, From, State) ->
+    case begin_seal(Reason, Timeout, From, State) of
+        {pending, Sealing} -> {noreply, Sealing};
+        {done, Reply, Sealed} -> {reply, Reply, Sealed}
+    end;
+handle_call({ingest, _Event}, _From, State = #state{integrity = {budget_reached, Reason}}) ->
+    {reply, {budget_reached, Reason}, State};
+handle_call({ingest, _Event}, _From, State = #state{sealed = true}) ->
+    {reply, {error, sealing}, State};
 handle_call({ingest, Event}, _From, State) ->
     case accept_event(Event, State) of
         {ok, Accepted} ->
             {reply, queued, flush(Accepted)};
-        {truncated, Reason, Truncated} ->
-            {reply, {truncated, Reason}, Truncated}
+        {budget_reached, Reason, Stopped} ->
+            {reply, {budget_reached, Reason}, Stopped}
     end;
 handle_call(status, _From, State) ->
     {reply, status_map(State), State};
@@ -242,8 +267,24 @@ handle_info({trace, Process, link, Peer}, State) ->
         Process, Peer, erlang:monotonic_time(nanosecond), State
     )};
 handle_info(capture_timeout, State) ->
-    TimedOut = truncate_capture(duration_budget, State),
-    {noreply, TimedOut};
+    case State#state.sealed of
+        true -> {noreply, State};
+        false ->
+            State#state.owner ! {
+                beamtrace_stop,
+                State#state.capture_id,
+                atom_to_binary(node(), utf8),
+                safety_ttl
+            },
+            {noreply, cleanup_capture(State#state{integrity = {agent_failure, safety_ttl}})}
+    end;
+handle_info({trace_delivered, all, Reference}, State = #state{sealed = true}) ->
+    {noreply, seal_barrier_delivered(Reference, State)};
+handle_info({beamtrace_drain_timeout, Reference}, State = #state{
+    sealed = true,
+    drain_timer = {Reference, _Timer}
+}) ->
+    {noreply, finalize_seal(drain_timeout, State)};
 handle_info({'DOWN', Reference, process, Owner, _Reason}, State = #state{
     owner = Owner,
     owner_monitor = Reference
@@ -290,7 +331,7 @@ arm_loaded(MFA, State) ->
                         {error, trigger_not_found, State};
                     _Count ->
                         Timer = erlang:send_after(
-                            State#state.max_duration_ms,
+                            safety_ttl_ms(State),
                             self(),
                             capture_timeout
                         ),
@@ -321,7 +362,7 @@ listen_capture(Label, State) when is_integer(Label), Label >= 0 ->
                     try
                         Session = trace:session_create(beamtrace_capture, self(), []),
                         Timer = erlang:send_after(
-                            State#state.max_duration_ms,
+                            safety_ttl_ms(State),
                             self(),
                             capture_timeout
                         ),
@@ -351,8 +392,8 @@ root_match_spec(Label, Arity, Filter) ->
         {set_seq_token, send, true},
         {set_seq_token, 'receive', true},
         {set_seq_token, print, true},
-        {set_seq_token, monotonic_timestamp, true},
-        {trace, [], [procs, set_on_spawn, monotonic_timestamp]},
+        {set_seq_token, strict_monotonic_timestamp, true},
+        {trace, [], [procs, set_on_spawn, strict_monotonic_timestamp]},
         {message, {const, {beamtrace_root, Label}}}
     ],
     Variables = argument_variables(Arity),
@@ -567,13 +608,18 @@ event_actor('receive', _From, To) -> To;
 event_actor(_Kind, From, _To) -> From.
 
 base_event(Kind, Process, Timestamp, State) ->
+    {LocalNanoseconds, _TraceOrder} = timestamp_parts(Timestamp),
     #{
         id => new_event_id(),
         root_id => State#state.label,
         kind => Kind,
         node => atom_to_binary(node(), utf8),
         process => process_identity(Process),
-        local_timestamp_ns => timestamp_ns(Timestamp)
+        local_offset_ns => erlang:max(0, LocalNanoseconds - State#state.clock_origin_ns),
+        %% The VM trace timestamp's unique component may be negative and is
+        %% process-global. Use the accepted-event index as the capture-local,
+        %% non-negative deterministic tie breaker exposed by schema v2.
+        local_order => State#state.event_count
     }.
 
 maybe_disarm_root(State = #state{root_count = Count, max_roots = Max, session = Session, trigger = MFA})
@@ -583,10 +629,10 @@ maybe_disarm_root(State = #state{root_count = Count, max_roots = Max, session = 
 maybe_disarm_root(State) ->
     State.
 
-enqueue_internal(Event, State = #state{completeness = complete}) ->
+enqueue_internal(Event, State = #state{integrity = clean}) ->
     case accept_event(Event, State) of
         {ok, Accepted} -> Accepted;
-        {truncated, _Reason, Truncated} -> Truncated
+        {budget_reached, _Reason, Stopped} -> Stopped
     end;
 enqueue_internal(_Event, State) ->
     State.
@@ -605,7 +651,7 @@ accept_event(Event, State) ->
         queue_budget when State#state.mode =:= live ->
             accept_live_overflow(Event, Size, State);
         Reason ->
-            {truncated, Reason, truncate_capture(Reason, State)}
+            {budget_reached, Reason, stop_for_budget(Reason, State)}
     end.
 
 budget_reason(_Size, #state{event_count = Count, max_events = Max}) when Count >= Max ->
@@ -627,18 +673,23 @@ accept_live_overflow(Event, Size, State) ->
                 byte_count = State#state.byte_count - DroppedSize + Size,
                 event_count = State#state.event_count + 1,
                 dropped_live = State#state.dropped_live + 1,
-                completeness = {gapped, State#state.dropped_live + 1}
+                integrity = {dropped_events, State#state.dropped_live + 1}
             }};
         {empty, _} ->
             {ok, State}
     end.
 
-truncate_capture(_Reason, State = #state{completeness = {truncated, _}}) ->
+stop_for_budget(_Reason, State = #state{integrity = {budget_reached, _}}) ->
     State;
-truncate_capture(Reason, State) ->
-    State#state.owner ! {beamtrace_stop, State#state.capture_id, {truncated, Reason}},
+stop_for_budget(Reason, State) ->
+    State#state.owner ! {
+        beamtrace_stop,
+        State#state.capture_id,
+        atom_to_binary(node(), utf8),
+        {budget_reached, Reason}
+    },
     Cleaned = cleanup_capture(State),
-    Cleaned#state{completeness = {truncated, Reason}}.
+    Cleaned#state{integrity = {budget_reached, Reason}}.
 
 flush(State = #state{credits = Credits, queued = Queued}) when Credits > 0, Queued > 0 ->
     {Batch, Queue, Taken} = take_batch(
@@ -659,6 +710,7 @@ flush(State = #state{credits = Credits, queued = Queued}) when Credits > 0, Queu
     State#state.owner ! {
         beamtrace_batch,
         State#state.capture_id,
+        atom_to_binary(node(), utf8),
         Sequence,
         GapPrefix ++ Batch
     },
@@ -687,17 +739,134 @@ status_map(State) ->
         capture_id => State#state.capture_id,
         armed => State#state.armed,
         trigger => State#state.trigger,
-        completeness => State#state.completeness,
+        integrity => State#state.integrity,
         queued => State#state.queued,
         credits => State#state.credits,
         event_count => State#state.event_count,
         byte_count => State#state.byte_count,
+        batch_sequence => State#state.batch_sequence,
+        sealed => State#state.sealed,
         root_count => State#state.root_count,
         owns_system_tracer => State#state.owns_system_tracer
     }.
 
+begin_seal(Reason, Timeout, From, State) ->
+    _ = cancel_timer(State#state.ttl_timer),
+    Session = State#state.session,
+    _ = case {Session, State#state.trigger} of
+        {undefined, _} -> ok;
+        {_, undefined} -> ok;
+        {_, MFA} -> safe_disable_meta(Session, MFA)
+    end,
+    _ = case Session of
+        undefined -> ok;
+        _ -> safe_disable_process_tracing(Session)
+    end,
+    _ = case State#state.owns_system_tracer of
+        true -> seq_trace:reset_trace();
+        false -> ok
+    end,
+    References = delivery_barriers(Session),
+    case References of
+        [] ->
+            Sealing = State#state{
+                sealed = true,
+                seal_from = From,
+                seal_reason = Reason,
+                ttl_timer = undefined
+            },
+            {Reply, Sealed} = finish_seal(verified, Sealing),
+            {done, Reply, Sealed};
+        _ ->
+            Tag = make_ref(),
+            Timer = erlang:send_after(Timeout, self(), {beamtrace_drain_timeout, Tag}),
+            {pending, State#state{
+                sealed = true,
+                seal_from = From,
+                seal_reason = Reason,
+                delivery_refs = References,
+                drain_timer = {Tag, Timer},
+                ttl_timer = undefined
+            }}
+    end.
+
+delivery_barriers(undefined) ->
+    case safe_seq_delivery_barrier() of
+        undefined -> [];
+        Reference -> [Reference]
+    end;
+delivery_barriers(Session) ->
+    SessionReference = safe_session_delivery_barrier(Session),
+    SeqReference = safe_seq_delivery_barrier(),
+    [Reference || Reference <- [SessionReference, SeqReference],
+        is_reference(Reference)].
+
+safe_session_delivery_barrier(Session) ->
+    try trace:delivered(Session, all)
+    catch _:_ -> undefined
+    end.
+
+safe_seq_delivery_barrier() ->
+    try erlang:trace_delivered(all)
+    catch _:_ -> undefined
+    end.
+
+safe_disable_process_tracing(Session) ->
+    try trace:process(Session, all, false, [all])
+    catch _:_ -> false
+    end.
+
+seal_barrier_delivered(Reference, State) ->
+    Remaining = lists:delete(Reference, State#state.delivery_refs),
+    case Remaining of
+        [] -> finalize_seal(verified, State#state{delivery_refs = []});
+        _ -> State#state{delivery_refs = Remaining}
+    end.
+
+finalize_seal(_Status, State = #state{seal_from = undefined}) ->
+    seal_cleanup(State);
+finalize_seal(Status, State = #state{seal_from = From}) ->
+    {Reply, Cleaned} = finish_seal(Status, State),
+    gen_server:reply(From, Reply),
+    Cleaned.
+
+finish_seal(Status, State) ->
+    Drained = flush_all(State),
+    Receipt = #{
+        node => atom_to_binary(node(), utf8),
+        final_batch_sequence => Drained#state.batch_sequence,
+        event_count => Drained#state.event_count,
+        byte_count => Drained#state.byte_count,
+        origin_local_ns => Drained#state.clock_origin_ns
+    },
+    Drained#state.owner ! {
+        beamtrace_receipt,
+        Drained#state.capture_id,
+        atom_to_binary(node(), utf8),
+        Receipt,
+        Status
+    },
+    {{ok, Receipt, Status}, seal_cleanup_drained(Drained)}.
+
+seal_cleanup(State) ->
+    seal_cleanup_drained(flush_all(State)).
+
+seal_cleanup_drained(Drained) ->
+    Cleaned = cleanup_capture(Drained),
+    Cleaned#state{
+        seal_from = undefined,
+        delivery_refs = [],
+        drain_timer = undefined
+    }.
+
+flush_all(State = #state{queued = Queued}) ->
+    NeededCredits = (Queued + State#state.batch_size - 1)
+        div State#state.batch_size + 1,
+    flush(State#state{credits = erlang:max(State#state.credits, NeededCredits)}).
+
 cleanup_capture(State) ->
     _ = cancel_timer(State#state.ttl_timer),
+    _ = cancel_drain_timer(State#state.drain_timer),
     case State#state.session of
         undefined -> ok;
         Session -> _ = safe_destroy_session(Session)
@@ -719,6 +888,9 @@ cancel_timer(undefined) -> ok;
 cancel_timer(Reference) ->
     _ = erlang:cancel_timer(Reference),
     ok.
+
+cancel_drain_timer(undefined) -> ok;
+cancel_drain_timer({_Reference, Timer}) -> cancel_timer(Timer).
 
 safe_disable_meta(Session, MFA) ->
     try trace:function(Session, MFA, false, [meta])
@@ -982,17 +1154,22 @@ semantic({'DOWN', _Reference, process, _Pid, _Reason}, erlang_supervisor) ->
     supervisor_down;
 semantic(Message, _Preset) -> classify_message(Message).
 
-timestamp_ns(Value) when is_integer(Value) -> Value;
-timestamp_ns({Monotonic, _Unique}) when is_integer(Monotonic) -> Monotonic;
-timestamp_ns({MegaSeconds, Seconds, MicroSeconds}) ->
+timestamp_parts(Value) when is_integer(Value) ->
+    {Value, erlang:unique_integer([positive, monotonic])};
+timestamp_parts({Monotonic, Unique}) when is_integer(Monotonic), is_integer(Unique) ->
+    {Monotonic, Unique};
+timestamp_parts({MegaSeconds, Seconds, MicroSeconds}) ->
     %% Meta call tracing can emit the legacy wall-clock tuple even when the
     %% process and sequential trace flags request monotonic timestamps. Map
     %% that observation into the node's monotonic domain before it enters the
     %% capture. Unix time is introduced only by exporters that require it.
     SystemNanoseconds =
         ((MegaSeconds * 1000000 + Seconds) * 1000000000) + MicroSeconds * 1000,
-    SystemNanoseconds - erlang:time_offset(nanosecond);
-timestamp_ns(_Other) -> erlang:monotonic_time(nanosecond).
+    {SystemNanoseconds - erlang:time_offset(nanosecond),
+        erlang:unique_integer([positive, monotonic])};
+timestamp_parts(_Other) ->
+    {erlang:monotonic_time(nanosecond),
+        erlang:unique_integer([positive, monotonic])}.
 
 new_capture_id() ->
     <<"capture-", (integer_to_binary(erlang:unique_integer([positive, monotonic])))/binary>>.
@@ -1011,6 +1188,15 @@ positive_option(Key, Options, Default) ->
         Value when is_integer(Value), Value > 0 -> Value;
         _ -> Default
     end.
+
+drain_timeout_option(Options) ->
+    case maps:get(drain_timeout_ms, Options, ?DEFAULT_DRAIN_TIMEOUT_MS) of
+        Value when is_integer(Value), Value >= 1000, Value =< 60000 -> Value;
+        _ -> ?DEFAULT_DRAIN_TIMEOUT_MS
+    end.
+
+safety_ttl_ms(State) ->
+    State#state.max_duration_ms + State#state.drain_timeout_ms + 5000.
 
 otp_supported() ->
     try

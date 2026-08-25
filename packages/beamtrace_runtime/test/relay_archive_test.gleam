@@ -278,7 +278,7 @@ fn seed_trace(
     store,
     session.id,
     session.relay_id,
-    "complete",
+    "delivered",
     session.received_at_ms + 2,
     session.received_at_ms + 3,
   ))
@@ -307,7 +307,7 @@ fn trace_start(
     received_at_ms: received_at_ms,
     ended_at_ms: 0,
     last_received_at_ms: received_at_ms,
-    completeness: "active",
+    delivery_status: "active",
     event_count: 0,
     legal_hold: False,
     active: True,

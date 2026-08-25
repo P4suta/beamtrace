@@ -27,6 +27,7 @@ import beamtrace_runtime/tui_driver
 import beamtrace_tui
 import gleam/int
 import gleam/io
+import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
@@ -98,7 +99,9 @@ fn run(command_: cli.Command) -> Int {
       run_attach(node, mode, cookie_file, port)
     cli.Open(path, mode, port) -> run_open(path, mode, port)
     cli.Compare(left, right) -> run_compare(left, right)
-    cli.Export(path, format) -> run_export(path, format)
+    cli.Export(path, format, anchor_now) -> run_export(path, format, anchor_now)
+    cli.Validate(path, json) -> run_validate(path, json)
+    cli.Migrate(path, output) -> run_migrate(path, output)
     cli.Record(
       node,
       trigger,
@@ -251,9 +254,9 @@ fn run_relay_capture(
       module_: module_,
       function_: function_,
       arity: arity,
-      completeness: case captured.completeness {
-        types.Complete -> relay_session.Complete
-        _ -> relay_session.Truncated
+      delivery_status: case types.delivery_verified(captured.outcome) {
+        True -> relay_session.Delivered
+        False -> relay_session.Partial
       },
     )
   let transferred = case grant {
@@ -284,10 +287,7 @@ fn run_relay_capture(
         <> int.to_string(list.length(captured.events))
         <> " events after durable hub acknowledgement.",
       )
-      case captured.completeness {
-        types.Complete -> 0
-        _ -> 3
-      }
+      capture.exit_code(captured.outcome)
     }
   }
 }
@@ -381,11 +381,10 @@ fn run_capture(
       tool_version: version,
       capture_id: capture_id(),
       nodes: nodes,
-      completeness: result.completeness,
+      outcome: result.outcome,
       privacy: types.Metadata,
-      checksums: [],
     )
-  case storage.save(out, manifest, result.events) {
+  case storage.save_with_clocks(out, manifest, result.events, result.clocks) {
     Ok(Nil) -> {
       io.println(
         "Saved "
@@ -393,7 +392,7 @@ fn run_capture(
         <> " events to "
         <> out,
       )
-      capture.exit_code(result.completeness)
+      capture.exit_code(result.outcome)
     }
     Error(error) -> fail("could not save capture: " <> string.inspect(error), 2)
   }
@@ -479,26 +478,101 @@ fn run_compare(left: String, right: String) -> Int {
   }
 }
 
-fn run_export(path: String, format: cli.ExportFormat) -> Int {
+fn run_export(path: String, format: cli.ExportFormat, anchor_now: Bool) -> Int {
   case storage.load(path) {
     Error(error) ->
       fail("could not load export source: " <> string.inspect(error), 2)
     Ok(archive) -> {
       let output = command.export_path(path, format)
       let content = case format {
-        cli.Html -> export.html(archive, include_raw: False)
-        cli.Jsonl -> export.jsonl(archive, include_raw: False)
-        cli.Mermaid -> export.mermaid(archive)
-        cli.Otlp -> export.otlp(archive, include_raw: False)
+        cli.Html -> Ok(export.html(archive, include_raw: False))
+        cli.Jsonl -> Ok(export.jsonl(archive, include_raw: False))
+        cli.Mermaid -> Ok(export.mermaid(archive))
+        cli.Otlp ->
+          export.otlp(archive, include_raw: False, anchor_now: anchor_now)
       }
-      case write_text(output, content) {
-        Ok(Nil) -> {
-          io.println("Exported " <> output)
-          0
-        }
-        Error(error) -> fail("could not write export: " <> error, 2)
+      case content {
+        Error(error) -> fail("could not export OTLP: " <> error, 2)
+        Ok(content) ->
+          case write_text(output, content) {
+            Ok(Nil) -> {
+              io.println("Exported " <> output)
+              0
+            }
+            Error(error) -> fail("could not write export: " <> error, 2)
+          }
       }
     }
+  }
+}
+
+fn run_validate(path: String, as_json: Bool) -> Int {
+  case storage.validate(path) {
+    Ok(archive) -> {
+      case as_json {
+        True ->
+          json.object([
+            #("valid", json.bool(True)),
+            #("schema_version", json.int(archive.manifest.schema_version)),
+            #("event_count", json.int(list.length(archive.events))),
+            #("outcome", codec.outcome_json(archive.manifest.outcome)),
+          ])
+          |> json.to_string
+          |> io.println
+        False ->
+          io.println(
+            "Valid .beamtrace schema v"
+            <> int.to_string(archive.manifest.schema_version)
+            <> " · "
+            <> int.to_string(list.length(archive.events))
+            <> " events · checksums and causal graph verified",
+          )
+      }
+      0
+    }
+    Error(error) -> {
+      case as_json {
+        True ->
+          json.object([
+            #("valid", json.bool(False)),
+            #("error_type", json.string(storage_error_kind(error))),
+            #("message", json.string(string.inspect(error))),
+          ])
+          |> json.to_string
+          |> io.println
+        False ->
+          io.println_error(
+            "beamtrace: invalid archive: " <> string.inspect(error),
+          )
+      }
+      2
+    }
+  }
+}
+
+fn run_migrate(path: String, output: String) -> Int {
+  case storage.migrate(path, output, version) {
+    Ok(Nil) -> {
+      io.println("Migrated " <> path <> " to schema v2 at " <> output)
+      0
+    }
+    Error(error) -> fail("migration failed: " <> string.inspect(error), 2)
+  }
+}
+
+fn storage_error_kind(error: storage.StorageError) -> String {
+  case error {
+    storage.InvalidContainer -> "invalid_container"
+    storage.UnsafeEntry(_) -> "unsafe_entry"
+    storage.DuplicateEntry(_) -> "duplicate_entry"
+    storage.ZipBomb -> "zip_bomb"
+    storage.ChecksumMismatch -> "checksum_mismatch"
+    storage.InvalidWindow -> "invalid_window"
+    storage.InvalidSearch -> "invalid_search"
+    storage.InvalidGraph(_) -> "invalid_graph"
+    storage.MigrationRequiresDistinctOutput -> "migration_output_conflict"
+    storage.CodecError(_) -> "schema_error"
+    storage.IoError(_) -> "io_error"
   }
 }
 
@@ -625,6 +699,7 @@ fn run_record_session(
       trigger: core_trigger,
       where_aql: where_aql,
       capture_window_ms: 30_000,
+      drain_timeout_ms: 10_000,
       budget: capture.default_budget(),
       max_roots: max_roots,
       preset: preset,
@@ -753,7 +828,7 @@ fn finish_record_child(
                 <> out,
               )
               case child_status {
-                0 -> capture.exit_code(result.completeness)
+                0 -> capture.exit_code(result.outcome)
                 _ -> 1
               }
             }
@@ -782,11 +857,10 @@ fn save_result(
       tool_version: version,
       capture_id: capture_id(),
       nodes: nodes,
-      completeness: result.completeness,
+      outcome: result.outcome,
       privacy: privacy,
-      checksums: [],
     )
-  case storage.save(out, manifest, result.events) {
+  case storage.save_with_clocks(out, manifest, result.events, result.clocks) {
     Ok(Nil) -> Ok(Nil)
     Error(error) -> Error(string.inspect(error))
   }
@@ -846,19 +920,23 @@ fn help_text() -> String {
   "BeamTrace — BEAM causal workbench\n\n"
   <> "Usage:\n"
   <> "  beamtrace attach <node> [--web|--tui] [--port PORT] [--cookie-file PATH]\n"
+  <> "                   --acknowledge-seq-trace-reset\n"
   <> "  beamtrace capture [<node>[,<node>...]] --trigger Module:function/arity [--where AQL]\n"
   <> "                    [--profile NAME] [--max-roots 1..1000] [--preset PRESET] --out FILE\n"
+  <> "                    --acknowledge-seq-trace-reset\n"
   <> "  beamtrace record [--node NODE] --trigger Module:function/arity --out FILE\n"
   <> "                   [--profile NAME] [capture options] -- <gleam|mix|rebar3 command>\n"
   <> "  beamtrace open <file.beamtrace> [--web|--tui] [--port PORT]\n"
   <> "  beamtrace compare <left.beamtrace> <right.beamtrace>\n"
-  <> "  beamtrace export <file.beamtrace> --format html|jsonl|mermaid|otlp\n"
+  <> "  beamtrace export <file.beamtrace> --format html|jsonl|mermaid|otlp [--otlp-anchor-now]\n"
+  <> "  beamtrace validate <file.beamtrace> [--json]\n"
+  <> "  beamtrace migrate <v1.beamtrace> --output <v2.beamtrace>\n"
   <> "  beamtrace serve [--port PORT]\n"
   <> "  beamtrace demo [--web|--tui|--no-ui] [--out PATH] [--port PORT]\n"
   <> "  beamtrace relay <https-hub-url> --enroll TOKEN\n"
   <> "                  [--node NODE --trigger Module:function/arity] [--where AQL]\n"
   <> "                  [--cookie-file PATH] [--max-roots 1..1000] [--preset PRESET]\n"
-  <> "                  [--raw-grant-file PATH]\n"
+  <> "                  [--raw-grant-file PATH] [--acknowledge-seq-trace-reset]\n"
   <> "  beamtrace tui [--server URL] [--session-cookie-file PATH]\n"
   <> "  beamtrace init | config check\n"
   <> "  beamtrace doctor [--json] | mcp\n\n"

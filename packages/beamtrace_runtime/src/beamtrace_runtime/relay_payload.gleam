@@ -187,7 +187,7 @@ fn decode_events(
   case sources {
     [] -> Ok(list.reverse(accumulator))
     [source, ..rest] ->
-      case codec.decode_event(source) {
+      case codec.decode_event_structural(source) {
         Error(_) -> Error("invalid_payload")
         Ok(event) -> decode_events(rest, [event, ..accumulator])
       }
@@ -458,7 +458,7 @@ fn valid_body(value: String, maximum_bytes: Int) -> Bool {
 }
 
 fn metadata_canonical(mode: String, events: List(types.TraceEvent)) -> String {
-  "{\"type\":\"batch\",\"mode\":\""
+  "{\"type\":\"batch\",\"event_schema\":2,\"mode\":\""
   <> mode
   <> "\",\"privacy\":\"metadata\",\"items\":["
   <> encoded_events(events)
@@ -471,7 +471,7 @@ fn raw_transport(
   policy: types.RawPolicy,
   events: List(types.TraceEvent),
 ) -> String {
-  "{\"type\":\"batch\",\"mode\":\""
+  "{\"type\":\"batch\",\"event_schema\":2,\"mode\":\""
   <> mode
   <> "\",\"privacy\":\"raw\",\"grant\":\""
   <> grant
@@ -487,7 +487,7 @@ fn raw_canonical(
   policy: types.RawPolicy,
   events: List(types.TraceEvent),
 ) -> String {
-  "{\"type\":\"batch\",\"mode\":\""
+  "{\"type\":\"batch\",\"event_schema\":2,\"mode\":\""
   <> mode
   <> "\",\"privacy\":\"raw\",\"policy\":"
   <> raw_grant.canonical_policy(policy)

@@ -59,7 +59,7 @@ pub fn team_trace_selection_is_bounded_and_locked_content_stays_closed_test() {
   let traces = [
     model.TeamTrace(
       "metadata-trace",
-      "complete",
+      "delivered",
       "app@host",
       "shop:checkout/1",
       "metadata",
@@ -69,7 +69,7 @@ pub fn team_trace_selection_is_bounded_and_locked_content_stays_closed_test() {
     ),
     model.TeamTrace(
       "raw-trace",
-      "incomplete",
+      "partial",
       "app@host",
       "shop:raw/0",
       "raw",

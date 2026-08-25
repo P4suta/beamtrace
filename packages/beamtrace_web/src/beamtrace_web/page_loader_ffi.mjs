@@ -8,7 +8,7 @@ export function pageUrl(start, limit, search) {
   if (search.trim() !== "") {
     query.set("q", search.trim());
   }
-  return `/api/v1/sessions/current/events?${query}`;
+  return `/api/v2/sessions/current/events?${query}`;
 }
 
 export function fetchPage(start, limit, search, onSuccess, onError) {

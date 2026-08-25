@@ -31,7 +31,7 @@ fn event(
     root_id: "root-1",
     node: process.physical.node,
     process: process,
-    local_timestamp_ns: at,
+    local_instant: types.LocalInstant(at, at),
     kind: kind,
     evidence: types.Exact,
   )
@@ -42,12 +42,25 @@ pub fn sequential_serial_creates_exact_causal_edge_test() {
   let worker = process("one@host", "<0.20.0>", "worker")
   let events = [
     event("root", 1, client, types.Root(types.Mfa("api", "run", 0), [])),
-    event("send", 2, client, types.Send(worker.physical, types.Tag("work"), 41)),
+    event(
+      "send",
+      2,
+      client,
+      types.Send(
+        worker.physical,
+        types.Tag("work"),
+        types.SequenceSerial(40, 41),
+      ),
+    ),
     event(
       "recv",
       3,
       worker,
-      types.Received(client.physical, types.Tag("work"), 41),
+      types.Received(
+        client.physical,
+        types.Tag("work"),
+        types.SequenceSerial(40, 41),
+      ),
     ),
   ]
 
@@ -57,7 +70,7 @@ pub fn sequential_serial_creates_exact_causal_edge_test() {
     Some(types.CausalEdge(
       from: "send",
       to: "recv",
-      kind: types.SequentialMessage(41),
+      kind: types.SequentialMessage(types.SequenceSerial(40, 41)),
       evidence: types.Exact,
     )),
   )
@@ -75,13 +88,21 @@ pub fn distributed_clock_skew_does_not_break_serial_causality_test() {
       "recv",
       10,
       worker,
-      types.Received(client.physical, types.Tag("work"), 77),
+      types.Received(
+        client.physical,
+        types.Tag("work"),
+        types.SequenceSerial(76, 77),
+      ),
     ),
     event(
       "send",
       20,
       client,
-      types.Send(worker.physical, types.Tag("work"), 77),
+      types.Send(
+        worker.physical,
+        types.Tag("work"),
+        types.SequenceSerial(76, 77),
+      ),
     ),
   ]
 
@@ -91,7 +112,7 @@ pub fn distributed_clock_skew_does_not_break_serial_causality_test() {
     Some(types.CausalEdge(
       from: "send",
       to: "recv",
-      kind: types.SequentialMessage(77),
+      kind: types.SequentialMessage(types.SequenceSerial(76, 77)),
       evidence: types.Exact,
     )),
   )
@@ -103,7 +124,12 @@ pub fn missing_receive_becomes_boundary_not_invented_edge_test() {
   let client = process("one@host", "<0.10.0>", "client")
   let absent = types.ProcessRef("down@host", "<0.40.0>")
   let events = [
-    event("send", 2, client, types.Send(absent, types.Tag("work"), 99)),
+    event(
+      "send",
+      2,
+      client,
+      types.Send(absent, types.Tag("work"), types.SequenceSerial(98, 99)),
+    ),
   ]
 
   let assert Ok(graph) = dag.build(events)

@@ -1,0 +1,1 @@
+{"schema_version":2,"tool_version":"0.3.0","capture_id":"capture-golden","nodes":["fixture@host"],"outcome":{"end":{"kind":"quiet_period","quiet_ms":250},"issues":[],"receipts":[{"node":"fixture@host","final_batch_sequence":1,"event_count":1,"byte_count":128}]},"privacy":{"kind":"metadata"}}

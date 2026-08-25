@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace/codec
+import beamtrace/dag
 import beamtrace/diff
+import beamtrace/merge
 import beamtrace/stats
 import beamtrace/types
 import beamtrace_runtime/capture
@@ -37,6 +39,7 @@ type CaptureArmPayload {
     trigger: String,
     where_aql: Option(String),
     capture_window_ms: Int,
+    drain_timeout_ms: Int,
     max_events: Int,
     max_bytes: Int,
     max_agent_mailbox: Int,
@@ -56,7 +59,24 @@ type ComparePayload {
 pub fn compare_response(
   incoming: wisp.Request,
   context: Context,
+  now_ms: Int,
+) -> wisp.Response {
+  compare_response_for(incoming, context, now_ms, False)
+}
+
+pub fn compare_v1_response(
+  incoming: wisp.Request,
+  context: Context,
+  now_ms: Int,
+) -> wisp.Response {
+  compare_response_for(incoming, context, now_ms, True)
+}
+
+fn compare_response_for(
+  incoming: wisp.Request,
+  context: Context,
   _now_ms: Int,
+  legacy: Bool,
 ) -> wisp.Response {
   case context.local_mode {
     False -> wisp.not_found()
@@ -80,14 +100,134 @@ pub fn compare_response(
                   |> json.to_string
                   |> wisp.json_response(422)
                 Ok(report) ->
-                  report
-                  |> compare_report_json
-                  |> json.to_string
-                  |> wisp.json_response(200)
+                  case legacy {
+                    False ->
+                      report
+                      |> compare_report_json
+                      |> json.to_string
+                      |> wisp.json_response(200)
+                    True ->
+                      case compare_report_v1_json(report) {
+                        Ok(body) ->
+                          body |> json.to_string |> wisp.json_response(200)
+                        Error(reason) -> v1_projection_error(reason)
+                      }
+                  }
               }
           }
       }
   }
+}
+
+fn compare_report_v1_json(
+  report: compare_workspace.Report,
+) -> Result(json.Json, String) {
+  use reports <- try_result(map_results(report.reports, compare_run_v1_json))
+  use statistics <- try_result(map_results(
+    report.statistics,
+    branch_stats_v1_json,
+  ))
+  Ok(
+    json.object([
+      #("baseline", json.string(report.baseline)),
+      #("run_count", json.int(report.run_count)),
+      #("reports", json.array(reports, fn(value) { value })),
+      #("statistics", json.array(statistics, fn(value) { value })),
+    ]),
+  )
+}
+
+fn compare_run_v1_json(
+  report: compare_workspace.RunReport,
+) -> Result(json.Json, String) {
+  use items <- try_result(map_results(report.items, diff_item_v1_json))
+  Ok(
+    json.object([
+      #("path", json.string(report.path)),
+      #("added", json.int(report.added)),
+      #("removed", json.int(report.removed)),
+      #("changed", json.int(report.changed)),
+      #("items", json.array(items, fn(value) { value })),
+    ]),
+  )
+}
+
+fn diff_item_v1_json(item: diff.DiffItem) -> Result(json.Json, String) {
+  case item {
+    diff.Matched(left_id, right_id, types.ExactTime(delta)) ->
+      Ok(
+        json.object([
+          #("status", json.string("matched")),
+          #("left_id", json.string(left_id)),
+          #("right_id", json.string(right_id)),
+          #("latency_delta_ns", json.int(delta)),
+        ]),
+      )
+    diff.Matched(_, _, _) -> Error("estimated_diff_time")
+    diff.Added(right_id) ->
+      Ok(
+        json.object([
+          #("status", json.string("added")),
+          #("right_id", json.string(right_id)),
+        ]),
+      )
+    diff.Removed(left_id) ->
+      Ok(
+        json.object([
+          #("status", json.string("removed")),
+          #("left_id", json.string(left_id)),
+        ]),
+      )
+    diff.Changed(left_id, right_id, reason) ->
+      Ok(
+        json.object([
+          #("status", json.string("changed")),
+          #("left_id", json.string(left_id)),
+          #("right_id", json.string(right_id)),
+          #("reason", json.string(reason)),
+        ]),
+      )
+    diff.AmbiguousRegion(_, _, _) -> Error("ambiguous_diff_region")
+  }
+}
+
+fn branch_stats_v1_json(
+  statistic: stats.BranchStats,
+) -> Result(json.Json, String) {
+  use p50 <- try_result(point_summary(statistic.p50))
+  use p95 <- try_result(point_summary(statistic.p95))
+  Ok(
+    json.object([
+      #("signature", json.string(statistic.signature)),
+      #("p50_ns", json.int(p50)),
+      #("p95_ns", json.int(p95)),
+      #("occurrences", json.int(statistic.occurrences)),
+      #("total_runs", json.int(statistic.total_runs)),
+      #(
+        "occurrence_rate",
+        json.float(case statistic.total_runs {
+          0 -> 0.0
+          total -> int.to_float(statistic.occurrences) /. int.to_float(total)
+        }),
+      ),
+    ]),
+  )
+}
+
+fn point_summary(summary: types.TimeSummary) -> Result(Int, String) {
+  case summary.estimate {
+    types.ExactTime(value) -> Ok(value)
+    _ -> Error("estimated_statistic_time")
+  }
+}
+
+fn v1_projection_error(reason: String) -> wisp.Response {
+  json.object([
+    #("error", json.string("v1_time_projection_unavailable")),
+    #("reason", json.string(reason)),
+  ])
+  |> json.to_string
+  |> wisp.json_response(422)
 }
 
 fn compare_payload_decoder() -> decode.Decoder(ComparePayload) {
@@ -110,18 +250,31 @@ fn compare_run_json(report: compare_workspace.RunReport) -> json.Json {
     #("added", json.int(report.added)),
     #("removed", json.int(report.removed)),
     #("changed", json.int(report.changed)),
+    #("ambiguity_count", json.int(report.ambiguity_count)),
+    #(
+      "first_divergence",
+      json.nullable(report.first_divergence, divergence_json),
+    ),
     #("items", json.array(report.items, diff_item_json)),
+  ])
+}
+
+fn divergence_json(divergence: diff.Divergence) -> json.Json {
+  json.object([
+    #("left_id", json.nullable(divergence.left_id, json.string)),
+    #("right_id", json.nullable(divergence.right_id, json.string)),
+    #("causal_path", json.array(divergence.causal_path, json.string)),
   ])
 }
 
 fn diff_item_json(item: diff.DiffItem) -> json.Json {
   case item {
-    diff.Matched(left_id, right_id, latency_delta_ns) ->
+    diff.Matched(left_id, right_id, latency_delta) ->
       json.object([
         #("status", json.string("matched")),
         #("left_id", json.string(left_id)),
         #("right_id", json.string(right_id)),
-        #("latency_delta_ns", json.int(latency_delta_ns)),
+        #("latency_delta", codec.time_estimate_json(latency_delta)),
       ])
     diff.Added(right_id) ->
       json.object([
@@ -140,17 +293,23 @@ fn diff_item_json(item: diff.DiffItem) -> json.Json {
         #("right_id", json.string(right_id)),
         #("reason", json.string(reason)),
       ])
+    diff.AmbiguousRegion(left_ids, right_ids, reason) ->
+      json.object([
+        #("status", json.string("ambiguous")),
+        #("left_ids", json.array(left_ids, json.string)),
+        #("right_ids", json.array(right_ids, json.string)),
+        #("reason", json.string(reason)),
+      ])
   }
 }
 
 fn branch_stats_json(statistic: stats.BranchStats) -> json.Json {
   json.object([
     #("signature", json.string(statistic.signature)),
-    #("p50_ns", json.int(statistic.p50_ns)),
-    #("p95_ns", json.int(statistic.p95_ns)),
+    #("p50", codec.time_summary_json(statistic.p50)),
+    #("p95", codec.time_summary_json(statistic.p95)),
     #("occurrences", json.int(statistic.occurrences)),
     #("total_runs", json.int(statistic.total_runs)),
-    #("occurrence_rate", json.float(statistic.occurrence_rate)),
   ])
 }
 
@@ -171,6 +330,87 @@ pub fn capture_status_response(
           |> wisp.json_response(200)
       }
   }
+}
+
+/// V2 status exposes the observation outcome and calibration model directly;
+/// "ready" is a storage state, never a claim of causal completeness.
+pub fn capture_status_v2_response(
+  _incoming: wisp.Request,
+  context: Context,
+  _now_ms: Int,
+) -> wisp.Response {
+  case context.authorize(rbac.ViewSession) {
+    False -> wisp.response(401)
+    True ->
+      case context.local_capture {
+        None -> wisp.not_found()
+        Some(store) ->
+          case capture_session.result(store) {
+            Ok(captured) ->
+              json.object([
+                #("status", json.string("sealed")),
+                #("event_count", json.int(list.length(captured.events))),
+                #("outcome", codec.outcome_json(captured.outcome)),
+                #(
+                  "delivery_verified",
+                  json.bool(types.delivery_verified(captured.outcome)),
+                ),
+                #("clocks", codec.clocks_json(captured.clocks)),
+              ])
+              |> json.to_string
+              |> wisp.json_response(200)
+            Error(capture_session.CaptureNotReady) ->
+              store
+              |> capture_session.status
+              |> capture_status_json
+              |> wisp.json_response(200)
+            Error(_) -> wisp.json_response("{\"status\":\"failed\"}", 422)
+          }
+      }
+  }
+}
+
+pub fn graph_response(
+  _incoming: wisp.Request,
+  context: Context,
+  _now_ms: Int,
+) -> wisp.Response {
+  case context.authorize(rbac.ViewSession) {
+    False -> wisp.response(401)
+    True ->
+      case context.archive_path, context.local_capture {
+        Some(path), _ ->
+          case storage.load(path) {
+            Ok(archive) -> graph_json_response(archive.graph)
+            Error(_) ->
+              wisp.json_response("{\"error\":\"invalid_archive\"}", 422)
+          }
+        None, Some(store) ->
+          case capture_session.result(store) {
+            Ok(captured) ->
+              case dag.build(captured.events) {
+                Ok(graph) -> graph_json_response(graph)
+                Error(_) ->
+                  wisp.json_response("{\"error\":\"invalid_graph\"}", 422)
+              }
+            Error(capture_session.CaptureNotReady) ->
+              wisp.json_response("{\"error\":\"capture_not_ready\"}", 409)
+            Error(_) ->
+              wisp.json_response("{\"error\":\"capture_failed\"}", 422)
+          }
+        None, None -> wisp.not_found()
+      }
+  }
+}
+
+fn graph_json_response(graph: dag.CausalGraph) -> wisp.Response {
+  codec.GraphSegment(
+    event_ids: list.map(graph.events, fn(event) { event.id }),
+    edges: graph.edges,
+    boundaries: graph.boundaries,
+  )
+  |> codec.encode_graph_segment
+  |> wisp.json_response(200)
 }
 
 pub fn mfa_search_response(
@@ -342,15 +582,7 @@ fn topology_edge_json(edge: topology.Edge) -> json.Json {
 }
 
 fn evidence_json(evidence: types.Evidence) -> json.Json {
-  case evidence {
-    types.Exact -> json.object([#("status", json.string("exact"))])
-    types.Inferred(reason, confidence) ->
-      json.object([
-        #("status", json.string("inferred")),
-        #("reason", json.string(reason)),
-        #("confidence", json.float(confidence)),
-      ])
-  }
+  codec.evidence_json(evidence)
 }
 
 fn mfa_search_parameters(
@@ -429,6 +661,7 @@ pub fn capture_arm_response(
                       trigger: trigger,
                       where_aql: payload.where_aql,
                       capture_window_ms: payload.capture_window_ms,
+                      drain_timeout_ms: payload.drain_timeout_ms,
                       budget: capture.Budget(
                         payload.max_events,
                         payload.max_bytes,
@@ -525,11 +758,17 @@ fn save_capture(
               tool_version: tool_version,
               capture_id: "capture-" <> int.to_string(now_ms),
               nodes: capture_session.nodes(store),
-              completeness: captured.completeness,
+              outcome: captured.outcome,
               privacy: types.Metadata,
-              checksums: [],
             )
-          case storage.save(path, manifest, captured.events) {
+          case
+            storage.save_with_clocks(
+              path,
+              manifest,
+              captured.events,
+              captured.clocks,
+            )
+          {
             Ok(Nil) ->
               json.object([
                 #("status", json.string("saved")),
@@ -549,10 +788,11 @@ fn capture_status_json(status: capture_session.Status) -> String {
     capture_session.Idle -> [#("status", json.string("idle"))]
     capture_session.Armed -> [#("status", json.string("armed"))]
     capture_session.Cancelling -> [#("status", json.string("cancelling"))]
-    capture_session.Ready(event_count, completeness) -> [
+    capture_session.Ready(event_count, outcome_summary) -> [
       #("status", json.string("ready")),
       #("event_count", json.int(event_count)),
-      #("completeness", json.string(completeness)),
+      // Deprecated API v1 adapter. V2 returns the structured outcome.
+      #("completeness", json.string(outcome_summary)),
     ]
     capture_session.Failed(reason) -> [
       #("status", json.string("failed")),
@@ -574,6 +814,11 @@ fn capture_arm_payload_decoder() -> decode.Decoder(CaptureArmPayload) {
   use trigger <- decode.field("trigger", decode.string)
   use where_aql <- decode.field("where", decode.optional(decode.string))
   use capture_window_ms <- decode.field("capture_window_ms", decode.int)
+  use drain_timeout_ms <- decode.optional_field(
+    "drain_timeout_ms",
+    10_000,
+    decode.int,
+  )
   use max_events <- decode.field("max_events", decode.int)
   use max_bytes <- decode.field("max_bytes", decode.int)
   use max_agent_mailbox <- decode.field("max_agent_mailbox", decode.int)
@@ -583,6 +828,7 @@ fn capture_arm_payload_decoder() -> decode.Decoder(CaptureArmPayload) {
     trigger,
     where_aql,
     capture_window_ms,
+    drain_timeout_ms,
     max_events,
     max_bytes,
     max_agent_mailbox,
@@ -649,7 +895,24 @@ fn parse_capture_preset(source: String) -> Result(types.Preset, Nil) {
 pub fn event_window_response(
   incoming: wisp.Request,
   context: Context,
+  now_ms: Int,
+) -> wisp.Response {
+  event_window_response_for(incoming, context, now_ms, False)
+}
+
+pub fn event_window_v1_response(
+  incoming: wisp.Request,
+  context: Context,
+  now_ms: Int,
+) -> wisp.Response {
+  event_window_response_for(incoming, context, now_ms, True)
+}
+
+fn event_window_response_for(
+  incoming: wisp.Request,
+  context: Context,
   _now_ms: Int,
+  legacy: Bool,
 ) -> wisp.Response {
   case context.authorize(rbac.ViewSession) {
     False -> wisp.response(401)
@@ -663,7 +926,7 @@ pub fn event_window_response(
           case context.local_capture {
             None -> wisp.not_found()
             Some(store) ->
-              capture_session_event_window(store, page, search_query)
+              capture_session_event_window(store, page, search_query, legacy)
           }
         _, Error(_), _ ->
           wisp.json_response("{\"error\":\"invalid_window\"}", 400)
@@ -676,24 +939,15 @@ pub fn event_window_response(
             Some(query) -> storage.search(path, query, start:, limit:)
           }
           case result {
-            Ok(window) -> {
-              let events =
-                window.events
-                |> list.map(codec.encode_event)
-                |> string.join(",")
-              wisp.json_response(
-                "{\"start\":"
-                  <> int.to_string(window.start)
-                  <> ",\"limit\":"
-                  <> int.to_string(window.limit)
-                  <> ",\"total\":"
-                  <> int.to_string(window.total)
-                  <> ",\"events\":["
-                  <> events
-                  <> "]}",
-                200,
+            Ok(window) ->
+              event_page_response(
+                window.events,
+                window.start,
+                window.limit,
+                window.total,
+                window.clocks,
+                legacy,
               )
-            }
             Error(storage.InvalidWindow) ->
               wisp.json_response("{\"error\":\"invalid_window\"}", 400)
             Error(storage.InvalidSearch) ->
@@ -710,6 +964,7 @@ fn capture_session_event_window(
   store: capture_session.Store,
   page: #(Int, Int),
   search_query: Option(String),
+  legacy: Bool,
 ) -> wisp.Response {
   case capture_session.result(store) {
     Error(capture_session.CaptureNotReady) ->
@@ -733,14 +988,68 @@ fn capture_session_event_window(
       case start <= total {
         False -> wisp.json_response("{\"error\":\"invalid_window\"}", 400)
         True ->
-          filtered
-          |> list.drop(start)
-          |> list.take(limit)
-          |> event_page_json(start, limit, total)
-          |> wisp.json_response(200)
+          event_page_response(
+            filtered |> list.drop(start) |> list.take(limit),
+            start,
+            limit,
+            total,
+            captured.clocks,
+            legacy,
+          )
       }
     }
   }
+}
+
+fn event_page_response(
+  events: List(types.TraceEvent),
+  start: Int,
+  limit: Int,
+  total: Int,
+  clocks: types.ClockCalibration,
+  legacy: Bool,
+) -> wisp.Response {
+  case legacy {
+    False ->
+      event_page_json(events, start, limit, total, clocks)
+      |> wisp.json_response(200)
+    True ->
+      case event_page_v1_json(events, start, limit, total, clocks) {
+        Ok(body) -> body |> json.to_string |> wisp.json_response(200)
+        Error(reason) -> v1_projection_error(reason)
+      }
+  }
+}
+
+fn event_page_v1_json(
+  events: List(types.TraceEvent),
+  start: Int,
+  limit: Int,
+  total: Int,
+  clocks: types.ClockCalibration,
+) -> Result(json.Json, String) {
+  use projected <- try_result(
+    map_results(events, fn(event) {
+      case event.evidence, merge.calibrated_time(event, clocks) {
+        types.Exact, types.ExactTime(value) ->
+          Ok(codec.event_v1_adapter_json(event, value))
+        types.Exact, types.EstimatedTime(value, lower, upper)
+          if value == lower && value == upper
+        -> Ok(codec.event_v1_adapter_json(event, value))
+        types.Inferred(_), _ ->
+          Error("structured_inference_has_no_v1_confidence")
+        _, _ -> Error("event_time_is_not_a_point_estimate")
+      }
+    }),
+  )
+  Ok(
+    json.object([
+      #("start", json.int(start)),
+      #("limit", json.int(limit)),
+      #("total", json.int(total)),
+      #("events", json.array(projected, fn(value) { value })),
+    ]),
+  )
 }
 
 fn event_page_json(
@@ -748,17 +1057,26 @@ fn event_page_json(
   start: Int,
   limit: Int,
   total: Int,
+  clocks: types.ClockCalibration,
 ) -> String {
-  let encoded = events |> list.map(codec.encode_event) |> string.join(",")
-  "{\"start\":"
-  <> int.to_string(start)
-  <> ",\"limit\":"
-  <> int.to_string(limit)
-  <> ",\"total\":"
-  <> int.to_string(total)
-  <> ",\"events\":["
-  <> encoded
-  <> "]}"
+  json.object([
+    #("start", json.int(start)),
+    #("limit", json.int(limit)),
+    #("total", json.int(total)),
+    #(
+      "events",
+      json.array(events, fn(event) {
+        json.object([
+          #("observation", codec.event_json(event)),
+          #(
+            "time",
+            codec.time_estimate_json(merge.calibrated_time(event, clocks)),
+          ),
+        ])
+      }),
+    ),
+  ])
+  |> json.to_string
 }
 
 fn event_search_query(incoming: wisp.Request) -> Result(Option(String), Nil) {
@@ -801,5 +1119,29 @@ fn query_value(
   case list.key_find(query, key) {
     Ok(value) -> value
     Error(_) -> default
+  }
+}
+
+fn try_result(
+  outcome: Result(a, error),
+  next: fn(a) -> Result(b, error),
+) -> Result(b, error) {
+  case outcome {
+    Ok(value) -> next(value)
+    Error(error) -> Error(error)
+  }
+}
+
+fn map_results(
+  values: List(a),
+  convert: fn(a) -> Result(b, error),
+) -> Result(List(b), error) {
+  case values {
+    [] -> Ok([])
+    [value, ..rest] -> {
+      use converted <- try_result(convert(value))
+      use converted_rest <- try_result(map_results(rest, convert))
+      Ok([converted, ..converted_rest])
+    }
   }
 }

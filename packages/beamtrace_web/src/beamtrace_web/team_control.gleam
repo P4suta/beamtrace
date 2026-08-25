@@ -94,24 +94,23 @@ fn events_decoder() -> decode.Decoder(workspace.TeamEventPage) {
 
 fn trace_decoder() -> decode.Decoder(workspace.TeamTrace) {
   use id <- decode.field("id", decode.string)
-  use status <- decode.field("status", decode.string)
+  use _deprecated_status <- decode.optional_field("status", "", decode.string)
   use node <- decode.field("node", decode.string)
   use mfa <- decode.field("mfa", mfa_decoder())
   use privacy <- decode.field("privacy", decode.string)
-  use completeness <- decode.field("completeness", decode.string)
+  use delivery_status <- decode.field("delivery_status", decode.string)
   use event_count <- decode.field("event_count", decode.int)
   use received_at_ms <- decode.field("received_at_ms", decode.int)
   use legal_hold <- decode.field("legal_hold", decode.bool)
   use locked <- decode.field("locked", decode.bool)
   decode.success(workspace.TeamTrace(
     id,
-    status,
     node,
     mfa.0,
     mfa.1,
     mfa.2,
     privacy,
-    completeness,
+    delivery_status,
     event_count,
     received_at_ms,
     legal_hold,

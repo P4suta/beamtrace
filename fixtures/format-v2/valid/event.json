@@ -1,0 +1,1 @@
+{"schema_version":2,"id":"event-golden","root_id":"root-golden","node":"fixture@host","process":{"physical":{"node":"fixture@host","pid":"<0.1.0>"},"logical":null,"identity_evidence":[]},"local_instant":{"offset_ns":42,"order":1},"event":{"kind":"stop","value":"sealed"},"evidence":{"kind":"exact"}}

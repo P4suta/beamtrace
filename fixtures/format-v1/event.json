@@ -1,0 +1,1 @@
+{"schema_version":1,"id":"legacy-event","root_id":"legacy-root","node":"legacy@host","process":{"physical":{"node":"legacy@host","pid":"<0.1.0>"},"logical":null,"identity_evidence":[]},"local_timestamp_ns":1700000000000000000,"event":{"kind":"stop","value":"legacy"},"evidence":{"kind":"inferred","reason":"legacy heuristic","confidence":0.9}}

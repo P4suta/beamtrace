@@ -19,7 +19,7 @@ pub type SessionMetadata {
     project: String,
     environment: String,
     created_at_ms: Int,
-    completeness: String,
+    delivery_status: String,
     privacy: String,
     blob_key: String,
     event_count: Int,
@@ -68,7 +68,7 @@ pub type TraceSession {
     received_at_ms: Int,
     ended_at_ms: Int,
     last_received_at_ms: Int,
-    completeness: String,
+    delivery_status: String,
     event_count: Int,
     legal_hold: Bool,
     active: Bool,
@@ -183,7 +183,7 @@ pub fn put_session(
           sqlight.text(metadata.project),
           sqlight.text(metadata.environment),
           sqlight.int(metadata.created_at_ms),
-          sqlight.text(metadata.completeness),
+          sqlight.text(metadata.delivery_status),
           sqlight.text(metadata.privacy),
           sqlight.text(metadata.blob_key),
           sqlight.int(metadata.event_count),
@@ -420,13 +420,13 @@ pub fn finish_trace_session(
   store: Store,
   session_id: String,
   relay_id: String,
-  completeness: String,
+  delivery_status: String,
   ended_at_ms: Int,
   received_at_ms: Int,
 ) -> Result(TraceSession, String) {
   case
     trace_session(store, session_id),
-    list.contains(["complete", "truncated", "incomplete"], completeness),
+    list.contains(["delivered", "partial", "failed"], delivery_status),
     ended_at_ms >= 0 && received_at_ms >= 0
   {
     Error(error), _, _ -> Error(error)
@@ -442,7 +442,7 @@ pub fn finish_trace_session(
         execute(
           connection,
           "UPDATE sessions SET completeness = ? WHERE id = ?;",
-          [sqlight.text(completeness), sqlight.text(existing.id)],
+          [sqlight.text(delivery_status), sqlight.text(existing.id)],
         )
       case base {
         Error(error) -> rollback_error(connection, error)
@@ -473,7 +473,7 @@ pub fn finish_trace_session(
   }
 }
 
-pub fn mark_trace_incomplete(
+pub fn mark_trace_failed(
   store: Store,
   session_id: String,
   relay_id: String,
@@ -488,7 +488,7 @@ pub fn mark_trace_incomplete(
       |> result_try(fn(_) {
         execute(
           connection,
-          "UPDATE sessions SET completeness = 'incomplete'
+          "UPDATE sessions SET completeness = 'failed'
            WHERE id = ? AND completeness = 'active'
              AND EXISTS (
                SELECT 1 FROM relay_session_details
@@ -1732,7 +1732,7 @@ fn session_decoder() -> decode.Decoder(SessionMetadata) {
   use project <- decode.field(1, decode.string)
   use environment <- decode.field(2, decode.string)
   use created_at_ms <- decode.field(3, decode.int)
-  use completeness <- decode.field(4, decode.string)
+  use delivery_status <- decode.field(4, decode.string)
   use privacy <- decode.field(5, decode.string)
   use blob_key <- decode.field(6, decode.string)
   use event_count <- decode.field(7, decode.int)
@@ -1741,7 +1741,7 @@ fn session_decoder() -> decode.Decoder(SessionMetadata) {
     project,
     environment,
     created_at_ms,
-    completeness,
+    normalize_delivery_status(delivery_status),
     privacy,
     blob_key,
     event_count,
@@ -1811,7 +1811,7 @@ fn trace_session_decoder() -> decode.Decoder(TraceSession) {
   use received_at_ms <- decode.field(11, decode.int)
   use ended_at_ms <- decode.field(12, decode.int)
   use last_received_at_ms <- decode.field(13, decode.int)
-  use completeness <- decode.field(14, decode.string)
+  use delivery_status <- decode.field(14, decode.string)
   use event_count <- decode.field(15, decode.int)
   use legal_hold <- decode.field(16, decode.int)
   use active <- decode.field(17, decode.int)
@@ -1830,7 +1830,7 @@ fn trace_session_decoder() -> decode.Decoder(TraceSession) {
     received_at_ms,
     ended_at_ms,
     last_received_at_ms,
-    completeness,
+    normalize_delivery_status(delivery_status),
     event_count,
     legal_hold == 1,
     active == 1,
@@ -1947,10 +1947,19 @@ fn valid_session(metadata: SessionMetadata) -> Bool {
   && valid_text(metadata.project, 256)
   && valid_text(metadata.environment, 256)
   && metadata.created_at_ms >= 0
-  && valid_text(metadata.completeness, 1024)
+  && valid_text(metadata.delivery_status, 1024)
   && list.contains(["metadata", "raw", "unknown"], metadata.privacy)
   && valid_blob_key(metadata.blob_key)
   && metadata.event_count >= 0
+}
+
+fn normalize_delivery_status(status: String) -> String {
+  case status {
+    "complete" -> "delivered"
+    "truncated" -> "partial"
+    "incomplete" -> "failed"
+    other -> other
+  }
 }
 
 fn valid_trace_session(session: TraceSession) -> Bool {
@@ -1969,7 +1978,7 @@ fn valid_trace_session(session: TraceSession) -> Bool {
   && session.received_at_ms >= 0
   && session.ended_at_ms == 0
   && session.last_received_at_ms == session.received_at_ms
-  && session.completeness == "active"
+  && session.delivery_status == "active"
   && session.event_count == 0
   && !session.legal_hold
   && session.active

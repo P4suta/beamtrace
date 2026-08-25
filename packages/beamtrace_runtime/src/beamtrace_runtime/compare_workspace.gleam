@@ -4,6 +4,7 @@ import beamtrace/stats
 import beamtrace/types
 import beamtrace_runtime/storage
 import gleam/list
+import gleam/option.{type Option}
 import gleam/string
 
 pub type RunReport {
@@ -13,6 +14,8 @@ pub type RunReport {
     added: Int,
     removed: Int,
     changed: Int,
+    ambiguity_count: Int,
+    first_divergence: Option(diff.Divergence),
   )
 }
 
@@ -51,6 +54,8 @@ pub fn compare(paths: List(String)) -> Result(Report, CompareError) {
                 added: report.added,
                 removed: report.removed,
                 changed: report.changed,
+                ambiguity_count: report.ambiguity_count,
+                first_divergence: report.first_divergence,
               )
             })
           Ok(Report(

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace/types
-import beamtrace_runtime/capture
 import beamtrace_runtime/capture_session
 import beamtrace_runtime/live
 import beamtrace_runtime/storage
@@ -9,9 +8,10 @@ import beamtrace_tui/session
 import gleam/list
 import gleam/option.{None}
 import gleeunit/should
+import v2_fixture
 
 pub fn tui_driver_arms_polls_and_saves_the_owned_capture_test() {
-  let expected = capture.CaptureResult([event()], types.Complete)
+  let expected = v2_fixture.capture_result([event()])
   let store =
     capture_session.new_with_backend_for_nodes(["fixture@host"], fn(spec) {
       spec.trigger |> should.equal(types.Mfa("shop", "checkout", 1))
@@ -26,7 +26,10 @@ pub fn tui_driver_arms_polls_and_saves_the_owned_capture_test() {
   capture_session.await(store, 1000) |> should.equal(Ok(expected))
 
   case driver.poll() {
-    session.SessionReady(rows, "complete") -> {
+    session.SessionReady(
+      rows,
+      "sealed_after_quiet_period:250:delivery_verified",
+    ) -> {
       rows |> list.length |> should.equal(1)
       let assert [row] = rows
       row.id |> should.equal("root")
@@ -44,9 +47,7 @@ pub fn tui_driver_arms_polls_and_saves_the_owned_capture_test() {
 
 pub fn tui_driver_refuses_non_archive_paths_and_save_before_ready_test() {
   let store =
-    capture_session.new_with_backend(fn(_) {
-      Ok(capture.CaptureResult([], types.Complete))
-    })
+    capture_session.new_with_backend(fn(_) { Ok(v2_fixture.capture_result([])) })
   let driver = tui_driver.new(store, "0.1.0")
 
   driver.save("capture.zip")
@@ -110,7 +111,7 @@ fn event() -> types.TraceEvent {
     root_id: "root",
     node: "fixture@host",
     process: types.ProcessIdentity(process, None, []),
-    local_timestamp_ns: 1,
+    local_instant: v2_fixture.instant(1),
     kind: types.Root(types.Mfa("shop", "checkout", 1), []),
     evidence: types.Exact,
   )

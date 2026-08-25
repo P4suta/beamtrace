@@ -229,8 +229,8 @@ fn capture_phase_label(phase: workspace.CapturePhase) -> String {
     workspace.Arming -> "Arming"
     workspace.Armed -> "Armed"
     workspace.Cancelling -> "Cancelling"
-    workspace.Ready(count, completeness) ->
-      "Ready · " <> int.to_string(count) <> " events · " <> completeness
+    workspace.Ready(count, outcome) ->
+      "Sealed · " <> int.to_string(count) <> " events · " <> outcome
     workspace.Failed(reason) -> "Failed · " <> reason
   }
 }
@@ -473,7 +473,9 @@ fn team_trace_row(trace: workspace.TeamTrace) -> Element(workspace.Msg) {
         html.button([attribute.class("event-link")], [html.text(trace.id)]),
       ]),
       html.td([], [
-        html.span([attribute.class("kind-pill")], [html.text(trace.status)]),
+        html.span([attribute.class("kind-pill")], [
+          html.text(trace.delivery_status),
+        ]),
       ]),
       html.td([], [
         html.text(
@@ -582,6 +584,16 @@ fn compare_workspace(model: workspace.Model) -> Element(workspace.Msg) {
           ])
         Some(report) ->
           html.div([attribute.class("compare-results")], [
+            divergence_summary(report.reports),
+            html.div([attribute.class("canvas-frame")], [
+              html.canvas([
+                attribute.id("causal-canvas"),
+                attribute.attribute("width", "1600"),
+                attribute.attribute("height", "620"),
+                attribute.aria_hidden(True),
+              ]),
+            ]),
+            event_table(workspace.visible_events(model)),
             alignment_table(items),
             statistics_table(report.statistics),
           ])
@@ -602,6 +614,10 @@ fn compare_summary(model: workspace.Model) -> String {
         list.fold(report.reports, 0, fn(total, run) { total + run.removed })
       let changed =
         list.fold(report.reports, 0, fn(total, run) { total + run.changed })
+      let ambiguous =
+        list.fold(report.reports, 0, fn(total, run) {
+          total + run.ambiguity_count
+        })
       int.to_string(report.run_count)
       <> " runs · +"
       <> int.to_string(added)
@@ -609,7 +625,41 @@ fn compare_summary(model: workspace.Model) -> String {
       <> int.to_string(removed)
       <> " ~"
       <> int.to_string(changed)
+      <> " ambiguous "
+      <> int.to_string(ambiguous)
     }
+  }
+}
+
+fn divergence_summary(
+  reports: List(workspace.CompareRun),
+) -> Element(workspace.Msg) {
+  let path = first_divergence_path(reports)
+  html.div(
+    [
+      attribute.class("divergence-summary"),
+      attribute.aria_label("First divergence causal path"),
+    ],
+    [
+      html.strong([], [html.text("First divergence")]),
+      html.span([], [
+        html.text(case path {
+          [] -> " · none established"
+          _ -> " · " <> string.join(path, " → ")
+        }),
+      ]),
+    ],
+  )
+}
+
+fn first_divergence_path(reports: List(workspace.CompareRun)) -> List(String) {
+  case reports {
+    [] -> []
+    [run, ..rest] ->
+      case run.first_divergence_path {
+        [] -> first_divergence_path(rest)
+        path -> path
+      }
   }
 }
 
@@ -653,11 +703,7 @@ fn compare_status_class(status: String) -> String {
 
 fn latency_delta(item: workspace.CompareItem) -> String {
   case item.status {
-    "matched" ->
-      case item.latency_delta_ns >= 0 {
-        True -> "+" <> int.to_string(item.latency_delta_ns) <> " ns"
-        False -> int.to_string(item.latency_delta_ns) <> " ns"
-      }
+    "matched" -> time_estimate_label(item.latency_delta)
     _ -> "—"
   }
 }
@@ -689,10 +735,9 @@ fn statistics_table(
             html.td([], [
               html.text(
                 "p50 "
-                <> int.to_string(row.p50_ns)
-                <> " ns · p95 "
-                <> int.to_string(row.p95_ns)
-                <> " ns",
+                <> time_summary_label(row.p50)
+                <> " · p95 "
+                <> time_summary_label(row.p95),
               ),
             ]),
             html.td([], [
@@ -921,7 +966,13 @@ fn event_row(row: workspace.EventRow) -> Element(workspace.Msg) {
       html.td([], [
         html.span([attribute.class("kind-pill")], [html.text(row.kind)]),
       ]),
-      html.td([], [html.text(int.to_string(row.timestamp_ns) <> " ns")]),
+      html.td([], [
+        html.text(
+          int.to_string(row.timestamp_ns)
+          <> " ns node-local · "
+          <> time_estimate_label(row.time),
+        ),
+      ]),
       html.td([], [html.text(evidence_label(row.evidence))]),
     ],
   )
@@ -950,8 +1001,7 @@ fn team_inspector(model: workspace.Model) -> Element(workspace.Msg) {
         Some(trace) ->
           html.div([], [
             definition("Trace", trace.id),
-            definition("Status", trace.status),
-            definition("Completeness", trace.completeness),
+            definition("Delivery status", trace.delivery_status),
             definition("Privacy", case trace.locked {
               True -> trace.privacy <> " · locked"
               False -> trace.privacy
@@ -1074,8 +1124,13 @@ fn inspector_event(
     ]),
     definition("Event ID", row.id),
     definition("Evidence", evidence_label(row.evidence)),
+    definition("Calibrated time", time_estimate_label(row.time)),
+    definition(
+      "Node-local offset",
+      int.to_string(row.timestamp_ns) <> " ns (not cross-node comparable)",
+    ),
     definition("Duration", int.to_string(row.duration_ns) <> " ns"),
-    definition("Boundary", "None observed"),
+    definition("Boundary", event_boundary_label(model, row.id)),
     definition("Source", "Unavailable in this event metadata"),
     html.label([attribute.class("annotation")], [
       html.span([], [html.text("Annotation")]),
@@ -1089,6 +1144,17 @@ fn inspector_event(
       ),
     ]),
   ])
+}
+
+fn event_boundary_label(model: workspace.Model, event_id: String) -> String {
+  let boundaries =
+    model.graph_boundaries
+    |> list.filter(fn(boundary) { boundary.event_id == event_id })
+    |> list.map(fn(boundary) { boundary.kind <> " · " <> boundary.reason })
+  case boundaries {
+    [] -> "None observed"
+    _ -> string.join(boundaries, "; ")
+  }
 }
 
 fn live_inspector(model: workspace.Model) -> Element(workspace.Msg) {
@@ -1329,7 +1395,7 @@ fn mode_slug(mode: workspace.Mode) -> String {
 
 fn mode_title(mode: workspace.Mode) -> String {
   case mode {
-    workspace.Capture -> "Exact causal sequence"
+    workspace.Capture -> "Bounded causal observation"
     workspace.Live -> "Runtime signals"
     workspace.Compare -> "Trace alignment"
     workspace.Team -> "Team trace library"
@@ -1339,9 +1405,27 @@ fn mode_title(mode: workspace.Mode) -> String {
 fn evidence_label(evidence: workspace.Evidence) -> String {
   case evidence {
     workspace.Exact -> "Exact"
-    workspace.Inferred(reason, confidence) ->
-      "Inferred " <> zoom_label(confidence) <> " · " <> reason
+    workspace.Inferred(method, reason) ->
+      "Inferred · " <> method <> " · " <> reason
   }
+}
+
+fn time_estimate_label(estimate: workspace.TimeEstimate) -> String {
+  case estimate {
+    workspace.ExactTime(value) -> value <> " ns exact"
+    workspace.EstimatedTime(value, lower, upper) ->
+      value <> " ns estimated [" <> lower <> ", " <> upper <> "]"
+    workspace.TimeUnavailable(reason) -> "time unavailable · " <> reason
+  }
+}
+
+fn time_summary_label(summary: workspace.TimeSummary) -> String {
+  time_estimate_label(summary.estimate)
+  <> " · "
+  <> int.to_string(summary.valid_samples)
+  <> " valid / "
+  <> int.to_string(summary.missing_samples)
+  <> " missing"
 }
 
 fn zoom_label(value: Float) -> String {

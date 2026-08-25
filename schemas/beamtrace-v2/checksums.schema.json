@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://beamtrace.dev/schema/v2/checksums.schema.json",
+  "title": "BeamTrace v2 checksum inventory",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["algorithm", "files"],
+  "properties": {
+    "algorithm": {"const": "sha256"},
+    "files": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 9999,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1, "maxLength": 4096, "pattern": "^(manifest\\.json|events/[0-9]{6}\\.ndjson|graph/[0-9]{6}\\.json|clocks\\.json|indexes/events\\.idx|annotations\\.json)$"},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    }
+  }
+}

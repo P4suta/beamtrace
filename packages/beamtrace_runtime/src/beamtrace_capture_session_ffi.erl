@@ -227,18 +227,24 @@ status_value(#state{phase = idle}) -> idle;
 status_value(#state{phase = armed}) -> armed;
 status_value(#state{phase = cancelling}) -> cancelling;
 status_value(#state{phase = failed, error = Reason}) -> {failed, Reason};
-status_value(#state{phase = ready, result = {capture_result, Events, Completeness}}) ->
-    {ready, length(Events), completeness_name(Completeness)};
+status_value(#state{phase = ready,
+        result = {capture_result, Events, Outcome, _Clocks}}) ->
+    {ready, length(Events), outcome_status(Outcome)};
 status_value(#state{phase = ready}) -> {failed, <<"invalid_capture_result">>}.
 
-completeness_name(complete) -> <<"complete">>;
-completeness_name({truncated, Reason}) -> <<"truncated:", Reason/binary>>;
-completeness_name({gapped, Count}) ->
-    <<"gapped:", (integer_to_binary(Count))/binary>>;
-completeness_name({partial_node, Nodes}) ->
-    <<"partial_node:", (iolist_to_binary(lists:join(<<",">>, Nodes)))/binary>>;
-completeness_name({inferred_capture, Reason}) -> <<"inferred:", Reason/binary>>;
-completeness_name(_) -> <<"unknown">>.
+outcome_status({capture_outcome, {quiet_period, QuietMs}, [], [_ | _]}) ->
+    <<"sealed_after_quiet_period:", (integer_to_binary(QuietMs))/binary,
+      ":delivery_verified">>;
+outcome_status({capture_outcome, {time_window, WindowMs}, [], [_ | _]}) ->
+    <<"sealed_after_time_window:", (integer_to_binary(WindowMs))/binary,
+      ":delivery_verified">>;
+outcome_status({capture_outcome, user_stopped, [], [_ | _]}) ->
+    <<"sealed_after_user_stop:delivery_verified">>;
+outcome_status({capture_outcome, _End, Issues, _Receipts}) when Issues =/= [] ->
+    <<"sealed:integrity_issues_present">>;
+outcome_status({capture_outcome, _End, [], []}) ->
+    <<"sealed:no_agent_receipts">>;
+outcome_status(_) -> <<"invalid_capture_outcome">>.
 
 safe_backend(Backend, Spec) ->
     try Backend(Spec) of
