@@ -3,6 +3,13 @@
 ## [0.2.0](https://github.com/P4suta/beamtrace/compare/v0.1.1...v0.2.0) (2026-08-25)
 
 
+### ⚠ BREAKING CHANGES
+
+* Relay protocol v1 now receives `upgrade_required`; relays must use signed, session-scoped v2 messages.
+* `GET /api/v1/relays/:id/frames` now returns `410 Gone`; clients must use the trace APIs.
+* Legacy relay frames migrate to synthetic `unknown` and `incomplete` sessions instead of remaining independent frame records.
+
+
 ### Features
 
 * **runtime:** deliver the v0.2 tracing platform ([#22](https://github.com/P4suta/beamtrace/issues/22)) ([20f6960](https://github.com/P4suta/beamtrace/commit/20f6960099bc5b2c13ce9d0205a5ba35bc6d52e2))
