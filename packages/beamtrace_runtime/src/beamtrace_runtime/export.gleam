@@ -1,6 +1,7 @@
 import beamtrace/codec
 import beamtrace/types
 import beamtrace_runtime/storage
+import gleam/dict.{type Dict}
 import gleam/int
 import gleam/json
 import gleam/list
@@ -77,6 +78,8 @@ pub fn otlp(archive: storage.Archive, include_raw include_raw: Bool) -> String {
     True -> archive
     False -> scrub_archive(archive)
   }
+  let exported_at_unix_ns = unix_time_nanoseconds()
+  let node_latest = latest_node_timestamps(archive.events)
   json.object([
     #(
       "resourceSpans",
@@ -91,7 +94,11 @@ pub fn otlp(archive: storage.Archive, include_raw include_raw: Bool) -> String {
                   [
                     #("service.name", "beamtrace"),
                     #("beamtrace.capture_id", archive.manifest.capture_id),
-                    #("beamtrace.clock", "node-local"),
+                    #("beamtrace.clock", "export-mapped-unix"),
+                    #(
+                      "beamtrace.otlp_time_mapping",
+                      "export-time-minus-node-relative-age",
+                    ),
                   ],
                   string_attribute,
                 ),
@@ -103,7 +110,12 @@ pub fn otlp(archive: storage.Archive, include_raw include_raw: Bool) -> String {
             json.array([archive.events], fn(events) {
               json.object([
                 #("scope", json.object([#("name", json.string("beamtrace"))])),
-                #("spans", json.array(events, otlp_span)),
+                #(
+                  "spans",
+                  json.array(events, fn(event) {
+                    otlp_span(event, exported_at_unix_ns, node_latest)
+                  }),
+                ),
               ])
             }),
           ),
@@ -122,18 +134,32 @@ fn string_attribute(attribute: #(String, String)) -> json.Json {
   ])
 }
 
-fn otlp_span(event: types.TraceEvent) -> json.Json {
+fn otlp_span(
+  event: types.TraceEvent,
+  exported_at_unix_ns: Int,
+  node_latest: Dict(String, Int),
+) -> json.Json {
+  let latest = case dict.get(node_latest, event.node) {
+    Ok(value) -> value
+    Error(_) -> event.local_timestamp_ns
+  }
+  let relative_age = int.max(0, latest - event.local_timestamp_ns)
+  let unix_timestamp = int.max(0, exported_at_unix_ns - relative_age)
   json.object([
     #("name", json.string(event_kind_name(event.kind))),
     #("spanId", json.string(event.id)),
     #("traceId", json.string(event.root_id)),
-    #("startTimeUnixNano", json.string(int.to_string(event.local_timestamp_ns))),
+    #("startTimeUnixNano", json.string(int.to_string(unix_timestamp))),
     #(
       "attributes",
       json.array(
         [
           #("beamtrace.node", event.node),
           #("beamtrace.clock", "node-local"),
+          #(
+            "beamtrace.local_timestamp_ns",
+            int.to_string(event.local_timestamp_ns),
+          ),
           #("beamtrace.evidence", evidence_name(event.evidence)),
         ],
         string_attribute,
@@ -141,6 +167,23 @@ fn otlp_span(event: types.TraceEvent) -> json.Json {
     ),
   ])
 }
+
+fn latest_node_timestamps(events: List(types.TraceEvent)) -> Dict(String, Int) {
+  list.fold(events, dict.new(), fn(latest, event) {
+    case dict.get(latest, event.node) {
+      Error(_) -> dict.insert(latest, event.node, event.local_timestamp_ns)
+      Ok(previous) ->
+        dict.insert(
+          latest,
+          event.node,
+          int.max(previous, event.local_timestamp_ns),
+        )
+    }
+  })
+}
+
+@external(erlang, "beamtrace_export_ffi", "unix_time_nanoseconds")
+fn unix_time_nanoseconds() -> Int
 
 fn event_kind_name(kind: types.TraceEventKind) -> String {
   case kind {

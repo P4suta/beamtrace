@@ -192,6 +192,7 @@ collector_to_peer_round_trip() ->
         ?assert(lists:member(<<"root">>, Kinds)),
         ?assert(lists:member(<<"send">>, Kinds)),
         ?assert(lists:member(<<"receive">>, Kinds)),
+        assert_one_monotonic_clock_domain(Events),
         SendTerms = [Term ||
             {raw_event_with_term, _Id2, _Root2, _EventNode2, _Pid2, _At2,
                 <<"send">>, _PeerNode2, _PeerPid2, _Serial2, _Semantic2,
@@ -211,6 +212,20 @@ collector_to_peer_round_trip() ->
             exit:noproc -> ok
         end
     end.
+
+assert_one_monotonic_clock_domain(Events) ->
+    Timed = [{Kind, At} ||
+        {raw_event_with_term, _Id, _Root, _EventNode, _Pid, At, Kind,
+            _PeerNode, _PeerPid, _Serial, _Semantic, _Metadata, _Term} <- Events,
+        Kind =:= <<"root">> orelse Kind =:= <<"send">> orelse
+            Kind =:= <<"receive">>],
+    [RootAt] = [At || {<<"root">>, At} <- Timed],
+    ?assert(is_integer(RootAt)),
+    ?assert(lists:all(fun({_Kind, At}) ->
+        is_integer(At) andalso At >= RootAt andalso
+            At - RootAt =< 5_000_000_000
+    end, Timed)),
+    ok.
 
 collector_captures_process_lifecycle() ->
     Cookie = atom_to_binary(erlang:get_cookie(), utf8),

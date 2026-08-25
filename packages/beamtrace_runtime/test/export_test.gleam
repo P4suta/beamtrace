@@ -94,5 +94,10 @@ pub fn otlp_export_is_metadata_only_and_has_no_external_dependency_test() {
   let json = export.otlp(archive, include_raw: False)
   json |> string.contains("resourceSpans") |> should.be_true()
   json |> string.contains("beamtrace.capture_id") |> should.be_true()
+  json
+  |> string.contains("export-time-minus-node-relative-age")
+  |> should.be_true()
+  json |> string.contains("\"startTimeUnixNano\":\"1\"") |> should.be_false()
+  json |> string.contains("beamtrace.local_timestamp_ns") |> should.be_true()
   json |> string.contains(secret) |> should.be_false()
 }
