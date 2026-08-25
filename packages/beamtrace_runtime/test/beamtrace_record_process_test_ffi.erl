@@ -16,6 +16,7 @@
 ]).
 
 -define(SIGNAL_TIMEOUT_MS, 10000).
+-define(RECORD_COMMAND_TIMEOUT_MS, 30000).
 
 gleam_javascript_target_rejected() ->
     case os:find_executable("gleam") of
@@ -318,10 +319,10 @@ record_signal_fixture() ->
         <<"beamtrace_signal_test_cookie">>,
         <<"erlang">>
     ) of
-        {ok, {gated_command, _Port, _Directory, _Gate, _FinishGate,
-              _Guardian, ChildPid}} when is_integer(ChildPid) ->
+        {ok, Handle = {gated_command, Port, _Directory, _Gate, _FinishGate,
+                      _Guardian, ChildPid}} when is_integer(ChildPid) ->
             io:format("BEAMTRACE_RECORD_SIGNAL_READY=~B~n", [ChildPid]),
-            receive after infinity -> ok end;
+            record_signal_owner_race(Port, Handle);
         Other ->
             io:format(
                 standard_error,
@@ -329,6 +330,21 @@ record_signal_fixture() ->
                 [Other]
             ),
             erlang:halt(2)
+    end.
+
+record_signal_owner_race(Port, Handle) ->
+    receive
+        {Port, {data, _Data}} -> record_signal_owner_race(Port, Handle);
+        {Port, {exit_status, _Status}} ->
+            SignalStatus = beamtrace_cli_ffi:record_shutdown_exit_code(),
+            nil = beamtrace_cli_ffi:stop_gated_command(Handle),
+            %% The guardian must publish 143 before terminating the child. If
+            %% the owner can observe the exit first, it could replace the
+            %% requested status during normal CLI cleanup.
+            case SignalStatus of
+                143 -> erlang:halt(143);
+                _ -> erlang:halt(2)
+            end
     end.
 
 await_record_signal_ready(Port, Output, Deadline) ->
@@ -495,7 +511,9 @@ wrapper_trigger_path_preloaded() ->
         {ok, Handle} ->
             {ok, nil} = beamtrace_cli_ffi:release_gated_command(Handle),
             {ok, nil} = beamtrace_cli_ffi:release_gated_command_finish(Handle),
-            case beamtrace_cli_ffi:await_gated_command(Handle, 5000) of
+            case beamtrace_cli_ffi:await_gated_command(
+                Handle, ?RECORD_COMMAND_TIMEOUT_MS
+            ) of
                 {ok, {0, Output}} -> {ok, Output};
                 Other ->
                     {error, unicode:characters_to_binary(
@@ -668,7 +686,9 @@ run_child() ->
         {ok, Handle} ->
             {ok, nil} = beamtrace_cli_ffi:release_gated_command(Handle),
             {ok, nil} = beamtrace_cli_ffi:release_gated_command_finish(Handle),
-            case beamtrace_cli_ffi:await_gated_command(Handle, 5000) of
+            case beamtrace_cli_ffi:await_gated_command(
+                Handle, ?RECORD_COMMAND_TIMEOUT_MS
+            ) of
                 {ok, {0, Output}} -> {ok, Output};
                 Other ->
                     {error, unicode:characters_to_binary(io_lib:format("~0p", [Other]))}

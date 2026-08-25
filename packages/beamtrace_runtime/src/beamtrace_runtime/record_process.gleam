@@ -40,6 +40,12 @@ pub fn is_running(handle: Handle) -> Bool {
   gated_command_running(handle)
 }
 
+/// Return the conventional process exit status requested by SIGINT/SIGTERM,
+/// or zero while no record shutdown is in progress.
+pub fn shutdown_exit_code() -> Int {
+  record_shutdown_exit_code()
+}
+
 pub fn ephemeral_cookie() -> Result(String, String) {
   read_record_cookie()
 }
@@ -79,6 +85,9 @@ fn stop_gated_command(handle: Handle) -> Nil
 
 @external(erlang, "beamtrace_cli_ffi", "gated_command_running")
 fn gated_command_running(handle: Handle) -> Bool
+
+@external(erlang, "beamtrace_cli_ffi", "record_shutdown_exit_code")
+fn record_shutdown_exit_code() -> Int
 
 @external(erlang, "beamtrace_cli_ffi", "read_record_cookie")
 fn read_record_cookie() -> Result(String, String)

@@ -23,6 +23,7 @@
     await_gated_command/2,
     stop_gated_command/1,
     gated_command_running/1,
+    record_shutdown_exit_code/0,
     halt/1
 ]).
 
@@ -36,6 +37,8 @@
 ]).
 
 -define(MAX_OUTPUT_TAIL_BYTES, 65536).
+-define(RECORD_SHUTDOWN_GRACE_MS, 5000).
+-define(RECORD_SHUTDOWN_KEY, {?MODULE, record_shutdown_exit_code}).
 -define(WRAPPER_COMPILE_TIMEOUT_MS, 300000).
 
 read_cookie_file(Path) when is_binary(Path) ->
@@ -668,11 +671,15 @@ release_gated_command(_Handle) -> {error, <<"invalid gated command">>}.
 release_gated_command_finish(
     {gated_command, Port, _Directory, _Gate, FinishGate, _Guardian, _OsPid}
 ) when is_port(Port), is_binary(FinishGate) ->
-    case create_marker(binary_to_list(FinishGate)) of
-        ok -> {ok, nil};
-        {error, eexist} -> {ok, nil};
-        {error, Reason} ->
-            {error, reason_binary({finish_gate_release_failed, Reason})}
+    case record_shutdown_exit_code() of
+        0 ->
+            case create_marker(binary_to_list(FinishGate)) of
+                ok -> {ok, nil};
+                {error, eexist} -> {ok, nil};
+                {error, Reason} ->
+                    {error, reason_binary({finish_gate_release_failed, Reason})}
+            end;
+        _SignalStatus -> {ok, nil}
     end;
 release_gated_command_finish(_Handle) -> {error, <<"invalid gated command">>}.
 
@@ -1025,12 +1032,26 @@ cleanup_guardian_loop(
             terminate_gated_port(Port, OsPid);
         {beamtrace_record_shutdown, Signal}
                 when Signal =:= sigint; Signal =:= sigterm ->
+            Status = signal_exit_status(Signal),
+            %% Publish the requested status before terminating the child. The
+            %% CLI can then cancel and close capture without racing a removed
+            %% finish gate, while halt/1 prevents any later diagnostic path
+            %% from replacing 130/143 with a generic exit code.
+            persistent_term:put(?RECORD_SHUTDOWN_KEY, Status),
             restore_guardian_signal_handler(Handler, Installation),
             terminate_gated_port(Port, OsPid),
             cleanup_gate_directory(Directory, Gate, FinishGate),
-            init:stop(signal_exit_status(Signal))
+            await_record_owner_shutdown(OwnerMonitor, Owner, Status)
     end,
     cleanup_gate_directory(Directory, Gate, FinishGate).
+
+await_record_owner_shutdown(OwnerMonitor, Owner, Status) ->
+    receive
+        stop -> ok;
+        {'DOWN', OwnerMonitor, process, Owner, _Reason} -> erlang:halt(Status)
+    after ?RECORD_SHUTDOWN_GRACE_MS ->
+        erlang:halt(Status)
+    end.
 
 await_guardian_start(Guardian) ->
     receive
@@ -1221,7 +1242,17 @@ handle_info(_Info, Owner) -> {ok, Owner}.
 terminate(_Reason, _Owner) -> ok.
 code_change(_OldVersion, Owner, _Extra) -> {ok, Owner}.
 
-halt(Code) when is_integer(Code) -> erlang:halt(Code).
+record_shutdown_exit_code() ->
+    case persistent_term:get(?RECORD_SHUTDOWN_KEY, 0) of
+        Status when Status =:= 130; Status =:= 143 -> Status;
+        _ -> 0
+    end.
+
+halt(Code) when is_integer(Code) ->
+    case record_shutdown_exit_code() of
+        0 -> erlang:halt(Code);
+        SignalStatus -> erlang:halt(SignalStatus)
+    end.
 
 shared_random_hex(Bytes) ->
     'beamtrace_runtime@crypto':random_hex(Bytes).

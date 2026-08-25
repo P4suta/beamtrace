@@ -544,7 +544,7 @@ fn run_record(
                   preset,
                 )
               capture_session.close(store)
-              result
+              record_exit_code(result)
             }
           }
       }
@@ -553,6 +553,19 @@ fn run_record(
 }
 
 fn record_start_failure(handle: record_process.Handle, reason: String) -> Int {
+  case record_process.shutdown_exit_code() {
+    code if code != 0 -> {
+      record_process.stop(handle)
+      code
+    }
+    _ -> record_start_failure_without_signal(handle, reason)
+  }
+}
+
+fn record_start_failure_without_signal(
+  handle: record_process.Handle,
+  reason: String,
+) -> Int {
   case record_process.is_running(handle) {
     False ->
       case record_process.await(handle, 1000) {
@@ -660,9 +673,24 @@ fn run_record_child(
   out: String,
 ) -> Int {
   let captured = capture_session.await(store, 35_000)
-  case captured {
-    Error(error) -> record_capture_failure(store, handle, error)
-    Ok(result) -> finish_record_child(handle, nodes, out, result)
+  case record_process.shutdown_exit_code() {
+    code if code != 0 -> {
+      let _ = capture_session.cancel(store)
+      record_process.stop(handle)
+      code
+    }
+    _ ->
+      case captured {
+        Error(error) -> record_capture_failure(store, handle, error)
+        Ok(result) -> finish_record_child(handle, nodes, out, result)
+      }
+  }
+}
+
+fn record_exit_code(result: Int) -> Int {
+  case record_process.shutdown_exit_code() {
+    0 -> result
+    signal_status -> signal_status
   }
 }
 

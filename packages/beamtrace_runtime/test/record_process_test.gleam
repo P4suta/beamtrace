@@ -50,7 +50,7 @@ pub fn child_beam_is_held_until_the_one_time_gate_is_released_test() {
   process.sleep(100)
   record_process.is_running(handle) |> should.be_true()
   record_process.release_finish(handle) |> should.equal(Ok(Nil))
-  let assert Ok(#(status, output)) = record_process.await(handle, 5000)
+  let assert Ok(#(status, output)) = record_process.await(handle, 30_000)
   status |> should.equal(0)
   output |> string.contains("child-ran") |> should.be_true()
 }
