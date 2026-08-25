@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.2.0](https://github.com/P4suta/beamtrace/compare/v0.1.1...v0.2.0) (2026-08-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* Relay protocol v1 now receives `upgrade_required`; relays must use signed, session-scoped v2 messages.
+* `GET /api/v1/relays/:id/frames` now returns `410 Gone`; clients must use the trace APIs.
+* Legacy relay frames migrate to synthetic `unknown` and `incomplete` sessions instead of remaining independent frame records.
+
+
+### Features
+
+* **runtime:** deliver the v0.2 tracing platform ([#22](https://github.com/P4suta/beamtrace/issues/22)) ([20f6960](https://github.com/P4suta/beamtrace/commit/20f6960099bc5b2c13ce9d0205a5ba35bc6d52e2))
+
+
+### Bug Fixes
+
+* **package:** scope SBOM to locked manifests ([#25](https://github.com/P4suta/beamtrace/issues/25)) ([9ab64ba](https://github.com/P4suta/beamtrace/commit/9ab64ba1fba64b52a3a9b86f6448f1a7f56339c8))
+* **record:** use platform EPMD bootstrap paths ([#24](https://github.com/P4suta/beamtrace/issues/24)) ([bf07bb9](https://github.com/P4suta/beamtrace/commit/bf07bb9199e41e283b97db5abbcdaef189c9525b))
+
 ## [0.1.1](https://github.com/P4suta/beamtrace/compare/v0.1.0...v0.1.1) (2026-08-24)
 
 
