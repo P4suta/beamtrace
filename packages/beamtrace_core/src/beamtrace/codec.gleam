@@ -50,7 +50,8 @@ pub fn decode_manifest(source: String) {
   json.parse(source, manifest_decoder())
 }
 
-fn event_json(event: types.TraceEvent) -> json.Json {
+/// Encode a trace event as a JSON object for structured protocol consumers.
+pub fn event_json(event: types.TraceEvent) -> json.Json {
   json.object([
     #("schema_version", json.int(schema_version)),
     #("id", json.string(event.id)),

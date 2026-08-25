@@ -4,6 +4,7 @@ import beamtrace_runtime/internal/version as runtime_version
 import beamtrace_runtime/local_auth
 import beamtrace_runtime/relay_channel
 import beamtrace_runtime/relay_payload
+import beamtrace_runtime/relay_session
 import beamtrace_runtime/relay_wire
 import gleam/bit_array
 import gleam/dynamic/decode
@@ -38,6 +39,16 @@ pub type ChannelState {
   Stopped(reason: String)
 }
 
+pub type TransferMetadata {
+  TransferMetadata(
+    node: String,
+    module_: String,
+    function_: String,
+    arity: Int,
+    completeness: relay_session.Completeness,
+  )
+}
+
 type BatchEncoding {
   MetadataEncoding
   RawEncoding(grant: String, policy: types.RawPolicy)
@@ -49,6 +60,15 @@ type CreditControl {
 
 type StopControl {
   StopControl(completeness: String, reason: String)
+}
+
+type SessionAckControl {
+  SessionAckControl(
+    protocol_version: Int,
+    session_id: String,
+    sequence: Int,
+    completeness: String,
+  )
 }
 
 const max_control_frame_bytes = 16_384
@@ -126,13 +146,44 @@ pub fn run_channel(
 }
 
 /// Transfer a completed bounded target capture over the authenticated
-/// outbound-only channel. One batch is kept in flight at a time and the next
-/// batch is not sent until the hub replenishes credit after durable ingest.
+/// outbound-only channel. Batches consume the shared window and pause only
+/// when all available credits have been spent.
 pub fn run_channel_with_events(
   receipt: EnrollmentReceipt,
   identity: relay_channel.Identity,
   mode: relay_channel.Mode,
+  metadata: TransferMetadata,
   events: List(types.TraceEvent),
+) -> Result(Nil, String) {
+  transfer_events(receipt, identity, mode, metadata, events, MetadataEncoding)
+}
+
+pub fn run_channel_with_raw_events(
+  receipt: EnrollmentReceipt,
+  identity: relay_channel.Identity,
+  mode: relay_channel.Mode,
+  metadata: TransferMetadata,
+  grant: String,
+  policy: types.RawPolicy,
+  events: List(types.TraceEvent),
+) -> Result(Nil, String) {
+  transfer_events(
+    receipt,
+    identity,
+    mode,
+    metadata,
+    events,
+    RawEncoding(grant, policy),
+  )
+}
+
+fn transfer_events(
+  receipt: EnrollmentReceipt,
+  identity: relay_channel.Identity,
+  mode: relay_channel.Mode,
+  metadata: TransferMetadata,
+  events: List(types.TraceEvent),
+  encoding: BatchEncoding,
 ) -> Result(Nil, String) {
   let hello =
     relay_wire.prepare_hello(
@@ -147,15 +198,61 @@ pub fn run_channel_with_events(
     Ok(socket) -> {
       let outcome = case await_initial_credit(socket) {
         Error(reason) -> Error(reason)
-        Ok(state) ->
-          produce_events(
-            socket,
-            state,
-            identity,
-            mode,
-            events,
-            MetadataEncoding,
-          )
+        Ok(state) -> {
+          let session_id = relay_session.new_id()
+          let start =
+            relay_session.Start(
+              session_id: session_id,
+              relay_id: receipt.relay_id,
+              node: metadata.node,
+              module_: metadata.module_,
+              function_: metadata.function_,
+              arity: metadata.arity,
+              mode: session_mode(mode),
+              privacy: encoding_privacy(encoding),
+              started_at_ms: local_auth.now_ms(),
+            )
+          case next_session_start(state, identity, start) {
+            Error(reason) -> Error(reason)
+            Ok(#(start_frame, started)) ->
+              case websocket_send(socket, start_frame) {
+                Error(reason) -> Error(reason)
+                Ok(Nil) ->
+                  case
+                    produce_events(
+                      socket,
+                      started,
+                      identity,
+                      session_id,
+                      0,
+                      mode,
+                      events,
+                      encoding,
+                    )
+                  {
+                    Error(reason) -> Error(reason)
+                    Ok(#(finished, last_session_sequence)) -> {
+                      let end =
+                        relay_session.End(
+                          session_id: session_id,
+                          sequence: last_session_sequence + 1,
+                          ended_at_ms: local_auth.now_ms(),
+                          completeness: metadata.completeness,
+                        )
+                      case next_session_end(finished, identity, end) {
+                        Error(reason) -> Error(reason)
+                        Ok(#(end_frame, ended_state)) ->
+                          case websocket_send(socket, end_frame) {
+                            Error(reason) -> Error(reason)
+                            Ok(Nil) ->
+                              await_session_ack(socket, ended_state, end)
+                          }
+                      }
+                    }
+                  }
+              }
+          }
+        }
       }
       websocket_close(socket)
       outcome
@@ -163,40 +260,25 @@ pub fn run_channel_with_events(
   }
 }
 
-pub fn run_channel_with_raw_events(
-  receipt: EnrollmentReceipt,
-  identity: relay_channel.Identity,
-  mode: relay_channel.Mode,
-  grant: String,
-  policy: types.RawPolicy,
-  events: List(types.TraceEvent),
+fn await_session_ack(
+  socket: Websocket,
+  state: ChannelState,
+  end: relay_session.End,
 ) -> Result(Nil, String) {
-  let hello =
-    relay_wire.prepare_hello(
-      identity,
-      receipt.relay_id,
-      local_auth.now_ms(),
-      websocket_nonce(),
-    )
-    |> relay_wire.encode_hello
-  case websocket_connect(receipt.channel_url, hello) {
+  case websocket_receive(socket, 10_000) {
+    Error("timeout") -> Error("session_ack_timeout")
     Error(reason) -> Error(reason)
-    Ok(socket) -> {
-      let outcome = case await_initial_credit(socket) {
+    Ok(frame) ->
+      case receive_session_ack(frame, end) {
         Error(reason) -> Error(reason)
-        Ok(state) ->
-          produce_events(
-            socket,
-            state,
-            identity,
-            mode,
-            events,
-            RawEncoding(grant, policy),
-          )
+        Ok(True) -> Ok(Nil)
+        Ok(False) ->
+          case receive_control(state, frame) {
+            Error(reason) -> Error(reason)
+            Ok(Stopped(reason)) -> Error("hub_stopped:" <> reason)
+            Ok(next) -> await_session_ack(socket, next, end)
+          }
       }
-      websocket_close(socket)
-      outcome
-    }
   }
 }
 
@@ -218,39 +300,58 @@ fn produce_events(
   socket: Websocket,
   state: ChannelState,
   identity: relay_channel.Identity,
+  session_id: String,
+  session_sequence: Int,
   mode: relay_channel.Mode,
   events: List(types.TraceEvent),
   encoding: BatchEncoding,
-) -> Result(Nil, String) {
+) -> Result(#(ChannelState, Int), String) {
   case events, state {
-    [], _ -> Ok(Nil)
+    [], _ -> Ok(#(state, session_sequence))
     _, Stopped(reason) -> Error("hub_stopped:" <> reason)
     _, AwaitingCredit(_) -> Error("awaiting_credit")
     _, Active(_, credits, _) if credits <= 0 ->
       case await_credit(socket, state, identity) {
         Error(reason) -> Error(reason)
         Ok(next) ->
-          produce_events(socket, next, identity, mode, events, encoding)
+          produce_events(
+            socket,
+            next,
+            identity,
+            session_id,
+            session_sequence,
+            mode,
+            events,
+            encoding,
+          )
       }
     _, Active(_, _, _) -> {
-      case next_encoded_event_prefix(state, identity, mode, events, encoding) {
+      case
+        next_encoded_event_prefix(
+          state,
+          identity,
+          session_id,
+          session_sequence + 1,
+          mode,
+          events,
+          encoding,
+        )
+      {
         Error(reason) -> Error(reason)
         Ok(#(frame, sent_state, remaining)) ->
           case websocket_send(socket, frame) {
             Error(reason) -> Error(reason)
             Ok(Nil) ->
-              case await_credit(socket, sent_state, identity) {
-                Error(reason) -> Error(reason)
-                Ok(acknowledged) ->
-                  produce_events(
-                    socket,
-                    acknowledged,
-                    identity,
-                    mode,
-                    remaining,
-                    encoding,
-                  )
-              }
+              produce_events(
+                socket,
+                sent_state,
+                identity,
+                session_id,
+                session_sequence + 1,
+                mode,
+                remaining,
+                encoding,
+              )
           }
       }
     }
@@ -379,6 +480,32 @@ pub fn receive_control(
   }
 }
 
+pub fn receive_session_ack(
+  source: String,
+  expected: relay_session.End,
+) -> Result(Bool, String) {
+  let expected_completeness =
+    relay_session.completeness_name(expected.completeness)
+  case string.byte_size(source) > max_control_frame_bytes {
+    True -> Error("control_frame_too_large")
+    False ->
+      case json.parse(source, control_type_decoder()) {
+        Ok("session_ack") ->
+          case json.parse(source, session_ack_decoder()) {
+            Ok(ack)
+              if ack.protocol_version == relay_channel.protocol_version
+              && ack.session_id == expected.session_id
+              && ack.sequence == expected.sequence
+              && ack.completeness == expected_completeness
+            -> Ok(True)
+            _ -> Error("invalid_session_ack")
+          }
+        Ok(_) -> Ok(False)
+        Error(_) -> Error("invalid_control")
+      }
+  }
+}
+
 pub fn next_heartbeat(
   state: ChannelState,
   identity: relay_channel.Identity,
@@ -400,18 +527,78 @@ pub fn next_heartbeat(
   }
 }
 
+pub fn next_session_start(
+  state: ChannelState,
+  identity: relay_channel.Identity,
+  start: relay_session.Start,
+) -> Result(#(String, ChannelState), String) {
+  case state {
+    AwaitingCredit(_) -> Error("awaiting_credit")
+    Stopped(_) -> Error("channel_stopped")
+    Active(sequence, credits, max_batch_events) -> {
+      let payload = relay_session.encode_start(start)
+      case relay_session.decode_message(payload) {
+        Ok(relay_session.SessionStart(_)) -> {
+          let next_sequence = sequence + 1
+          let frame =
+            relay_wire.sign_envelope(identity, next_sequence, payload)
+            |> relay_wire.encode_envelope
+          Ok(#(frame, Active(next_sequence, credits, max_batch_events)))
+        }
+        _ -> Error("invalid_session_start")
+      }
+    }
+  }
+}
+
+pub fn next_session_end(
+  state: ChannelState,
+  identity: relay_channel.Identity,
+  end: relay_session.End,
+) -> Result(#(String, ChannelState), String) {
+  case state {
+    AwaitingCredit(_) -> Error("awaiting_credit")
+    Stopped(_) -> Error("channel_stopped")
+    Active(sequence, credits, max_batch_events) -> {
+      let payload = relay_session.encode_end(end)
+      case relay_session.decode_message(payload) {
+        Ok(relay_session.SessionEnd(_)) -> {
+          let next_sequence = sequence + 1
+          let frame =
+            relay_wire.sign_envelope(identity, next_sequence, payload)
+            |> relay_wire.encode_envelope
+          Ok(#(frame, Active(next_sequence, credits, max_batch_events)))
+        }
+        _ -> Error("invalid_session_end")
+      }
+    }
+  }
+}
+
 pub fn next_event_batch(
   state: ChannelState,
   identity: relay_channel.Identity,
+  session_id: String,
+  session_sequence: Int,
   mode: relay_channel.Mode,
   events: List(types.TraceEvent),
 ) -> Result(#(String, ChannelState), String) {
-  next_encoded_event_batch(state, identity, mode, events, MetadataEncoding)
+  next_encoded_event_batch(
+    state,
+    identity,
+    session_id,
+    session_sequence,
+    mode,
+    events,
+    MetadataEncoding,
+  )
 }
 
 pub fn next_raw_event_batch(
   state: ChannelState,
   identity: relay_channel.Identity,
+  session_id: String,
+  session_sequence: Int,
   mode: relay_channel.Mode,
   grant: String,
   policy: types.RawPolicy,
@@ -420,6 +607,8 @@ pub fn next_raw_event_batch(
   next_encoded_event_batch(
     state,
     identity,
+    session_id,
+    session_sequence,
     mode,
     events,
     RawEncoding(grant, policy),
@@ -431,6 +620,8 @@ pub fn next_raw_event_batch(
 pub fn next_raw_event_prefix(
   state: ChannelState,
   identity: relay_channel.Identity,
+  session_id: String,
+  session_sequence: Int,
   mode: relay_channel.Mode,
   grant: String,
   policy: types.RawPolicy,
@@ -439,6 +630,8 @@ pub fn next_raw_event_prefix(
   next_encoded_event_prefix(
     state,
     identity,
+    session_id,
+    session_sequence,
     mode,
     events,
     RawEncoding(grant, policy),
@@ -448,6 +641,8 @@ pub fn next_raw_event_prefix(
 fn next_encoded_event_prefix(
   state: ChannelState,
   identity: relay_channel.Identity,
+  session_id: String,
+  session_sequence: Int,
   mode: relay_channel.Mode,
   events: List(types.TraceEvent),
   encoding: BatchEncoding,
@@ -457,6 +652,8 @@ fn next_encoded_event_prefix(
       fit_encoded_event_prefix(
         state,
         identity,
+        session_id,
+        session_sequence,
         mode,
         events,
         encoding,
@@ -470,13 +667,25 @@ fn next_encoded_event_prefix(
 fn fit_encoded_event_prefix(
   state: ChannelState,
   identity: relay_channel.Identity,
+  session_id: String,
+  session_sequence: Int,
   mode: relay_channel.Mode,
   events: List(types.TraceEvent),
   encoding: BatchEncoding,
   count: Int,
 ) -> Result(#(String, ChannelState, List(types.TraceEvent)), String) {
   let batch = list.take(events, count)
-  case next_encoded_event_batch(state, identity, mode, batch, encoding) {
+  case
+    next_encoded_event_batch(
+      state,
+      identity,
+      session_id,
+      session_sequence,
+      mode,
+      batch,
+      encoding,
+    )
+  {
     Ok(#(frame, next)) -> Ok(#(frame, next, list.drop(events, count)))
     Error("frame_too_large") if count > 1 -> {
       let next_count = case int.divide(count, by: 2) {
@@ -486,6 +695,8 @@ fn fit_encoded_event_prefix(
       fit_encoded_event_prefix(
         state,
         identity,
+        session_id,
+        session_sequence,
         mode,
         events,
         encoding,
@@ -499,16 +710,19 @@ fn fit_encoded_event_prefix(
 fn next_encoded_event_batch(
   state: ChannelState,
   identity: relay_channel.Identity,
+  session_id: String,
+  session_sequence: Int,
   mode: relay_channel.Mode,
   events: List(types.TraceEvent),
   encoding: BatchEncoding,
 ) -> Result(#(String, ChannelState), String) {
   let event_count = list.length(events)
-  case state {
-    AwaitingCredit(_) -> Error("awaiting_credit")
-    Stopped(_) -> Error("channel_stopped")
-    Active(_, credits, _) if credits <= 0 -> Error("credit_exhausted")
-    Active(sequence, credits, limit) -> {
+  case state, session_sequence > 0 {
+    _, False -> Error("invalid_session_sequence")
+    AwaitingCredit(_), _ -> Error("awaiting_credit")
+    Stopped(_), _ -> Error("channel_stopped")
+    Active(_, credits, _), True if credits <= 0 -> Error("credit_exhausted")
+    Active(sequence, credits, limit), True -> {
       case event_count == 0, event_count > limit {
         True, _ -> Error("empty_batch")
         _, True -> Error("batch_event_limit")
@@ -525,12 +739,25 @@ fn next_encoded_event_batch(
           case encoded {
             Error(error) -> Error(error)
             Ok(payload) -> {
-              case string.byte_size(payload) > relay_wire.max_envelope_bytes {
+              let session_payload =
+                relay_session.encode_batch(
+                  session_id,
+                  session_sequence,
+                  payload,
+                )
+              case
+                string.byte_size(session_payload)
+                > relay_wire.max_envelope_bytes
+              {
                 True -> Error("frame_too_large")
                 False -> {
                   let next_sequence = sequence + 1
                   let frame =
-                    relay_wire.sign_envelope(identity, next_sequence, payload)
+                    relay_wire.sign_envelope(
+                      identity,
+                      next_sequence,
+                      session_payload,
+                    )
                     |> relay_wire.encode_envelope
                   case
                     string.byte_size(frame)
@@ -592,6 +819,19 @@ fn receive_stop(source: String) -> Result(ChannelState, String) {
 fn control_type_decoder() -> decode.Decoder(String) {
   use type_ <- decode.field("type", decode.string)
   decode.success(type_)
+}
+
+fn session_ack_decoder() -> decode.Decoder(SessionAckControl) {
+  use protocol_version <- decode.field("protocol_version", decode.int)
+  use session_id <- decode.field("session_id", decode.string)
+  use sequence <- decode.field("sequence", decode.int)
+  use completeness <- decode.field("completeness", decode.string)
+  decode.success(SessionAckControl(
+    protocol_version,
+    session_id,
+    sequence,
+    completeness,
+  ))
 }
 
 fn credit_decoder() -> decode.Decoder(CreditControl) {
@@ -664,6 +904,20 @@ fn trim_trailing_slashes(source: String) -> String {
   case string.ends_with(source, "/") {
     True -> trim_trailing_slashes(string.drop_end(source, 1))
     False -> source
+  }
+}
+
+fn session_mode(mode: relay_channel.Mode) -> relay_session.Mode {
+  case mode {
+    relay_channel.Exact -> relay_session.Exact
+    relay_channel.Live -> relay_session.Live
+  }
+}
+
+fn encoding_privacy(encoding: BatchEncoding) -> relay_session.Privacy {
+  case encoding {
+    MetadataEncoding -> relay_session.Metadata
+    RawEncoding(_, _) -> relay_session.Raw
   }
 }
 

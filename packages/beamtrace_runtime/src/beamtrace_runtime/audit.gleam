@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
+import beamtrace_runtime/crypto
 import gleam/int
 import gleam/list
 import gleam/string
@@ -130,12 +131,9 @@ fn entry_hash(
     previous_hash,
   ]
   |> string.join("|")
-  |> sha256_hex
+  |> crypto.sha256_hex
 }
 
 fn frame(value: String) -> String {
   int.to_string(string.length(value)) <> ":" <> value
 }
-
-@external(erlang, "beamtrace_audit_ffi", "sha256_hex")
-fn sha256_hex(value: String) -> String

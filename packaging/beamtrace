@@ -6,7 +6,7 @@ script_dir=${0%/*}
 if [ "$script_dir" = "$0" ]; then
   script_dir=.
 fi
-install_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+install_root=$(CDPATH='' cd -- "$script_dir/.." && pwd)
 runtime_root="$install_root/runtime"
 bundled_escript=
 runtime_count=0
@@ -24,6 +24,13 @@ export BEAMTRACE_AGENT_BEAM="$install_root/lib/beamtrace_agent.beam"
 export BEAMTRACE_WEB_ROOT="$install_root/share/beamtrace/web"
 
 export BEAMTRACE_BUNDLED_RUNTIME=1
+if [ "${PATH+x}" = x ]; then
+  export BEAMTRACE_PARENT_PATH_SET=1
+  export BEAMTRACE_PARENT_PATH="$PATH"
+else
+  export BEAMTRACE_PARENT_PATH_SET=0
+  unset BEAMTRACE_PARENT_PATH
+fi
 if [ "${ERL_ROOTDIR+x}" = x ]; then
   export BEAMTRACE_PARENT_ERL_ROOTDIR_SET=1
   export BEAMTRACE_PARENT_ERL_ROOTDIR="$ERL_ROOTDIR"
@@ -45,6 +52,23 @@ else
   export BEAMTRACE_PARENT_ERL_LIBS_SET=0
   unset BEAMTRACE_PARENT_ERL_LIBS
 fi
+save_parent_runtime_variable() {
+  beamtrace_variable_name=$1
+  beamtrace_variable_is_set=$2
+  beamtrace_variable_value=$3
+  if [ "$beamtrace_variable_is_set" = x ]; then
+    export "BEAMTRACE_PARENT_${beamtrace_variable_name}_SET=1"
+    export "BEAMTRACE_PARENT_${beamtrace_variable_name}=$beamtrace_variable_value"
+  else
+    export "BEAMTRACE_PARENT_${beamtrace_variable_name}_SET=0"
+    unset "BEAMTRACE_PARENT_${beamtrace_variable_name}"
+  fi
+}
+save_parent_runtime_variable BINDIR "${BINDIR+x}" "${BINDIR-}"
+save_parent_runtime_variable EMU "${EMU+x}" "${EMU-}"
+save_parent_runtime_variable PROGNAME "${PROGNAME+x}" "${PROGNAME-}"
+save_parent_runtime_variable ESCRIPT_NAME "${ESCRIPT_NAME+x}" "${ESCRIPT_NAME-}"
+unset beamtrace_variable_name beamtrace_variable_is_set beamtrace_variable_value
 
 export ERL_ROOTDIR="$runtime_root"
 export ROOTDIR="$runtime_root"
@@ -53,4 +77,34 @@ if [ -n "${ERL_LIBS:-}" ]; then
 else
   export ERL_LIBS="$install_root/lib/native"
 fi
-exec "$bundled_escript" "$install_root/lib/beamtrace.escript" "$@"
+child_pid=
+shutdown_requested=0
+# shellcheck disable=SC2329 # Invoked by the INT/TERM trap below.
+forward_shutdown() {
+  shutdown_requested=1
+  if [ -n "$child_pid" ]; then
+    kill -TERM "$child_pid" 2>/dev/null || true
+  fi
+}
+trap forward_shutdown INT TERM
+
+"$bundled_escript" "$install_root/lib/beamtrace.escript" "$@" &
+child_pid=$!
+if [ "$shutdown_requested" -eq 1 ]; then
+  kill -TERM "$child_pid" 2>/dev/null || true
+fi
+status=0
+while :; do
+  if wait "$child_pid"; then
+    status=0
+    break
+  else
+    status=$?
+  fi
+  if kill -0 "$child_pid" 2>/dev/null; then
+    continue
+  fi
+  break
+done
+trap - INT TERM
+exit "$status"

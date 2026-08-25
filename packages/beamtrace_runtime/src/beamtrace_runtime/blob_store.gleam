@@ -2,7 +2,7 @@
 import beamtrace_runtime/s3_blob
 
 pub type Blob {
-  Blob(key: String, sha256: String, bytes: Int)
+  Blob(key: String, sha256: String, bytes: Int, created: Bool)
 }
 
 pub type Backend {
@@ -36,7 +36,8 @@ pub fn put_with(
     Filesystem(root) -> put(root, key, payload)
     S3(config) ->
       case s3_blob.put(config, key, payload) {
-        Ok(#(stored_key, sha256, bytes)) -> Ok(Blob(stored_key, sha256, bytes))
+        Ok(#(stored_key, sha256, bytes, created)) ->
+          Ok(Blob(stored_key, sha256, bytes, created))
         Error(error) -> Error(error)
       }
   }

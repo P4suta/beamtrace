@@ -77,7 +77,9 @@ jobs:
           rebar3-version: '3.27.0'
       - name: Distribution capture tests
         shell: pwsh
-        run: ./scripts/test-agent.ps1 -Distribution '${{ matrix.distribution }}'
+        env:
+          BEAMTRACE_DISTRIBUTION_MATRIX: ${{ matrix.distribution }}
+        run: ./scripts/test-agent.ps1 -Distribution $env:BEAMTRACE_DISTRIBUTION_MATRIX
 
   language-fixtures:
     name: Gleam / Elixir / Erlang fixtures
@@ -96,6 +98,11 @@ jobs:
       - name: Fixture acceptance tests
         shell: pwsh
         run: ./scripts/test-fixtures.ps1
+        env:
+          BEAMTRACE_REQUIRE_ELIXIR: '1'
+      - name: Mix record wrapper acceptance
+        shell: pwsh
+        run: ./scripts/test-runtime.ps1
         env:
           BEAMTRACE_REQUIRE_ELIXIR: '1'
 

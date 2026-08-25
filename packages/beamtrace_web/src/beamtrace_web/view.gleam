@@ -250,6 +250,7 @@ fn workspace_header(model: workspace.Model) -> Element(workspace.Msg) {
       mode_button(model.mode, workspace.Capture, "Capture", "1"),
       mode_button(model.mode, workspace.Live, "Live", "2"),
       mode_button(model.mode, workspace.Compare, "Compare", "3"),
+      mode_button(model.mode, workspace.Team, "Team traces", "4"),
     ]),
     html.div([attribute.class("topbar-actions")], [
       html.label([attribute.class("search")], [
@@ -299,6 +300,13 @@ fn mode_button(
 }
 
 fn session_navigator(model: workspace.Model) -> Element(workspace.Msg) {
+  case model.mode {
+    workspace.Team -> team_navigator(model)
+    _ -> capture_navigator(model)
+  }
+}
+
+fn capture_navigator(model: workspace.Model) -> Element(workspace.Msg) {
   html.nav(
     [
       attribute.class("navigator panel"),
@@ -330,11 +338,211 @@ fn session_navigator(model: workspace.Model) -> Element(workspace.Msg) {
   )
 }
 
+fn team_navigator(model: workspace.Model) -> Element(workspace.Msg) {
+  html.nav(
+    [
+      attribute.class("navigator panel"),
+      attribute.aria_label("Team trace navigator"),
+      attribute.attribute("tabindex", "0"),
+    ],
+    [
+      panel_heading("Team trace library", "01"),
+      html.section([], [
+        html.h2([], [html.text("Retention-safe sessions")]),
+        html.p([], [
+          html.text(
+            int.to_string(list.length(model.team_traces))
+            <> " traces loaded · max 100",
+          ),
+        ]),
+        html.button(
+          [
+            attribute.class("quiet-button"),
+            attribute.disabled(model.team_loading),
+            event.on_click(workspace.UserRequestedTeamTraces),
+          ],
+          [html.text("Refresh traces")],
+        ),
+      ]),
+      html.section([], [
+        html.h2([], [html.text("Privacy")]),
+        html.p([], [
+          html.text(
+            "Raw and unknown trace contents remain locked unless your combined role permits access.",
+          ),
+        ]),
+      ]),
+    ],
+  )
+}
+
 fn causal_workspace(model: workspace.Model) -> Element(workspace.Msg) {
   case model.mode {
     workspace.Live -> live_workspace(model)
     workspace.Compare -> compare_workspace(model)
     workspace.Capture -> event_workspace(model)
+    workspace.Team -> team_workspace(model)
+  }
+}
+
+fn team_workspace(model: workspace.Model) -> Element(workspace.Msg) {
+  html.section(
+    [
+      attribute.class("causal panel team-traces-panel"),
+      attribute.aria_label("Team trace library"),
+    ],
+    [
+      html.div([attribute.class("panel-toolbar")], [
+        html.div([], [
+          html.p([attribute.class("eyebrow")], [html.text("team")]),
+          html.h2([], [html.text("Session-scoped traces")]),
+        ]),
+        html.span(
+          [attribute.class("window-count"), attribute.aria_live("polite")],
+          [html.text(team_status(model))],
+        ),
+      ]),
+      case model.team_error {
+        Some(reason) ->
+          html.p([attribute.class("error-state"), attribute.role("alert")], [
+            html.text(reason),
+          ])
+        None -> html.div([], [])
+      },
+      team_trace_table(model),
+      case model.team_next_cursor {
+        Some(_) ->
+          html.button(
+            [
+              attribute.class("quiet-button"),
+              attribute.disabled(model.team_loading),
+              event.on_click(workspace.UserRequestedMoreTeamTraces),
+            ],
+            [html.text("Load more traces")],
+          )
+        None -> html.div([], [])
+      },
+      team_event_section(model),
+    ],
+  )
+}
+
+fn team_status(model: workspace.Model) -> String {
+  case model.team_loading {
+    True -> "Loading traces"
+    False -> int.to_string(list.length(model.team_traces)) <> " loaded"
+  }
+}
+
+fn team_trace_table(model: workspace.Model) -> Element(workspace.Msg) {
+  case model.team_traces {
+    [] ->
+      html.div([attribute.class("empty-state")], [
+        html.p([], [html.text("No team traces are available.")]),
+      ])
+    traces ->
+      html.div([attribute.class("event-table-wrap team-trace-table")], [
+        html.table([attribute.aria_label("Team traces")], [
+          html.thead([], [
+            html.tr([], [
+              html.th([], [html.text("Trace")]),
+              html.th([], [html.text("Status")]),
+              html.th([], [html.text("Node / MFA")]),
+              html.th([], [html.text("Privacy")]),
+              html.th([], [html.text("Events")]),
+              html.th([], [html.text("Received")]),
+            ]),
+          ]),
+          html.tbody([], list.map(traces, team_trace_row)),
+        ]),
+      ])
+  }
+}
+
+fn team_trace_row(trace: workspace.TeamTrace) -> Element(workspace.Msg) {
+  html.tr(
+    [
+      attribute.class(case trace.locked {
+        True -> "locked"
+        False -> ""
+      }),
+      event.on_click(workspace.UserSelectedTeamTrace(trace.id)),
+    ],
+    [
+      html.td([], [
+        html.button([attribute.class("event-link")], [html.text(trace.id)]),
+      ]),
+      html.td([], [
+        html.span([attribute.class("kind-pill")], [html.text(trace.status)]),
+      ]),
+      html.td([], [
+        html.text(
+          trace.node
+          <> " · "
+          <> trace.module_
+          <> ":"
+          <> trace.function_
+          <> "/"
+          <> int.to_string(trace.arity),
+        ),
+      ]),
+      html.td([], [
+        html.text(trace.privacy),
+        case trace.locked {
+          True ->
+            html.span(
+              [
+                attribute.class("locked-badge"),
+                attribute.aria_label("Content locked"),
+              ],
+              [html.text(" Locked")],
+            )
+          False -> html.span([], [])
+        },
+      ]),
+      html.td([], [html.text(int.to_string(trace.event_count))]),
+      html.td([], [html.text(int.to_string(trace.received_at_ms) <> " ms")]),
+    ],
+  )
+}
+
+fn team_event_section(model: workspace.Model) -> Element(workspace.Msg) {
+  case workspace.selected_team_trace(model) {
+    None ->
+      html.div([attribute.class("empty-state")], [
+        html.p([], [
+          html.text("Select a trace to inspect its bounded event page."),
+        ]),
+      ])
+    Some(trace) if trace.locked ->
+      html.div([attribute.class("empty-state locked-trace")], [
+        html.h3([], [html.text("Trace contents locked")]),
+        html.p([], [
+          html.text(
+            "This page does not request or render raw payloads without ViewRawTrace permission.",
+          ),
+        ]),
+      ])
+    Some(trace) ->
+      html.section([attribute.class("team-events")], [
+        html.h3([], [html.text("Events · " <> trace.id)]),
+        case model.team_events_error {
+          Some(reason) -> html.p([attribute.role("alert")], [html.text(reason)])
+          None -> event_table(model.team_events)
+        },
+        case model.team_events_next_cursor {
+          Some(_) ->
+            html.button(
+              [
+                attribute.class("quiet-button"),
+                attribute.disabled(model.team_events_loading),
+                event.on_click(workspace.UserRequestedMoreTeamEvents),
+              ],
+              [html.text("Load more events")],
+            )
+          None -> html.div([], [])
+        },
+      ])
   }
 }
 
@@ -724,7 +932,58 @@ fn inspector(model: workspace.Model) -> Element(workspace.Msg) {
     workspace.Live -> live_inspector(model)
     workspace.Compare -> compare_inspector(model)
     workspace.Capture -> event_inspector(model)
+    workspace.Team -> team_inspector(model)
   }
+}
+
+fn team_inspector(model: workspace.Model) -> Element(workspace.Msg) {
+  html.aside(
+    [
+      attribute.class("inspector panel"),
+      attribute.aria_label("Team trace inspector"),
+      attribute.attribute("tabindex", "0"),
+    ],
+    [
+      panel_heading("Trace policy", "03"),
+      case workspace.selected_team_trace(model) {
+        None -> html.p([], [html.text("Select a trace")])
+        Some(trace) ->
+          html.div([], [
+            definition("Trace", trace.id),
+            definition("Status", trace.status),
+            definition("Completeness", trace.completeness),
+            definition("Privacy", case trace.locked {
+              True -> trace.privacy <> " · locked"
+              False -> trace.privacy
+            }),
+            definition("Legal hold", case trace.legal_hold {
+              True -> "enabled"
+              False -> "disabled"
+            }),
+            html.button(
+              [
+                attribute.class("quiet-button"),
+                event.on_click(workspace.UserRequestedTraceHold(
+                  trace.id,
+                  !trace.legal_hold,
+                )),
+              ],
+              [
+                html.text(case trace.legal_hold {
+                  True -> "Release legal hold"
+                  False -> "Place legal hold"
+                }),
+              ],
+            ),
+            html.p([], [
+              html.text(
+                "Legal hold changes require an Admin role and are CSRF-protected and audited.",
+              ),
+            ]),
+          ])
+      },
+    ],
+  )
 }
 
 fn compare_inspector(model: workspace.Model) -> Element(workspace.Msg) {
@@ -943,6 +1202,11 @@ fn minimap(model: workspace.Model) -> Element(workspace.Msg) {
         [html.span([], [html.text(compare_summary(model))])],
       )
     workspace.Capture -> event_minimap(model)
+    workspace.Team ->
+      html.footer(
+        [attribute.class("minimap"), attribute.aria_label("Team trace status")],
+        [html.span([], [html.text(team_status(model))])],
+      )
   }
 }
 
@@ -1038,6 +1302,10 @@ fn palette(model: workspace.Model) -> Element(workspace.Msg) {
               html.text("Compare saved traces"),
             ],
           ),
+          html.button(
+            [event.on_click(workspace.UserSelectedMode(workspace.Team))],
+            [html.text("Open Team trace library")],
+          ),
         ],
       )
   }
@@ -1055,6 +1323,7 @@ fn mode_slug(mode: workspace.Mode) -> String {
     workspace.Capture -> "capture"
     workspace.Live -> "live"
     workspace.Compare -> "compare"
+    workspace.Team -> "team"
   }
 }
 
@@ -1063,6 +1332,7 @@ fn mode_title(mode: workspace.Mode) -> String {
     workspace.Capture -> "Exact causal sequence"
     workspace.Live -> "Runtime signals"
     workspace.Compare -> "Trace alignment"
+    workspace.Team -> "Team trace library"
   }
 }
 

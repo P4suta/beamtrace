@@ -20,7 +20,7 @@ fn page_decoder() -> decode.Decoder(workspace.EventPage) {
   decode.success(workspace.EventPage(events, total, start, limit))
 }
 
-fn event_decoder() -> decode.Decoder(workspace.EventRow) {
+pub fn event_decoder() -> decode.Decoder(workspace.EventRow) {
   use id <- decode.field("id", decode.string)
   use actor <- decode.field("process", actor_decoder())
   use timestamp_ns <- decode.field("local_timestamp_ns", decode.int)

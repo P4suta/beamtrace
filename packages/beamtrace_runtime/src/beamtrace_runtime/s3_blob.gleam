@@ -12,7 +12,7 @@ pub fn put(
   config: Config,
   key: String,
   payload: String,
-) -> Result(#(String, String, Int), String)
+) -> Result(#(String, String, Int, Bool), String)
 
 @external(erlang, "beamtrace_s3_blob_ffi", "read")
 pub fn read(config: Config, key: String) -> Result(String, String)

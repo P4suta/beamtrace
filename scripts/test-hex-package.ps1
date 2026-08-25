@@ -36,7 +36,15 @@ if (-not (Test-Path -LiteralPath $license -PathType Leaf)) {
     throw 'The Hex package must include its complete dual-licence text.'
 }
 $readmeText = Get-Content -Raw -LiteralPath $readme
-foreach ($marker in @('gleam add beamtrace_core', 'https://hexdocs.pm/beamtrace_core/')) {
+foreach ($marker in @(
+    'gleam add beamtrace_core',
+    'https://hexdocs.pm/beamtrace_core/',
+    'codec.encode_event',
+    'dag.build',
+    'diagnostics.hot_senders',
+    'gleam run --target erlang',
+    'gleam run --target javascript --runtime nodejs'
+)) {
     if (-not $readmeText.Contains($marker)) {
         throw "The Hex README is missing: $marker"
     }
@@ -57,8 +65,22 @@ foreach ($relative in @('LICENSES/Apache-2.0.txt', 'LICENSES/MIT.txt')) {
 $tarball = Join-Path $coreRoot "build/beamtrace_core-$projectVersion.tar"
 if ($ContainerBoundary) {
     $mount = "${repoRoot}:/src"
-    & docker run --rm --volume $mount --workdir /src/packages/beamtrace_core `
-        ghcr.io/gleam-lang/gleam:v1.18.1-erlang-alpine gleam export hex-tarball
+    $dockerArguments = @('run', '--rm')
+    if (-not $IsWindows) {
+        $hostUid = (& id -u | Out-String).Trim()
+        $hostGid = (& id -g | Out-String).Trim()
+        if ($hostUid -notmatch '^\d+$' -or $hostGid -notmatch '^\d+$') {
+            throw 'Could not resolve the host UID/GID for the Hex container boundary.'
+        }
+        $dockerArguments += @('--user', "${hostUid}:${hostGid}")
+    }
+    $dockerArguments += @(
+        '--volume', $mount,
+        '--workdir', '/src/packages/beamtrace_core',
+        'ghcr.io/gleam-lang/gleam:v1.18.1-erlang-alpine@sha256:7c82e4a284b7c05c26eac34db497ea0e63ce7cb04bd019d966d70338eb172b68',
+        'gleam', 'export', 'hex-tarball'
+    )
+    & docker @dockerArguments
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 elseif (-not $IsWindows) {
@@ -109,6 +131,43 @@ try {
         if (-not $metadata.Contains($marker)) {
             throw "Hex tarball metadata is missing: $marker"
         }
+    }
+
+    # Compile the exact package payload that would be uploaded, not the
+    # monorepo source tree. This catches missing files or package-boundary
+    # assumptions before the immutable Hex version is published.
+    $candidatePackage = Join-Path $resolvedTemp 'candidate-package'
+    New-Item -ItemType Directory -Path $candidatePackage | Out-Null
+    & tar -xzf (Join-Path $resolvedTemp 'contents.tar.gz') -C $candidatePackage
+    if ($LASTEXITCODE -ne 0) { throw 'Could not extract the candidate Hex package payload.' }
+
+    $consumer = Join-Path $resolvedTemp 'candidate-consumer'
+    & gleam new $consumer --name beamtrace_hex_candidate_consumer --skip-github
+    if ($LASTEXITCODE -ne 0) { throw 'Could not create the candidate Hex consumer project.' }
+    $consumerToml = Join-Path $consumer 'gleam.toml'
+    $candidatePath = $candidatePackage.Replace('\', '/')
+    $toml = Get-Content -Raw -LiteralPath $consumerToml
+    $dependency = 'gleam_stdlib = ">= 0.70.0 and < 2.0.0"' + "`n" +
+        "beamtrace_core = { path = `"$candidatePath`" }"
+    $toml = $toml -replace '(?m)^gleam_stdlib = .+$', $dependency
+    $toml | Set-Content -LiteralPath $consumerToml -Encoding utf8NoBOM
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'fixtures/hex_consumer.gleam') `
+        -Destination (Join-Path $consumer 'src/beamtrace_hex_candidate_consumer.gleam')
+
+    Push-Location $consumer
+    try {
+        $expected = 'codec=round-trip dag_boundaries=1 diagnostic_messages=1'
+        $erlangOutput = (& gleam run --target erlang 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or -not $erlangOutput.EndsWith($expected)) {
+            throw "Candidate Hex payload failed in an isolated Erlang consumer:`n$erlangOutput"
+        }
+        $javascriptOutput = (& gleam run --target javascript --runtime nodejs 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or -not $javascriptOutput.EndsWith($expected)) {
+            throw "Candidate Hex payload failed in an isolated JavaScript consumer:`n$javascriptOutput"
+        }
+    }
+    finally {
+        Pop-Location
     }
 }
 finally {

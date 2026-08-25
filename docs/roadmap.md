@@ -7,13 +7,13 @@
 - shortname/longname single- and multi-node capture with partial-order events
 - metadata shaping, budgets, credit flow, truncation and gap semantics
 - canonical event codec, AQL parsing/evaluation, causal DAG, identity, diagnostics, anomaly, diff
-- CLI capture/open/compare/export/doctor/record and HTTPS relay enrollment
+- CLI capture/open/compare/export/doctor/record, zero-setup demo, project profiles, and HTTPS relay enrollment
 - safe segmented `.beamtrace`, paged reader/API, HTML/JSONL/Mermaid/OTLP exports
 - bounded Live process sampling without mailbox contents
 - Web workspace, Canvas window, accessible event table and inspector
 - TUI attach/arm/search/save interaction model
 - OIDC discovery/callback verification, CSRF, RBAC, and team HTTP middleware
-- SQLite WAL metadata/index schema, filesystem blobs, event-aware quotas, startup retention, and audit-chain contracts
+- production session-scoped relay v2, SQLite WAL metadata/segment indexes, filesystem blobs, event-aware quotas, legal hold, startup/hourly retention, and audit-chain contracts
 - persistent signed outbound relay WebSocket, one-time Ed25519 enrollment, credit-based batches, and canonical metadata privacy validation
 - relay producer capture from attached target nodes, including bounded audited raw grants
 - shared live-session fan-out and full multi-trace visual Compare workspace
@@ -21,6 +21,8 @@
 - indexed search over unloaded segments and PID/clock-independent multi-run p50/p95/occurrence statistics
 - real Chromium acceptance over one million logical events, keyboard/axe checks, PTY harness, and package smoke tests
 - self-contained native archive packaging with bundled ERTS and SQLite NIF, SPDX SBOM/checksums, OCI image, Hex tarball, Homebrew/Scoop metadata, and GitHub release provenance
+- official MCP 2026-07-28 lifecycle/tool schemas tested against the exact 2.0.0 client
+- responsive one/two/three-panel etui layout and Web/TUI Team trace selectors with locked raw content
 
 ## Post-alpha release operations
 

@@ -24,6 +24,7 @@ pub fn complete_team_environment_resolves_public_oidc_and_roles_test() {
     #("beam-raw", rbac.RawCaptureRole),
   ])
   config.retention_days |> should.equal(7)
+  config.raw_retention_days |> should.equal(1)
   config.relay_max_events |> should.equal(1_000_000)
   config.relay_max_bytes |> should.equal(1_073_741_824)
   config.blob_backend |> should.equal(team_config.FilesystemBlobs)
@@ -152,6 +153,21 @@ pub fn team_relay_quota_must_be_positive_and_bounded_test() {
   |> should.equal(
     Error(team_config.InvalidInteger("relay_max_bytes", "1000000000001")),
   )
+}
+
+pub fn raw_retention_cannot_outlive_metadata_retention_test() {
+  valid_source()
+  |> dict.insert("retention_days", "7")
+  |> dict.insert("raw_retention_days", "8")
+  |> team_config.resolve
+  |> should.equal(Error(team_config.InvalidValue("raw_retention_days")))
+
+  let assert Ok(config) =
+    valid_source()
+    |> dict.insert("retention_days", "7")
+    |> dict.insert("raw_retention_days", "7")
+    |> team_config.resolve
+  config.raw_retention_days |> should.equal(7)
 }
 
 fn valid_source() {

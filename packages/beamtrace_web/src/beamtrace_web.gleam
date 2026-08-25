@@ -4,8 +4,10 @@ import beamtrace_web/capture_control
 import beamtrace_web/compare_control
 import beamtrace_web/live_control
 import beamtrace_web/page_loader
+import beamtrace_web/team_control
 import beamtrace_web/view
 import beamtrace_web/workspace
+import gleam/option.{None, Some}
 import lustre
 import lustre/effect.{type Effect}
 
@@ -27,6 +29,13 @@ fn update(
   case message {
     workspace.UserSelectedMode(workspace.Live) ->
       finish_update(workspace.update(model, message), [live_control.load()])
+    workspace.UserSelectedMode(workspace.Team) -> {
+      let next = workspace.update(model, message)
+      case next.team_traces {
+        [] -> finish_update(next, [team_control.load_traces("")])
+        _ -> finish_update(next, [])
+      }
+    }
     workspace.UserChangedTrigger(query) ->
       finish_update(workspace.update(model, message), [
         capture_control.search_mfas(query),
@@ -97,6 +106,37 @@ fn update(
         _ -> finish_update(next, [])
       }
     }
+    workspace.UserRequestedTeamTraces ->
+      finish_update(workspace.update(model, message), [
+        team_control.load_traces(""),
+      ])
+    workspace.UserRequestedMoreTeamTraces -> {
+      let next = workspace.update(model, message)
+      case model.team_next_cursor {
+        Some(cursor) -> finish_update(next, [team_control.load_traces(cursor)])
+        None -> finish_update(next, [])
+      }
+    }
+    workspace.UserSelectedTeamTrace(trace_id) -> {
+      let next = workspace.update(model, message)
+      case workspace.selected_team_trace(next) {
+        Some(trace) if !trace.locked ->
+          finish_update(next, [team_control.load_events(trace_id, "")])
+        _ -> finish_update(next, [])
+      }
+    }
+    workspace.UserRequestedMoreTeamEvents -> {
+      let next = workspace.update(model, message)
+      case model.selected_trace_id, model.team_events_next_cursor {
+        Some(trace_id), Some(cursor) ->
+          finish_update(next, [team_control.load_events(trace_id, cursor)])
+        _, _ -> finish_update(next, [])
+      }
+    }
+    workspace.UserRequestedTraceHold(trace_id, enabled) ->
+      finish_update(workspace.update(model, message), [
+        team_control.set_hold(trace_id, enabled),
+      ])
     _ -> finish_update(workspace.update(model, message), [])
   }
 }

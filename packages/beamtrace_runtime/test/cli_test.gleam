@@ -56,6 +56,29 @@ pub fn capture_defaults_to_one_generic_root_test() {
   )
 }
 
+pub fn capture_accepts_an_option_node_for_project_profile_expansion_test() {
+  cli.parse([
+    "capture",
+    "--node",
+    "profile@host",
+    "--trigger",
+    "shop:checkout/1",
+    "--out",
+    "x.beamtrace",
+  ])
+  |> should.equal(
+    Ok(cli.Capture(
+      node: "profile@host",
+      trigger: cli.Mfa("shop", "checkout", 1),
+      where_aql: None,
+      out: "x.beamtrace",
+      cookie_file: None,
+      max_roots: 1,
+      preset: types.Generic,
+    )),
+  )
+}
+
 pub fn capture_rejects_invalid_root_budget_and_preset_test() {
   let base = [
     "capture",
@@ -95,6 +118,9 @@ pub fn every_public_command_parses_test() {
     cli.parse(["compare", "good.beamtrace", "bad.beamtrace"]),
     cli.parse(["export", "run.beamtrace", "--format", "mermaid"]),
     cli.parse(["serve"]),
+    cli.parse(["demo", "--no-ui", "--out", "demo.beamtrace"]),
+    cli.parse(["init"]),
+    cli.parse(["config", "check"]),
     cli.parse(["relay", "https://hub.example", "--enroll", "once"]),
     cli.parse(["tui", "--server", "http://127.0.0.1:4040"]),
     cli.parse(["doctor"]),
@@ -107,6 +133,36 @@ pub fn every_public_command_parses_test() {
     }
   })
   |> should.be_true()
+}
+
+pub fn demo_parses_ui_output_and_ephemeral_port_test() {
+  cli.parse([
+    "demo",
+    "--tui",
+    "--out",
+    "custom.beamtrace",
+    "--port",
+    "0",
+  ])
+  |> should.equal(Ok(cli.Demo(cli.DemoTui, "custom.beamtrace", 0)))
+}
+
+pub fn team_tui_accepts_only_a_session_cookie_file_not_a_cookie_value_test() {
+  cli.parse([
+    "tui",
+    "--server",
+    "https://trace.example",
+    "--session-cookie-file",
+    ".secrets/team-session",
+  ])
+  |> should.equal(
+    Ok(cli.Tui(Some("https://trace.example"), Some(".secrets/team-session"))),
+  )
+
+  cli.parse(["tui", "--session-cookie", "secret"])
+  |> should.equal(
+    Error(cli.ParseError("unknown tui option '--session-cookie'", 2)),
+  )
 }
 
 pub fn relay_target_producer_parses_capture_options_without_plaintext_cookie_test() {
@@ -213,7 +269,7 @@ pub fn record_parses_capture_options_before_the_child_separator_test() {
   |> should.equal(
     Ok(
       cli.Record(
-        node: "app@host",
+        node: Some("app@host"),
         trigger: cli.Mfa("shop", "checkout", 1),
         where_aql: Some("arg.0.tag == order"),
         out: "run.beamtrace",
@@ -226,10 +282,36 @@ pub fn record_parses_capture_options_before_the_child_separator_test() {
   )
 }
 
-pub fn record_requires_a_target_trigger_output_and_child_command_test() {
+pub fn record_generates_a_target_but_still_requires_trigger_output_and_child_test() {
   let assert Error(error) = cli.parse(["record", "--", "gleam", "test"])
   error.exit_code |> should.equal(2)
-  error.message |> should.equal("record requires --node <node>")
+  error.message
+  |> should.equal("record requires --trigger Module:function/arity")
+
+  cli.parse([
+    "record",
+    "--trigger",
+    "m:f/0",
+    "--out",
+    "x.beamtrace",
+    "--",
+    "gleam",
+    "run",
+  ])
+  |> should.equal(
+    Ok(
+      cli.Record(
+        None,
+        cli.Mfa("m", "f", 0),
+        None,
+        "x.beamtrace",
+        None,
+        1,
+        types.Generic,
+        ["gleam", "run"],
+      ),
+    ),
+  )
 
   let assert Error(child_error) =
     cli.parse([
@@ -257,7 +339,19 @@ pub fn plaintext_cookie_argument_is_a_safety_refusal_test() {
 
 pub fn defaults_do_not_smuggle_a_cookie_test() {
   cli.parse(["attach", "app@host"])
-  |> should.equal(Ok(cli.Attach("app@host", cli.Web, None)))
+  |> should.equal(Ok(cli.Attach("app@host", cli.Web, None, 4040)))
+}
+
+pub fn local_web_commands_accept_ephemeral_or_explicit_ports_test() {
+  cli.parse(["attach", "app@host", "--web", "--port", "0"])
+  |> should.equal(Ok(cli.Attach("app@host", cli.Web, None, 0)))
+  cli.parse(["open", "trace.beamtrace", "--web", "--port", "8123"])
+  |> should.equal(Ok(cli.Open("trace.beamtrace", cli.Web, 8123)))
+  cli.parse(["serve", "--port", "0"])
+  |> should.equal(Ok(cli.Serve(0)))
+
+  let assert Error(error) = cli.parse(["serve", "--port", "65536"])
+  error.message |> should.equal("--port must be between 0 and 65535")
 }
 
 pub fn malformed_mfa_is_usage_error_test() {

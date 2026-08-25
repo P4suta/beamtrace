@@ -7,7 +7,7 @@ import gleam/int
 import gleam/json
 import gleam/string
 
-const protocol_version = 1
+const protocol_version = 2
 
 const max_hello_bytes = 16_384
 
@@ -97,9 +97,10 @@ pub fn authenticate(
   hello: Hello,
   now_ms: Int,
 ) -> Result(enrollment_store.RelayRecord, String) {
-  case hello.protocol_version == protocol_version {
-    False -> Error("unsupported_protocol")
-    True ->
+  case hello.protocol_version {
+    1 -> Error("upgrade_required")
+    version if version != protocol_version -> Error("unsupported_protocol")
+    _ ->
       enrollment_store.authenticate(
         store,
         hello.relay_id,
@@ -125,7 +126,7 @@ pub fn sign_envelope(
 
 pub fn encode_envelope(envelope: Envelope) -> String {
   json.object([
-    #("type", json.string("batch")),
+    #("type", json.string("message")),
     #("protocol_version", json.int(protocol_version)),
     #("sequence", json.int(envelope.sequence)),
     #("payload", json.string(envelope.payload)),
@@ -145,12 +146,13 @@ pub fn decode_envelope(source: String) -> Result(Envelope, String) {
         Error(_) -> Error("invalid_envelope")
         Ok(encoded) ->
           case
-            encoded.protocol_version == protocol_version,
+            encoded.protocol_version,
             encoded.sequence > 0,
             string.byte_size(encoded.payload) <= max_envelope_bytes,
             bit_array.base64_url_decode(encoded.signature)
           {
-            True, True, True, Ok(signature) ->
+            1, _, _, _ -> Error("upgrade_required")
+            version, True, True, Ok(signature) if version == protocol_version ->
               case bit_array.byte_size(signature) == 64 {
                 True ->
                   Ok(Envelope(encoded.sequence, encoded.payload, signature))
@@ -185,12 +187,13 @@ pub fn verify_envelope(
 
 fn decode_hello_parts(encoded: EncodedHello) -> Result(Hello, String) {
   case
-    encoded.protocol_version == protocol_version,
+    encoded.protocol_version,
     encoded.relay_id != "" && string.byte_size(encoded.relay_id) <= 128,
     bit_array.base64_url_decode(encoded.nonce),
     bit_array.base64_url_decode(encoded.signature)
   {
-    True, True, Ok(nonce), Ok(signature) ->
+    1, _, _, _ -> Error("upgrade_required")
+    version, True, Ok(nonce), Ok(signature) if version == protocol_version ->
       case
         bit_array.byte_size(nonce) >= 16
         && bit_array.byte_size(nonce) <= 64
@@ -240,13 +243,13 @@ fn envelope_decoder() -> decode.Decoder(EncodedEnvelope) {
   use sequence <- decode.field("sequence", decode.int)
   use payload <- decode.field("payload", decode.string)
   use signature <- decode.field("signature", decode.string)
-  case type_ == "batch" {
+  case type_ == "message" {
     True ->
       decode.success(EncodedEnvelope(version, sequence, payload, signature))
     False ->
       decode.failure(
         EncodedEnvelope(version, sequence, payload, signature),
-        expected: "batch frame",
+        expected: "message frame",
       )
   }
 }
@@ -257,7 +260,7 @@ fn hello_payload(
   nonce: BitArray,
 ) -> BitArray {
   let source =
-    "beamtrace-relay-v1\nhello\n"
+    "beamtrace-relay-v2\nhello\n"
     <> relay_id
     <> "\n"
     <> int.to_string(timestamp_ms)
@@ -268,6 +271,9 @@ fn hello_payload(
 
 fn envelope_payload(sequence: Int, payload: String) -> BitArray {
   let source =
-    "beamtrace-relay-v1\nbatch\n" <> int.to_string(sequence) <> "\n" <> payload
+    "beamtrace-relay-v2\nmessage\n"
+    <> int.to_string(sequence)
+    <> "\n"
+    <> payload
   bit_array.from_string(source)
 }

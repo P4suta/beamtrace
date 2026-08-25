@@ -47,15 +47,18 @@ jobs:
           otp-version: '29'
           gleam-version: '1.18.1'
           rebar3-version: '3.27.0'
-      - name: Build release archive without publishing
+      - name: Build and smoke-test release archive without publishing
         shell: pwsh
-        run: ./scripts/package.ps1 -SkipTests
+        run: ./scripts/test-package.ps1
       - name: Require the matrix-specific archive
         shell: pwsh
+        env:
+          PACKAGE_PLATFORM: ${{ matrix.platform }}
+          PACKAGE_ARCHITECTURE: ${{ matrix.architecture }}
         run: |
           . ./scripts/project-version.ps1
           $version = Get-BeamTraceVersion -RepositoryRoot $PWD
-          $archive = "dist/beamtrace-$version-${{ matrix.platform }}-${{ matrix.architecture }}.zip"
+          $archive = "dist/beamtrace-$version-$env:PACKAGE_PLATFORM-$env:PACKAGE_ARCHITECTURE.zip"
           if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
             throw "Candidate archive was not produced: $archive"
           }
@@ -120,8 +123,8 @@ jobs:
           . ./scripts/project-version.ps1
           $version = Get-BeamTraceVersion -RepositoryRoot $PWD
           ./scripts/build-distribution-metadata.ps1 `
-            -BaseUrl "https://github.com/${{ github.repository }}/releases/download/v$version" `
-            -Homepage "https://github.com/${{ github.repository }}"
+            -BaseUrl "https://github.com/$env:GITHUB_REPOSITORY/releases/download/v$version" `
+            -Homepage "https://github.com/$env:GITHUB_REPOSITORY"
 
   gate:
     name: Release Candidate Gate

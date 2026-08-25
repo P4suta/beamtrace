@@ -37,18 +37,19 @@ try {
     $toml = Get-Content -Raw -LiteralPath $consumerToml
     $toml = $toml -replace '(?m)^gleam_stdlib = .+$', "gleam_stdlib = `">= 0.70.0 and < 2.0.0`"`nbeamtrace_core = `"$Version`""
     $toml | Set-Content -LiteralPath $consumerToml -Encoding utf8NoBOM
-    @'
-import beamtrace/types
-
-pub fn main() {
-  let _budget = types.default_budget()
-  Nil
-}
-'@ | Set-Content -LiteralPath (Join-Path $consumer 'src/beamtrace_release_consumer.gleam') -Encoding utf8NoBOM
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'fixtures/hex_consumer.gleam') `
+        -Destination (Join-Path $consumer 'src/beamtrace_release_consumer.gleam')
     Push-Location $consumer
     try {
-        & gleam build
-        if ($LASTEXITCODE -ne 0) { throw "A clean consumer could not build beamtrace_core $Version." }
+        $expected = 'codec=round-trip dag_boundaries=1 diagnostic_messages=1'
+        $erlangOutput = (& gleam run --target erlang 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or -not $erlangOutput.EndsWith($expected)) {
+            throw "A clean Erlang consumer could not run beamtrace_core ${Version}:`n$erlangOutput"
+        }
+        $javascriptOutput = (& gleam run --target javascript --runtime nodejs 2>&1 | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0 -or -not $javascriptOutput.EndsWith($expected)) {
+            throw "A clean JavaScript consumer could not run beamtrace_core ${Version}:`n$javascriptOutput"
+        }
     }
     finally {
         Pop-Location

@@ -18,6 +18,7 @@
 ```powershell
 ./scripts/check-format.ps1
 ./scripts/test-core.ps1
+./scripts/test-core-consumer.ps1
 ./scripts/test-runtime.ps1
 ./scripts/test-agent.ps1 -Distribution short
 ./scripts/test-agent.ps1 -Distribution long
@@ -40,7 +41,13 @@
 
 The narrow test should be used for Red/Green iteration. `test-all` is the portable local gate and includes Chromium unless `-SkipBrowserE2E` is supplied. Run `test-s3-dogfood.ps1` as the Docker-backed storage boundary. PTY acceptance runs on Linux; Windows validates its harness contract. Native Hex export runs on Linux because Gleam 1.18.1 rejects valid Windows paths during `hex-tarball`; `test-hex-package.ps1 -ContainerBoundary` exercises the Linux boundary from Windows when Docker is available.
 
-CI repeats the non-browser gate across OTP 27–29 and three operating systems, exercises short/long/TLS distribution separately, runs real S3-compatible TLS, Chromium, and PTY acceptance, and builds the actual OCI image. Tag workflows require all package versions to match the tag, build five self-contained native archives, and attest release subjects with GitHub OIDC. Windows ARM64 packaging remains disabled until CI has a reproducible native Erlang/OTP runtime.
+CI repeats the non-browser gate across OTP 27–29 and three operating systems, exercises short/long/TLS distribution separately, runs real S3-compatible TLS, Chromium, the exact official MCP client, and PTY acceptance, and builds the actual OCI image. Record acceptance covers direct Erlang, a resolved Gleam shim, Rebar3, and Mix; the Elixir fixture job makes the otherwise optional Mix boundary mandatory. The isolated core consumer executes the README codec/DAG/diagnostics example on Erlang and JavaScript; the post-publication gate repeats it against the exact Hex version. Tag workflows require all package versions to match the tag, build and smoke-test five self-contained native archives, reject ZIP growth above 5% of the published v0.1.0 per-target baseline, and attest release subjects with GitHub OIDC. Windows ARM64 packaging remains disabled until CI has a reproducible native Erlang/OTP runtime.
+
+Changes carried in dependency forks are not automatically upstreamable.
+[The upstream candidate ledger](upstream-candidates.md) records pinned SHAs,
+missing evidence, and the approval gate; external issues, PRs, comments, and
+branch pushes require a fresh evidence bundle and explicit repository-specific
+user approval.
 
 ## Definition of done
 

@@ -9,13 +9,18 @@ import gleam/list
 pub fn payload(model: workspace.Model) -> String {
   case model.mode {
     workspace.Live -> live_payload(model)
+    workspace.Team -> rows_payload(model.team_events)
     _ -> event_payload(model)
   }
 }
 
 fn event_payload(model: workspace.Model) -> String {
-  model
-  |> workspace.visible_events
+  rows_payload(workspace.visible_events(model))
+}
+
+fn rows_payload(rows: List(workspace.EventRow)) -> String {
+  rows
+  |> list.take(1000)
   |> json.array(fn(row) {
     json.object([
       #("id", json.string(row.id)),

@@ -9,17 +9,18 @@ pub fn start(
   command: List(String),
   node: String,
   cookie: String,
+  trigger_module: String,
 ) -> Result(Handle, String) {
-  start_gated_command(command, node, cookie)
+  start_gated_command(command, node, cookie, trigger_module)
 }
 
 pub fn release(handle: Handle) -> Result(Nil, String) {
   release_gated_command(handle)
 }
 
-/// Release the post-command gate after capture cleanup is complete. Direct
-/// `erl` commands are held here before `init:stop`; wrappers without a safe
-/// post-command insertion treat this as a no-op.
+/// Release the post-command gate after capture cleanup is complete. A tiny
+/// injected OTP shutdown guard holds both direct `erl` and wrapper-driven VMs
+/// here even when a wrapper places `ERL_ZFLAGS` after its argument terminator.
 pub fn release_finish(handle: Handle) -> Result(Nil, String) {
   release_gated_command_finish(handle)
 }
@@ -43,11 +44,22 @@ pub fn ephemeral_cookie() -> Result(String, String) {
   read_record_cookie()
 }
 
+/// Generate a unique short-name target matching the host Erlang will use for
+/// `-sname`. Callers may still supply an explicit long or short node name.
+pub fn auto_node() -> Result(String, String) {
+  auto_record_node()
+}
+
+pub fn demo_command() -> Result(List(String), String) {
+  bundled_demo_command()
+}
+
 @external(erlang, "beamtrace_cli_ffi", "start_gated_command")
 fn start_gated_command(
   command: List(String),
   node: String,
   cookie: String,
+  trigger_module: String,
 ) -> Result(Handle, String)
 
 @external(erlang, "beamtrace_cli_ffi", "release_gated_command")
@@ -70,3 +82,9 @@ fn gated_command_running(handle: Handle) -> Bool
 
 @external(erlang, "beamtrace_cli_ffi", "read_record_cookie")
 fn read_record_cookie() -> Result(String, String)
+
+@external(erlang, "beamtrace_cli_ffi", "auto_record_node")
+fn auto_record_node() -> Result(String, String)
+
+@external(erlang, "beamtrace_cli_ffi", "demo_command")
+fn bundled_demo_command() -> Result(List(String), String)

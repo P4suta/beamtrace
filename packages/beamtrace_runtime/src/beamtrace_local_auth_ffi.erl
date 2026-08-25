@@ -70,17 +70,9 @@ safe_lookup(Store, Key) ->
     end.
 
 secure_equal(Left, Right) when byte_size(Left) =:= byte_size(Right) ->
-    try crypto:hash_equals(Left, Right)
-    catch error:undef -> Left =:= Right
-    end;
+    'beamtrace_runtime@crypto':constant_time_equal(Left, Right);
 secure_equal(_Left, _Right) -> false.
 
-hash(Value) -> crypto:hash(sha256, Value).
+hash(Value) -> 'beamtrace_runtime@crypto':sha256(Value).
 
-random_token(Bytes) -> hex(crypto:strong_rand_bytes(Bytes)).
-
-hex(Binary) ->
-    << <<(hex_digit(Byte bsr 4)), (hex_digit(Byte band 16#0f))>> || <<Byte>> <= Binary >>.
-
-hex_digit(Value) when Value < 10 -> $0 + Value;
-hex_digit(Value) -> $a + Value - 10.
+random_token(Bytes) -> 'beamtrace_runtime@crypto':random_hex(Bytes).

@@ -52,6 +52,45 @@ pub fn shortcuts_cover_attach_arm_anomalies_search_save_and_web_test() {
   model.key_to_message("/") |> should.equal(Some(model.FocusSearch))
   model.key_to_message("s") |> should.equal(Some(model.FocusSave))
   model.key_to_message("w") |> should.equal(Some(model.OpenWeb))
+  model.key_to_message("t") |> should.equal(Some(model.OpenTraceLibrary))
+}
+
+pub fn team_trace_selection_is_bounded_and_locked_content_stays_closed_test() {
+  let traces = [
+    model.TeamTrace(
+      "metadata-trace",
+      "complete",
+      "app@host",
+      "shop:checkout/1",
+      "metadata",
+      10,
+      1000,
+      False,
+    ),
+    model.TeamTrace(
+      "raw-trace",
+      "incomplete",
+      "app@host",
+      "shop:raw/0",
+      "raw",
+      5,
+      2000,
+      True,
+    ),
+  ]
+  let state = model.remote_with_traces([], "https://hub.example", traces)
+  let state = model.handle_key(state, "down")
+  state.selected_trace |> should.equal(1)
+  let assert Some(selected) = model.selected_team_trace(state)
+  selected.id |> should.equal("raw-trace")
+  selected.locked |> should.be_true()
+
+  let state = model.handle_key(state, "down")
+  state.selected_trace |> should.equal(1)
+  let state = model.handle_key(state, "enter")
+  state.notice
+  |> should.equal("Trace raw-trace is locked by raw-trace policy")
+  state.events |> should.equal([])
 }
 
 pub fn anomaly_view_only_contains_flagged_events_test() {

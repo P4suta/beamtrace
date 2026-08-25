@@ -21,6 +21,21 @@ $previousWeb = $env:BEAMTRACE_WEB_ROOT
 $previousErlLibs = $env:ERL_LIBS
 $previousErlRoot = $env:ERL_ROOTDIR
 $previousRoot = $env:ROOTDIR
+$runtimeEnvironmentNames = @('PATH', 'BINDIR', 'EMU', 'PROGNAME', 'ESCRIPT_NAME')
+$previousRuntimeEnvironment = @{}
+$previousRuntimeMarkers = @{}
+foreach ($name in $runtimeEnvironmentNames) {
+    $previousRuntimeEnvironment[$name] = [pscustomobject]@{
+        IsSet = Test-Path "Env:$name"
+        Value = [Environment]::GetEnvironmentVariable($name, 'Process')
+    }
+    foreach ($marker in @("BEAMTRACE_PARENT_${name}_SET", "BEAMTRACE_PARENT_$name")) {
+        $previousRuntimeMarkers[$marker] = [pscustomobject]@{
+            IsSet = Test-Path "Env:$marker"
+            Value = [Environment]::GetEnvironmentVariable($marker, 'Process')
+        }
+    }
+}
 $previousBundledRuntime = $env:BEAMTRACE_BUNDLED_RUNTIME
 $previousParentErlRootSet = $env:BEAMTRACE_PARENT_ERL_ROOTDIR_SET
 $previousParentErlRoot = $env:BEAMTRACE_PARENT_ERL_ROOTDIR
@@ -35,6 +50,19 @@ try {
     $env:BEAMTRACE_AGENT_BEAM = Join-Path $installRoot 'lib/beamtrace_agent.beam'
     $env:BEAMTRACE_WEB_ROOT = Join-Path $installRoot 'share/beamtrace/web'
     $env:BEAMTRACE_BUNDLED_RUNTIME = '1'
+    foreach ($name in $runtimeEnvironmentNames) {
+        $saved = $previousRuntimeEnvironment[$name]
+        [Environment]::SetEnvironmentVariable(
+            "BEAMTRACE_PARENT_${name}_SET",
+            $(if ($saved.IsSet) { '1' } else { '0' }),
+            'Process'
+        )
+        [Environment]::SetEnvironmentVariable(
+            "BEAMTRACE_PARENT_$name",
+            $(if ($saved.IsSet) { $saved.Value } else { $null }),
+            'Process'
+        )
+    }
     $env:BEAMTRACE_PARENT_ERL_ROOTDIR_SET = if ($hadErlRoot) { '1' } else { '0' }
     $env:BEAMTRACE_PARENT_ERL_ROOTDIR = if ($hadErlRoot) { $previousErlRoot } else { $null }
     $env:BEAMTRACE_PARENT_ROOTDIR_SET = if ($hadRoot) { '1' } else { '0' }
@@ -60,6 +88,13 @@ finally {
     $env:ERL_ROOTDIR = $previousErlRoot
     $env:ROOTDIR = $previousRoot
     $env:BEAMTRACE_BUNDLED_RUNTIME = $previousBundledRuntime
+    foreach ($entry in $previousRuntimeMarkers.GetEnumerator()) {
+        [Environment]::SetEnvironmentVariable(
+            $entry.Key,
+            $(if ($entry.Value.IsSet) { $entry.Value.Value } else { $null }),
+            'Process'
+        )
+    }
     $env:BEAMTRACE_PARENT_ERL_ROOTDIR_SET = $previousParentErlRootSet
     $env:BEAMTRACE_PARENT_ERL_ROOTDIR = $previousParentErlRoot
     $env:BEAMTRACE_PARENT_ROOTDIR_SET = $previousParentRootSet

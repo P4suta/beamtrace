@@ -3,6 +3,7 @@ import beamtrace/types
 import beamtrace_runtime/relay_channel
 import beamtrace_runtime/relay_client
 import beamtrace_runtime/relay_payload
+import beamtrace_runtime/relay_session
 import beamtrace_runtime/relay_wire
 import gleam/bit_array
 import gleam/list
@@ -79,7 +80,7 @@ pub fn relay_channel_waits_for_credit_and_signs_strict_heartbeats_test() {
   let assert Ok(active) =
     relay_client.receive_control(
       initial,
-      "{\"type\":\"credit\",\"protocol_version\":1,\"credits\":8,\"max_batch_events\":128}",
+      "{\"type\":\"credit\",\"protocol_version\":2,\"credits\":8,\"max_batch_events\":128}",
     )
   active
   |> should.equal(relay_client.Active(
@@ -113,7 +114,7 @@ pub fn relay_channel_rejects_data_before_credit_and_unbounded_controls_test() {
   |> should.equal(Error("awaiting_credit"))
   relay_client.receive_control(
     relay_client.initial_channel_state(),
-    "{\"type\":\"credit\",\"protocol_version\":1,\"credits\":1000001,\"max_batch_events\":128}",
+    "{\"type\":\"credit\",\"protocol_version\":2,\"credits\":1000001,\"max_batch_events\":128}",
   )
   |> should.equal(Error("invalid_control"))
   relay_client.receive_control(
@@ -121,6 +122,36 @@ pub fn relay_channel_rejects_data_before_credit_and_unbounded_controls_test() {
     string.repeat("x", 16_385),
   )
   |> should.equal(Error("control_frame_too_large"))
+}
+
+pub fn session_ack_is_versioned_and_must_match_the_durable_end_test() {
+  let end =
+    relay_session.End(
+      session_id: session_id(),
+      sequence: 3,
+      ended_at_ms: 2000,
+      completeness: relay_session.Complete,
+    )
+  let frame =
+    "{\"type\":\"session_ack\",\"protocol_version\":2,\"session_id\":\""
+    <> end.session_id
+    <> "\",\"sequence\":3,\"completeness\":\"complete\"}"
+  relay_client.receive_session_ack(frame, end) |> should.equal(Ok(True))
+  relay_client.receive_session_ack(
+    string.replace(frame, "\"sequence\":3", "\"sequence\":2"),
+    end,
+  )
+  |> should.equal(Error("invalid_session_ack"))
+  relay_client.receive_session_ack(
+    string.replace(frame, "\"protocol_version\":2", "\"protocol_version\":1"),
+    end,
+  )
+  |> should.equal(Error("invalid_session_ack"))
+  relay_client.receive_session_ack(
+    "{\"type\":\"credit\",\"protocol_version\":2,\"credits\":4,\"max_batch_events\":128}",
+    end,
+  )
+  |> should.equal(Ok(False))
 }
 
 fn event(id: String, term: types.TermView) -> types.TraceEvent {
@@ -144,7 +175,14 @@ pub fn credited_client_sends_validated_signed_event_batches_test() {
   let state = relay_client.Active(sequence: 4, credits: 1, max_batch_events: 2)
   let events = [event("one", types.Hidden), event("two", types.Hidden)]
   let assert Ok(#(frame, next)) =
-    relay_client.next_event_batch(state, identity, relay_channel.Exact, events)
+    relay_client.next_event_batch(
+      state,
+      identity,
+      session_id(),
+      1,
+      relay_channel.Exact,
+      events,
+    )
   next
   |> should.equal(relay_client.Active(
     sequence: 5,
@@ -154,7 +192,8 @@ pub fn credited_client_sends_validated_signed_event_batches_test() {
   let assert Ok(envelope) = relay_wire.decode_envelope(frame)
   let assert Ok(payload) =
     relay_wire.verify_envelope(identity.public_key, envelope, 4)
-  let assert Ok(decoded) = relay_payload.decode(payload)
+  let assert Ok(relay_session.Batch(_, 1, _, decoded)) =
+    relay_session.decode_message(payload)
   decoded.event_count |> should.equal(2)
   decoded.mode |> should.equal("exact")
 }
@@ -165,6 +204,8 @@ pub fn event_batches_require_credit_bounds_and_metadata_safety_test() {
   relay_client.next_event_batch(
     relay_client.initial_channel_state(),
     identity,
+    session_id(),
+    1,
     relay_channel.Live,
     [safe],
   )
@@ -172,6 +213,8 @@ pub fn event_batches_require_credit_bounds_and_metadata_safety_test() {
   relay_client.next_event_batch(
     relay_client.Active(0, 1, 1),
     identity,
+    session_id(),
+    1,
     relay_channel.Live,
     [safe, safe],
   )
@@ -179,6 +222,8 @@ pub fn event_batches_require_credit_bounds_and_metadata_safety_test() {
   relay_client.next_event_batch(
     relay_client.Active(0, 1, 1),
     identity,
+    session_id(),
+    1,
     relay_channel.Exact,
     [
       event(
@@ -208,6 +253,8 @@ pub fn credited_client_signs_raw_batches_only_with_the_granted_policy_test() {
     relay_client.next_raw_event_batch(
       state,
       identity,
+      session_id(),
+      1,
       relay_channel.Exact,
       grant,
       policy,
@@ -217,7 +264,8 @@ pub fn credited_client_signs_raw_batches_only_with_the_granted_policy_test() {
   let assert Ok(envelope) = relay_wire.decode_envelope(frame)
   let assert Ok(payload) =
     relay_wire.verify_envelope(identity.public_key, envelope, 8)
-  let assert Ok(decoded) = relay_payload.decode_for_ingest(payload)
+  let assert Ok(relay_session.Batch(_, 1, _, decoded)) =
+    relay_session.decode_message(payload)
   let assert relay_payload.RawBatch(received, received_policy) = decoded.privacy
   received |> should.equal(grant)
   received_policy |> should.equal(policy)
@@ -239,6 +287,8 @@ pub fn relay_rejects_one_oversized_encoded_event_and_splits_multi_event_prefixes
   relay_client.next_raw_event_batch(
     relay_client.Active(0, 1, 128),
     identity,
+    session_id(),
+    1,
     relay_channel.Exact,
     grant,
     policy,
@@ -261,6 +311,8 @@ pub fn relay_rejects_one_oversized_encoded_event_and_splits_multi_event_prefixes
     relay_client.next_raw_event_prefix(
       relay_client.Active(0, 3, 128),
       identity,
+      session_id(),
+      1,
       relay_channel.Exact,
       grant,
       policy,
@@ -269,11 +321,16 @@ pub fn relay_rejects_one_oversized_encoded_event_and_splits_multi_event_prefixes
   let assert Ok(envelope) = relay_wire.decode_envelope(frame)
   let assert Ok(payload) =
     relay_wire.verify_envelope(identity.public_key, envelope, 0)
-  let assert Ok(decoded) = relay_payload.decode_for_ingest(payload)
+  let assert Ok(relay_session.Batch(_, 1, _, decoded)) =
+    relay_session.decode_message(payload)
   let sent_some = decoded.event_count > 0
   let left_some = decoded.event_count < 3
   sent_some |> should.be_true()
   left_some |> should.be_true()
   list.length(remaining) + decoded.event_count |> should.equal(3)
   let assert relay_client.Active(1, 2, 128) = next
+}
+
+fn session_id() -> String {
+  "00112233445566778899aabbccddeeff"
 }

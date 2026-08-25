@@ -14,6 +14,7 @@ if (-not $workRoot.StartsWith($buildRoot + [IO.Path]::DirectorySeparatorChar, [S
 
 $fixtureRoot = Join-Path $workRoot 'fixture'
 $tracePath = Join-Path $workRoot 'record.beamtrace'
+$gleamTracePath = Join-Path $workRoot 'record-gleam.beamtrace'
 $jsonlPath = Join-Path $workRoot 'record.jsonl'
 $inspectRoot = Join-Path $workRoot 'inspect'
 $previousCleanupAssertion = $env:BEAMTRACE_RECORD_ASSERT_CLEANUP
@@ -25,6 +26,30 @@ if (-not [string]::IsNullOrWhiteSpace($Launcher)) {
     }
 }
 $erlCommand = (Get-Command erl -ErrorAction Stop).Source
+
+function Invoke-CheckedBeamTrace {
+    param(
+        [Parameter(Mandatory)][string[]]$Arguments,
+        [Parameter(Mandatory)][string]$Description
+    )
+
+    $output = if ($null -eq $resolvedLauncher) {
+        (& (Join-Path $PSScriptRoot 'beamtrace.ps1') -BeamTraceArguments $Arguments 2>&1 | Out-String)
+    }
+    else {
+        (& $resolvedLauncher @Arguments 2>&1 | Out-String)
+    }
+    $status = $LASTEXITCODE
+    if (-not [string]::IsNullOrEmpty($output)) {
+        Write-Host $output.TrimEnd()
+    }
+    if ($status -ne 0) {
+        throw "$Description failed with exit code $status."
+    }
+    if ($output -match '(?im)^(escript:\s+Internal error:|Runtime terminating during boot|=CRASH REPORT====|=ERROR REPORT====|=SUPERVISOR REPORT====)') {
+        throw "$Description emitted an internal BEAM failure despite exiting successfully."
+    }
+}
 
 New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
 try {
@@ -43,15 +68,9 @@ try {
         '--trigger', 'beamtrace_agent_fixture:filtered_trigger/1',
         '--out', $tracePath.Replace('\', '/'),
         '--', $erlCommand, '-noshell', '-pa', $fixtureRoot.Replace('\', '/'),
-        '-eval', $expression, '-s', 'init', 'stop'
+        '-eval', $expression
     )
-    if ($null -eq $resolvedLauncher) {
-        & (Join-Path $PSScriptRoot 'beamtrace.ps1') -BeamTraceArguments $recordArguments
-    }
-    else {
-        & $resolvedLauncher @recordArguments
-    }
-    if ($LASTEXITCODE -ne 0) { throw "Record dogfood failed with exit code $LASTEXITCODE." }
+    Invoke-CheckedBeamTrace -Arguments $recordArguments -Description 'Direct Erlang record dogfood'
     if (-not (Test-Path -LiteralPath $tracePath -PathType Leaf)) {
         throw 'Record dogfood did not produce a trace archive.'
     }
@@ -59,13 +78,8 @@ try {
     $exportArguments = @(
         'export', $tracePath.Replace('\', '/'), '--format', 'jsonl'
     )
-    if ($null -eq $resolvedLauncher) {
-        & (Join-Path $PSScriptRoot 'beamtrace.ps1') -BeamTraceArguments $exportArguments
-    }
-    else {
-        & $resolvedLauncher @exportArguments
-    }
-    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $jsonlPath -PathType Leaf)) {
+    Invoke-CheckedBeamTrace -Arguments $exportArguments -Description 'Record dogfood JSONL export'
+    if (-not (Test-Path -LiteralPath $jsonlPath -PathType Leaf)) {
         throw 'Record dogfood JSONL export failed.'
     }
 
@@ -89,7 +103,52 @@ try {
         throw 'Record dogfood archive is incomplete or not metadata-only.'
     }
 
-    Write-Host "Record dogfood passed: $($events.Count) events, complete, metadata-only, cleanup verified in target VM."
+    $gleamCommand = (Get-Command gleam -ErrorAction Stop).Source
+    if ($null -ne $resolvedLauncher) {
+        Push-Location (Join-Path $repoRoot 'packages/beamtrace_runtime')
+        try {
+            & $gleamCommand clean
+            if ($LASTEXITCODE -ne 0) {
+                throw "Could not clean the Gleam wrapper fixture, exit code $LASTEXITCODE."
+            }
+        }
+        finally {
+            Pop-Location
+        }
+    }
+    $gleamRecordArguments = @(
+        'record',
+        '--trigger', 'beamtrace_demo_fixture:run/0',
+        '--out', $gleamTracePath.Replace('\', '/'),
+        '--', $gleamCommand, 'run', '--no-print-progress', '-m', 'beamtrace_record_fixture'
+    )
+    Push-Location (Join-Path $repoRoot 'packages/beamtrace_runtime')
+    try {
+        Invoke-CheckedBeamTrace -Arguments $gleamRecordArguments -Description 'Gleam-wrapper record dogfood'
+    }
+    finally {
+        Pop-Location
+    }
+    if (-not (Test-Path -LiteralPath $gleamTracePath -PathType Leaf)) {
+        throw 'Gleam-wrapper record dogfood did not produce a trace archive.'
+    }
+    $gleamInspectRoot = Join-Path $workRoot 'inspect-gleam'
+    Expand-Archive -LiteralPath $gleamTracePath -DestinationPath $gleamInspectRoot -Force
+    $gleamManifest = Get-Content -Raw -LiteralPath (Join-Path $gleamInspectRoot 'manifest.json') | ConvertFrom-Json
+    $gleamEventLines = @(
+        Get-ChildItem -LiteralPath (Join-Path $gleamInspectRoot 'events') -File -Filter '*.ndjson' |
+            Sort-Object Name |
+            Get-Content
+    )
+    if (
+        $gleamManifest.completeness.kind -ne 'complete' -or
+        $gleamManifest.privacy.kind -ne 'metadata' -or
+        $gleamEventLines.Count -lt 1
+    ) {
+        throw 'Gleam-wrapper record dogfood archive is empty, incomplete, or not metadata-only.'
+    }
+
+    Write-Host "Record dogfood passed: direct erl and gleam run/shim captures are complete, metadata-only, and cleanup-verified."
 }
 finally {
     $env:BEAMTRACE_RECORD_ASSERT_CLEANUP = $previousCleanupAssertion

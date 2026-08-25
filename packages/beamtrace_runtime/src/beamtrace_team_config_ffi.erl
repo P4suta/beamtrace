@@ -26,6 +26,7 @@ environment_pairs() ->
         {<<"project">>, "BEAMTRACE_PROJECT"},
         {<<"environment">>, "BEAMTRACE_ENVIRONMENT"},
         {<<"retention_days">>, "BEAMTRACE_RETENTION_DAYS"},
+        {<<"raw_retention_days">>, "BEAMTRACE_RAW_RETENTION_DAYS"},
         {<<"relay_max_events">>, "BEAMTRACE_RELAY_MAX_EVENTS"},
         {<<"relay_max_bytes">>, "BEAMTRACE_RELAY_MAX_BYTES"},
         {<<"enrollment_ttl_ms">>, "BEAMTRACE_ENROLLMENT_TTL_MS"},

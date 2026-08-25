@@ -9,6 +9,32 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $buildDir = Join-Path $repoRoot ".build/agent-$Distribution"
 New-Item -ItemType Directory -Path $buildDir -Force | Out-Null
+$runtimeRoot = Join-Path $repoRoot 'packages/beamtrace_runtime'
+
+Push-Location $runtimeRoot
+try {
+    & gleam build --target erlang
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+finally {
+    Pop-Location
+}
+
+$runtimeCodePaths = @(
+    Get-ChildItem -LiteralPath (Join-Path $runtimeRoot 'build/dev/erlang') -Directory |
+        ForEach-Object { Join-Path $_.FullName 'ebin' } |
+        Where-Object { Test-Path -LiteralPath $_ -PathType Container }
+)
+foreach ($requiredModule in @(
+    'beamtrace_runtime@credit_policy.beam',
+    'beamtrace_runtime@crypto.beam'
+)) {
+    if (-not ($runtimeCodePaths | Where-Object {
+        Test-Path -LiteralPath (Join-Path $_ $requiredModule) -PathType Leaf
+    })) {
+        throw "Runtime dependency module was not built for the agent tests: $requiredModule"
+    }
+}
 
 $sources = @(
     (Join-Path $repoRoot 'agent\src\beamtrace_agent.erl'),
@@ -63,7 +89,9 @@ try {
         $env:ERL_AFLAGS = "-proto_dist inet_tls -ssl_dist_optfile $tlsConfigPath"
     }
 
-    & erl -noshell @nameArguments -setcookie beamtrace_test_cookie -pa $buildDir -eval 'case eunit:test([beamtrace_agent_tests, beamtrace_relay_tests, beamtrace_capture_tests, beamtrace_live_tests, beamtrace_distributed_tests], [verbose]) of ok -> halt(0); _ -> halt(1) end.'
+    & erl -noshell @nameArguments -setcookie beamtrace_test_cookie `
+        -pa $buildDir @runtimeCodePaths `
+        -eval 'case eunit:test([beamtrace_agent_tests, beamtrace_relay_tests, beamtrace_capture_tests, beamtrace_live_tests, beamtrace_distributed_tests], [verbose]) of ok -> halt(0); _ -> halt(1) end.'
     exit $LASTEXITCODE
 }
 finally {

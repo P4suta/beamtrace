@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import etui/keys
+import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
@@ -9,6 +10,20 @@ pub type Screen {
   CaptureScreen
   LiveScreen
   AnomalyScreen
+  TraceLibraryScreen
+}
+
+pub type TeamTrace {
+  TeamTrace(
+    id: String,
+    status: String,
+    node: String,
+    mfa: String,
+    privacy: String,
+    event_count: Int,
+    received_at_ms: Int,
+    locked: Bool,
+  )
 }
 
 pub type Focus {
@@ -60,6 +75,8 @@ pub type Model {
     live_events: List(Event),
     live_generation: Int,
     live_summary: String,
+    team_traces: List(TeamTrace),
+    selected_trace: Int,
   )
 }
 
@@ -72,6 +89,7 @@ pub type Msg {
   OpenWeb
   OpenCapture
   OpenLive
+  OpenTraceLibrary
   AttachSubmitted(String)
   AttachAccepted(String)
   AttachFailed(String)
@@ -89,6 +107,8 @@ pub type Msg {
   DismissNotice
   LiveUpdated(events: List(Event), generation: Int, summary: String)
   LiveFailed(String)
+  TeamTracesUpdated(List(TeamTrace))
+  TraceSelected(Int)
 }
 
 pub fn init(events: List(Event)) -> Model {
@@ -111,6 +131,8 @@ pub fn init(events: List(Event)) -> Model {
     live_events: [],
     live_generation: 0,
     live_summary: "Waiting for bounded process samples",
+    team_traces: [],
+    selected_trace: 0,
   )
 }
 
@@ -141,10 +163,18 @@ pub fn attached(events: List(Event), node: String) -> Model {
 pub fn remote(events: List(Event), server_url: String) -> Model {
   Model(
     ..init(events),
-    screen: LiveScreen,
+    screen: TraceLibraryScreen,
     focus: NormalFocus,
-    notice: "Server " <> server_url,
+    notice: "Team trace library · " <> server_url,
   )
+}
+
+pub fn remote_with_traces(
+  events: List(Event),
+  server_url: String,
+  traces: List(TeamTrace),
+) -> Model {
+  Model(..remote(events, server_url), team_traces: list.take(traces, 100))
 }
 
 pub fn update(model: Model, message: Msg) -> Model {
@@ -162,6 +192,8 @@ pub fn update(model: Model, message: Msg) -> Model {
       )
     OpenCapture -> Model(..model, screen: CaptureScreen, focus: NormalFocus)
     OpenLive -> Model(..model, screen: LiveScreen, focus: NormalFocus)
+    OpenTraceLibrary ->
+      Model(..model, screen: TraceLibraryScreen, focus: NormalFocus)
     AttachSubmitted(node) ->
       Model(
         ..model,
@@ -249,6 +281,16 @@ pub fn update(model: Model, message: Msg) -> Model {
       )
     LiveFailed(reason) ->
       Model(..model, live_summary: "Live unavailable · " <> reason)
+    TeamTracesUpdated(traces) ->
+      Model(..model, team_traces: list.take(traces, 100), selected_trace: 0)
+    TraceSelected(index) -> select_trace(model, index)
+  }
+}
+
+pub fn selected_team_trace(model: Model) -> Option(TeamTrace) {
+  case list.drop(model.team_traces, model.selected_trace) {
+    [trace, ..] -> Some(trace)
+    [] -> None
   }
 }
 
@@ -292,6 +334,7 @@ pub fn key_to_message(key: String) -> Option(Msg) {
     "w" -> Some(OpenWeb)
     "c" -> Some(OpenCapture)
     "l" -> Some(OpenLive)
+    "t" -> Some(OpenTraceLibrary)
     _ -> None
   }
 }
@@ -373,12 +416,34 @@ fn handle_save_key(model: Model, key: keys.Key) -> Model {
 fn handle_normal_key(model: Model, key: keys.Key) -> Model {
   case key {
     keys.Char("q") | keys.Ctrl("c") -> Model(..model, quit: True)
+    keys.Up -> select_trace(model, model.selected_trace - 1)
+    keys.Down -> select_trace(model, model.selected_trace + 1)
+    keys.Enter -> open_selected_trace(model)
     keys.Char(value) ->
       case key_to_message(value) {
         Some(message) -> update(model, message)
         None -> model
       }
     _ -> model
+  }
+}
+
+fn select_trace(model: Model, requested: Int) -> Model {
+  case model.screen, list.length(model.team_traces) {
+    TraceLibraryScreen, count if count > 0 ->
+      Model(..model, selected_trace: int.clamp(requested, 0, count - 1))
+    _, _ -> model
+  }
+}
+
+fn open_selected_trace(model: Model) -> Model {
+  case model.screen, selected_team_trace(model) {
+    TraceLibraryScreen, Some(trace) ->
+      Model(..model, notice: case trace.locked {
+        True -> "Trace " <> trace.id <> " is locked by raw-trace policy"
+        False -> "Selected trace " <> trace.id
+      })
+    _, _ -> model
   }
 }
 

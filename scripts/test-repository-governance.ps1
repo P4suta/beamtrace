@@ -82,7 +82,7 @@ if (-not $webAcceptance.Contains('npm run test:property')) {
 }
 
 $coreConfig = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_core/gleam.toml')
-if (-not $coreConfig.Contains('qcheck = "1.0.4"')) {
+if (-not $coreConfig.Contains('qcheck = "1.0.5"')) {
     throw 'qcheck must be an exact core dev dependency for reproducible property tests.'
 }
 foreach ($marker in @('[repository]', 'type = "github"', 'user = "P4suta"', 'repo = "beamtrace"', 'path = "packages/beamtrace_core"')) {
@@ -103,13 +103,39 @@ foreach ($relative in @('LICENSES/Apache-2.0.txt', 'LICENSES/MIT.txt')) {
     }
 }
 $coreLock = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_core/manifest.toml')
-if (-not $coreLock.Contains('name = "qcheck", version = "1.0.4"')) {
+if (-not $coreLock.Contains('name = "qcheck", version = "1.0.5"')) {
     throw 'The core lockfile does not preserve the exact qcheck version.'
 }
 $corePropertyTest = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_core/test/dag_property_test.gleam')
 foreach ($marker in @('import qcheck', 'qcheck.run', 'test_count: 2000', 'dag.is_acyclic')) {
     if (-not $corePropertyTest.Contains($marker)) {
         throw "The causal DAG property test is missing: $marker"
+    }
+}
+
+$runtimeConfig = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_runtime/gleam.toml')
+foreach ($dependency in @('tom = "2.1.0"', 'gleam_crypto = "1.6.0"')) {
+    if (-not $runtimeConfig.Contains($dependency)) {
+        throw "The runtime dependency must remain exact: $dependency"
+    }
+}
+$runtimeLock = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packages/beamtrace_runtime/manifest.toml')
+foreach ($dependency in @(
+    'name = "tom", version = "2.1.0"',
+    'name = "gleam_crypto", version = "1.6.0"'
+)) {
+    if (-not $runtimeLock.Contains($dependency)) {
+        throw "The runtime lockfile does not preserve the exact dependency: $dependency"
+    }
+}
+
+$hexAcceptance = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'scripts/test-hex-package.ps1')
+foreach ($marker in @(
+    'ghcr.io/gleam-lang/gleam:v1.18.1-erlang-alpine@sha256:',
+    '''--user'', "${hostUid}:${hostGid}"'
+)) {
+    if (-not $hexAcceptance.Contains($marker)) {
+        throw "The Hex container boundary is not reproducible and host-ownership safe: $marker"
     }
 }
 
@@ -232,9 +258,15 @@ if (
     throw 'Release PR artifact generation is not guarded by its candidate gate.'
 }
 $configure = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'scripts/configure-github.ps1')
-foreach ($marker in @('googleapis/release-please-action@*', 'environments/release-automation/variables', 'RELEASE_PLEASE_APP_CLIENT_ID')) {
+foreach ($marker in @('googleapis/release-please-action@*', 'environments/release-automation/variables', 'RELEASE_PLEASE_APP_CLIENT_ID', 'repos/$Repository/immutable-releases')) {
     if (-not $configure.Contains($marker)) {
         throw "Remote release governance configuration is missing: $marker"
+    }
+}
+$audit = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'scripts/audit-github.ps1')
+foreach ($marker in @('repos/$Repository/immutable-releases', 'Immutable releases are disabled')) {
+    if (-not $audit.Contains($marker)) {
+        throw "Remote release governance audit is missing: $marker"
     }
 }
 

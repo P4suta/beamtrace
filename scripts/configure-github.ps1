@@ -86,6 +86,7 @@ $repositorySettings = [ordered]@{
     }
 }
 Invoke-GitHubApi -Method PATCH -Endpoint "repos/$Repository" -Body $repositorySettings | Out-Null
+Invoke-GitHubApi -Method PUT -Endpoint "repos/$Repository/immutable-releases" | Out-Null
 
 $topics = @(
     'beam', 'causal-tracing', 'debugging', 'distributed-tracing', 'elixir',

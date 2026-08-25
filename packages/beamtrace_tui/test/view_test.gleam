@@ -53,3 +53,80 @@ pub fn headless_live_render_uses_sampled_processes_and_inference_evidence_test()
   ansi |> string.contains("Inferred 80%") |> should.be_true()
   ansi |> string.contains("supervision 1") |> should.be_true()
 }
+
+pub fn responsive_layout_uses_three_two_and_one_real_panels_test() {
+  let state =
+    model.attached(
+      [model.Event("event-responsive", "worker", "send", "Exact", 1, False)],
+      "app@localhost",
+    )
+  let wide =
+    view.render(state, geometry.rect_new(0, 0, 100, 24))
+    |> buffer.to_ansi
+  wide |> string.contains("NODE / SESSION") |> should.be_true()
+  wide |> string.contains("EVENT / ACTIONS") |> should.be_true()
+  wide |> string.contains("event-responsive") |> should.be_true()
+
+  let medium =
+    view.render(state, geometry.rect_new(0, 0, 72, 24))
+    |> buffer.to_ansi
+  medium |> string.contains("NODE / SESSION") |> should.be_false()
+  medium |> string.contains("EVENT / ACTIONS") |> should.be_true()
+  medium |> string.contains("event-responsive") |> should.be_true()
+
+  let narrow =
+    view.render(state, geometry.rect_new(0, 0, 71, 24))
+    |> buffer.to_ansi
+  narrow |> string.contains("NODE / SESSION") |> should.be_false()
+  narrow |> string.contains("EVENT / ACTIONS") |> should.be_false()
+  narrow |> string.contains("event-responsive") |> should.be_true()
+}
+
+pub fn event_rows_use_cell_aware_truncation_for_cjk_and_emoji_test() {
+  let actor = "注文😀注文😀注文😀注文😀注文😀注文😀注文😀注文😀"
+  let state =
+    model.attached(
+      [model.Event("wide-event", actor, "送信 combining-é", "Exact", 1, False)],
+      "app@localhost",
+    )
+  let ansi =
+    view.render(state, geometry.rect_new(0, 0, 72, 20))
+    |> buffer.to_ansi
+
+  ansi |> string.contains("wide-event") |> should.be_true()
+  ansi |> string.contains("…") |> should.be_true()
+  ansi |> string.contains(actor) |> should.be_false()
+}
+
+pub fn team_trace_selector_shows_locked_rows_and_selection_test() {
+  let traces = [
+    model.TeamTrace(
+      "trace-metadata",
+      "complete",
+      "app@host",
+      "shop:checkout/1",
+      "metadata",
+      12,
+      1000,
+      False,
+    ),
+    model.TeamTrace(
+      "trace-raw",
+      "incomplete",
+      "worker@host",
+      "orders:run/0",
+      "raw",
+      3,
+      2000,
+      True,
+    ),
+  ]
+  let state = model.remote_with_traces([], "https://hub.example", traces)
+  let ansi =
+    view.render(state, geometry.rect_new(0, 0, 100, 24))
+    |> buffer.to_ansi
+  ansi |> string.contains("TRACE LIBRARY") |> should.be_true()
+  ansi |> string.contains("trace-metadata") |> should.be_true()
+  ansi |> string.contains("trace-raw") |> should.be_true()
+  ansi |> string.contains("🔒") |> should.be_true()
+}

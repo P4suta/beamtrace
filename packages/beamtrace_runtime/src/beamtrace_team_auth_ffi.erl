@@ -39,7 +39,7 @@ close(Store) when is_reference(Store) ->
     catch error:badarg -> nil
     end.
 
-hash(Value) -> crypto:hash(sha256, Value).
+hash(Value) -> 'beamtrace_runtime@crypto':sha256(Value).
 
 random_token(Bytes) ->
-    base64:encode(crypto:strong_rand_bytes(Bytes), #{mode => urlsafe, padding => false}).
+    'beamtrace_runtime@crypto':random_base64url(Bytes).

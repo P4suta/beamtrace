@@ -113,20 +113,75 @@ pub fn persist_events_classified_with(
   received_at_ms: Int,
   event_count event_count: Int,
 ) -> Result(team_store.RelayFrameIndex, String) {
+  persist_classified_with(
+    store,
+    backend,
+    "legacy-" <> relay_id,
+    relay_id,
+    sequence,
+    mode,
+    privacy,
+    payload,
+    received_at_ms,
+    event_count: event_count,
+    trace_session: False,
+  )
+}
+
+pub fn persist_session_events_classified_with(
+  store: team_store.Store,
+  backend: blob_store.Backend,
+  session_id: String,
+  relay_id: String,
+  sequence: Int,
+  mode: Mode,
+  privacy: relay_inbox.Privacy,
+  payload: String,
+  received_at_ms: Int,
+  event_count event_count: Int,
+) -> Result(team_store.RelayFrameIndex, String) {
+  persist_classified_with(
+    store,
+    backend,
+    session_id,
+    relay_id,
+    sequence,
+    mode,
+    privacy,
+    payload,
+    received_at_ms,
+    event_count: event_count,
+    trace_session: True,
+  )
+}
+
+fn persist_classified_with(
+  store: team_store.Store,
+  backend: blob_store.Backend,
+  session_id: String,
+  relay_id: String,
+  sequence: Int,
+  mode: Mode,
+  privacy: relay_inbox.Privacy,
+  payload: String,
+  received_at_ms: Int,
+  event_count event_count: Int,
+  trace_session trace_session: Bool,
+) -> Result(team_store.RelayFrameIndex, String) {
   case valid_input(relay_id, sequence, event_count, received_at_ms) {
     False -> Error("invalid_relay_frame")
     True -> {
-      let key =
-        "relays/"
-        <> relay_id
-        <> "/frames/"
-        <> int.to_string(sequence)
-        <> ".json"
+      let prefix = case trace_session {
+        True -> "sessions/" <> session_id <> "/events/"
+        False -> "relays/" <> relay_id <> "/frames/"
+      }
+      let key = prefix <> int.to_string(sequence) <> ".json"
       case blob_store.put_with(backend, key, payload) {
         Error(error) -> Error(error)
         Ok(blob) -> {
           let frame =
             team_store.RelayFrameIndex(
+              session_id: session_id,
               relay_id: relay_id,
               sequence: sequence,
               received_at_ms: received_at_ms,
@@ -137,13 +192,39 @@ pub fn persist_events_classified_with(
               bytes: blob.bytes,
               sha256: blob.sha256,
             )
-          case team_store.put_relay_frame(store, frame) {
-            Ok(Nil) -> Ok(frame)
-            Error(error) -> Error(error)
+          let indexed = case trace_session {
+            True -> team_store.put_trace_frame(store, frame)
+            False ->
+              team_store.put_relay_frame(store, frame)
+              |> map_index_result(frame)
+          }
+          case indexed {
+            Ok(saved) -> Ok(saved)
+            Error(error) -> {
+              // A same-content retry may have returned an already indexed
+              // immutable object. Only roll back an object created by this
+              // attempt; deleting a pre-existing one would corrupt the
+              // durable frame that owns it.
+              let _ = case blob.created {
+                True -> blob_store.delete_with(backend, blob.key)
+                False -> Ok(Nil)
+              }
+              Error(error)
+            }
           }
         }
       }
     }
+  }
+}
+
+fn map_index_result(
+  result: Result(Nil, String),
+  frame: team_store.RelayFrameIndex,
+) -> Result(team_store.RelayFrameIndex, String) {
+  case result {
+    Ok(Nil) -> Ok(frame)
+    Error(error) -> Error(error)
   }
 }
 
@@ -194,6 +275,171 @@ pub fn prune_before_with(
               Ok(PruneResult(..result, more: list.length(frames) > limit))
           }
         }
+      }
+  }
+}
+
+pub fn prune_sessions_before_with(
+  store: team_store.Store,
+  backend: blob_store.Backend,
+  metadata_cutoff_ms metadata_cutoff_ms: Int,
+  raw_cutoff_ms raw_cutoff_ms: Int,
+  limit limit: Int,
+) -> Result(PruneResult, String) {
+  case limit > 0 && limit <= 1000 {
+    False -> Error("invalid_retention_window")
+    True ->
+      drain_retention_queue(
+        store,
+        backend,
+        metadata_cutoff_ms,
+        raw_cutoff_ms,
+        limit,
+      )
+  }
+}
+
+fn drain_retention_queue(
+  store: team_store.Store,
+  backend: blob_store.Backend,
+  metadata_cutoff_ms: Int,
+  raw_cutoff_ms: Int,
+  limit: Int,
+) -> Result(PruneResult, String) {
+  case team_store.retention_blob_deletions(store, limit: limit + 1) {
+    Error(error) -> Error(error)
+    Ok(queued) -> {
+      let selected = list.take(queued, limit)
+      case delete_retention_blobs(store, backend, selected, 0, 0) {
+        Error(error) -> Error(error)
+        Ok(#(deleted_frames, deleted_bytes)) ->
+          case list.length(queued) > limit {
+            True -> Ok(PruneResult(deleted_frames, deleted_bytes, True))
+            False ->
+              prune_expired_trace_sessions(
+                store,
+                backend,
+                metadata_cutoff_ms,
+                raw_cutoff_ms,
+                limit,
+                deleted_frames,
+                deleted_bytes,
+              )
+          }
+      }
+    }
+  }
+}
+
+fn prune_expired_trace_sessions(
+  store: team_store.Store,
+  backend: blob_store.Backend,
+  metadata_cutoff_ms: Int,
+  raw_cutoff_ms: Int,
+  limit: Int,
+  deleted_frames: Int,
+  deleted_bytes: Int,
+) -> Result(PruneResult, String) {
+  case
+    team_store.expired_trace_sessions(
+      store,
+      metadata_cutoff_ms: metadata_cutoff_ms,
+      raw_cutoff_ms: raw_cutoff_ms,
+      limit: limit + 1,
+    )
+  {
+    Error(error) -> Error(error)
+    Ok(sessions) -> {
+      let selected = list.take(sessions, limit)
+      case
+        prune_trace_sessions(
+          store,
+          backend,
+          selected,
+          deleted_frames,
+          deleted_bytes,
+        )
+      {
+        Error(error) -> Error(error)
+        Ok(result) ->
+          Ok(PruneResult(..result, more: list.length(sessions) > limit))
+      }
+    }
+  }
+}
+
+fn prune_trace_sessions(
+  store: team_store.Store,
+  backend: blob_store.Backend,
+  sessions: List(team_store.TraceSession),
+  deleted_frames: Int,
+  deleted_bytes: Int,
+) -> Result(PruneResult, String) {
+  case sessions {
+    [] -> Ok(PruneResult(deleted_frames, deleted_bytes, False))
+    [session, ..rest] ->
+      case
+        team_store.prepare_expired_trace_session_deletion(store, session.id)
+      {
+        Error("trace_retention_protected") ->
+          prune_trace_sessions(
+            store,
+            backend,
+            rest,
+            deleted_frames,
+            deleted_bytes,
+          )
+        Error(error) -> Error(error)
+        Ok(blobs) ->
+          case
+            delete_retention_blobs(
+              store,
+              backend,
+              blobs,
+              deleted_frames,
+              deleted_bytes,
+            )
+          {
+            Error(error) -> Error(error)
+            Ok(#(next_frames, next_bytes)) ->
+              prune_trace_sessions(
+                store,
+                backend,
+                rest,
+                next_frames,
+                next_bytes,
+              )
+          }
+      }
+  }
+}
+
+fn delete_retention_blobs(
+  store: team_store.Store,
+  backend: blob_store.Backend,
+  blobs: List(team_store.RetentionBlob),
+  deleted_frames: Int,
+  deleted_bytes: Int,
+) -> Result(#(Int, Int), String) {
+  case blobs {
+    [] -> Ok(#(deleted_frames, deleted_bytes))
+    [blob, ..rest] ->
+      case blob_store.delete_with(backend, blob.blob_key) {
+        Error(error) -> Error(error)
+        Ok(Nil) ->
+          case
+            team_store.complete_retention_blob_deletion(store, blob.blob_key)
+          {
+            Error(error) -> Error(error)
+            Ok(Nil) ->
+              delete_retention_blobs(
+                store,
+                backend,
+                rest,
+                deleted_frames + 1,
+                deleted_bytes + blob.bytes,
+              )
+          }
       }
   }
 }

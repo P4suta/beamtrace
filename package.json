@@ -3,9 +3,11 @@
   "private": true,
   "scripts": {
     "test:e2e": "playwright test",
+    "test:mcp": "node --test tests/mcp/*.test.mjs",
     "test:property": "node --test tests/property/*.test.js"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
     "@axe-core/playwright": "4.13.0",
     "@playwright/test": "1.62.1",
     "fast-check": "4.9.0"

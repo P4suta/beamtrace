@@ -12,9 +12,9 @@ pub type AppendStatus {
   Truncated(reason: String)
 }
 
-/// Privacy is stored beside each payload so authorization can be decided
-/// without decoding or returning the payload. Unknown is the conservative
-/// classification for frames written before this field existed.
+/// Privacy is persisted beside every relay payload so authorization can be
+/// decided without decoding or returning the payload itself. Unknown is the
+/// conservative classification for data written before this field existed.
 pub type Privacy {
   Metadata
   Raw
@@ -43,6 +43,33 @@ pub fn append(
   payload: String,
   received_at_ms: Int,
 ) -> Result(AppendStatus, String)
+
+/// Session-scoped v2 queues use the immutable 128-bit session id as their
+/// independent budget key. The legacy relay-keyed API remains migration-only.
+pub fn append_session(
+  store: Store,
+  session_id: String,
+  sequence: Int,
+  mode: Mode,
+  privacy: Privacy,
+  payload: String,
+  received_at_ms: Int,
+) -> Result(AppendStatus, String) {
+  append(store, session_id, sequence, mode, privacy, payload, received_at_ms)
+}
+
+pub fn session_snapshot(store: Store, session_id: String) -> List(Entry) {
+  snapshot(store, session_id)
+}
+
+pub fn session_window(
+  store: Store,
+  session_id: String,
+  start start: Int,
+  limit limit: Int,
+) -> Result(Window, String) {
+  window(store, session_id, start:, limit:)
+}
 
 @external(erlang, "beamtrace_relay_inbox_ffi", "snapshot")
 pub fn snapshot(store: Store, relay_id: String) -> List(Entry)

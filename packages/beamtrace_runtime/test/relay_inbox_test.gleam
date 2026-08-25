@@ -19,7 +19,7 @@ pub fn exact_inbox_truncates_without_replacing_accepted_frames_test() {
     "relay-1",
     2,
     relay_inbox.Exact,
-    relay_inbox.Raw,
+    relay_inbox.Metadata,
     "two",
     1001,
   )
@@ -29,7 +29,7 @@ pub fn exact_inbox_truncates_without_replacing_accepted_frames_test() {
     "relay-1",
     3,
     relay_inbox.Exact,
-    relay_inbox.Unknown,
+    relay_inbox.Metadata,
     "three",
     1002,
   )
@@ -38,7 +38,7 @@ pub fn exact_inbox_truncates_without_replacing_accepted_frames_test() {
   relay_inbox.snapshot(store, "relay-1")
   |> should.equal([
     relay_inbox.Payload(1, relay_inbox.Metadata, "one", 1000),
-    relay_inbox.Payload(2, relay_inbox.Raw, "two", 1001),
+    relay_inbox.Payload(2, relay_inbox.Metadata, "two", 1001),
   ])
   relay_inbox.close(store)
 }
@@ -50,7 +50,7 @@ pub fn live_inbox_drops_oldest_and_surfaces_an_explicit_gap_test() {
     "relay-live",
     1,
     relay_inbox.Live,
-    relay_inbox.Metadata,
+    relay_inbox.Raw,
     "one",
     1000,
   )
@@ -70,7 +70,7 @@ pub fn live_inbox_drops_oldest_and_surfaces_an_explicit_gap_test() {
     "relay-live",
     3,
     relay_inbox.Live,
-    relay_inbox.Unknown,
+    relay_inbox.Raw,
     "three",
     1002,
   )
@@ -80,7 +80,7 @@ pub fn live_inbox_drops_oldest_and_surfaces_an_explicit_gap_test() {
   |> should.equal([
     relay_inbox.Gap(1, "hub_inbox_budget", 1002),
     relay_inbox.Payload(2, relay_inbox.Raw, "two", 1001),
-    relay_inbox.Payload(3, relay_inbox.Unknown, "three", 1002),
+    relay_inbox.Payload(3, relay_inbox.Raw, "three", 1002),
   ])
   relay_inbox.close(store)
 }
@@ -92,7 +92,7 @@ pub fn inbox_rejects_invalid_identity_sequence_and_oversized_single_frame_test()
     "",
     1,
     relay_inbox.Exact,
-    relay_inbox.Metadata,
+    relay_inbox.Unknown,
     "one",
     1000,
   )
@@ -102,7 +102,7 @@ pub fn inbox_rejects_invalid_identity_sequence_and_oversized_single_frame_test()
     "relay-1",
     0,
     relay_inbox.Exact,
-    relay_inbox.Metadata,
+    relay_inbox.Unknown,
     "one",
     1000,
   )
@@ -112,7 +112,7 @@ pub fn inbox_rejects_invalid_identity_sequence_and_oversized_single_frame_test()
     "relay-1",
     1,
     relay_inbox.Exact,
-    relay_inbox.Metadata,
+    relay_inbox.Unknown,
     "12345",
     1000,
   )
@@ -137,7 +137,7 @@ pub fn inbox_window_is_ordered_bounded_and_reports_the_total_test() {
     "relay-page",
     2,
     relay_inbox.Exact,
-    relay_inbox.Raw,
+    relay_inbox.Metadata,
     "two",
     1001,
   )
@@ -147,7 +147,7 @@ pub fn inbox_window_is_ordered_bounded_and_reports_the_total_test() {
     "relay-page",
     3,
     relay_inbox.Exact,
-    relay_inbox.Unknown,
+    relay_inbox.Metadata,
     "three",
     1002,
   )
@@ -156,7 +156,7 @@ pub fn inbox_window_is_ordered_bounded_and_reports_the_total_test() {
   relay_inbox.window(store, "relay-page", start: 1, limit: 1)
   |> should.equal(
     Ok(relay_inbox.Window(
-      entries: [relay_inbox.Payload(2, relay_inbox.Raw, "two", 1001)],
+      entries: [relay_inbox.Payload(2, relay_inbox.Metadata, "two", 1001)],
       total: 3,
       start: 1,
       limit: 1,

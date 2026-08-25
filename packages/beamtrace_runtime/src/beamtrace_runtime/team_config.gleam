@@ -24,6 +24,7 @@ pub type Config {
     project: String,
     environment: String,
     retention_days: Int,
+    raw_retention_days: Int,
     relay_max_events: Int,
     relay_max_bytes: Int,
     enrollment_ttl_ms: Int,
@@ -121,6 +122,12 @@ pub fn resolve(source: Dict(String, String)) -> Result(Config, ConfigError) {
     "7",
     3650,
   ))
+  use raw_retention_days <- try_result(positive_integer(
+    source,
+    "raw_retention_days",
+    "1",
+    3650,
+  ))
   use relay_max_events <- try_result(positive_integer(
     source,
     "relay_max_events",
@@ -147,26 +154,31 @@ pub fn resolve(source: Dict(String, String)) -> Result(Config, ConfigError) {
   let data_dir = optional(source, "data_dir", "beamtrace-data")
   use Nil <- try_result(bounded("data_dir", data_dir, 4096))
 
-  Ok(Config(
-    bind: optional(source, "bind", "127.0.0.1"),
-    data_dir: data_dir,
-    port: port,
-    origin: trim_trailing_slash(origin),
-    authorization_endpoint: authorization_endpoint,
-    token_endpoint: token_endpoint,
-    issuer: issuer,
-    client_id: client_id,
-    redirect_uri: redirect_uri,
-    jwks_json: jwks_json,
-    group_roles: group_roles,
-    project: project,
-    environment: environment,
-    retention_days: retention_days,
-    relay_max_events: relay_max_events,
-    relay_max_bytes: relay_max_bytes,
-    enrollment_ttl_ms: enrollment_ttl_ms,
-    blob_backend: blob_backend,
-  ))
+  case raw_retention_days <= retention_days {
+    False -> Error(InvalidValue("raw_retention_days"))
+    True ->
+      Ok(Config(
+        bind: optional(source, "bind", "127.0.0.1"),
+        data_dir: data_dir,
+        port: port,
+        origin: trim_trailing_slash(origin),
+        authorization_endpoint: authorization_endpoint,
+        token_endpoint: token_endpoint,
+        issuer: issuer,
+        client_id: client_id,
+        redirect_uri: redirect_uri,
+        jwks_json: jwks_json,
+        group_roles: group_roles,
+        project: project,
+        environment: environment,
+        retention_days: retention_days,
+        raw_retention_days: raw_retention_days,
+        relay_max_events: relay_max_events,
+        relay_max_bytes: relay_max_bytes,
+        enrollment_ttl_ms: enrollment_ttl_ms,
+        blob_backend: blob_backend,
+      ))
+  }
 }
 
 fn reject_forbidden(source: Dict(String, String)) -> Result(Nil, ConfigError) {

@@ -18,6 +18,7 @@ pub type Batch {
     event_count: Int,
     canonical: String,
     privacy: BatchPrivacy,
+    events: List(types.TraceEvent),
   )
 }
 
@@ -106,6 +107,7 @@ pub fn decode_for_ingest(source: String) -> Result(Batch, String) {
             event_count: list.length(events),
             canonical: raw_canonical(mode, policy, events),
             privacy: RawBatch(grant, policy),
+            events: events,
           ))
         }
       }
@@ -125,7 +127,46 @@ fn finish_metadata(
     event_count: list.length(events),
     canonical: metadata_canonical(mode, events),
     privacy: MetadataBatch,
+    events: events,
   ))
+}
+
+/// Decode a payload already accepted and classified by the hub. Raw grant
+/// material is intentionally absent from the canonical stored representation.
+pub fn decode_stored(source: String, privacy: String) -> Result(Batch, String) {
+  use parts <- result_try(decode_batch_parts(source))
+  let #(
+    mode,
+    encoded_privacy,
+    _,
+    redact_keys,
+    max_depth,
+    max_binary_bytes,
+    encoded_events,
+  ) = parts
+  case privacy, encoded_privacy {
+    "metadata", "metadata" -> finish_metadata(mode, encoded_events)
+    "raw", "raw" -> {
+      let presented_policy =
+        types.RawPolicy(redact_keys, max_depth, max_binary_bytes)
+      let policy = raw_grant.normalize_policy(presented_policy)
+      case policy == presented_policy, valid_raw_policy(policy) {
+        False, _ | _, False -> Error("invalid_raw_policy")
+        True, True -> {
+          use events <- result_try(decode_events(encoded_events, []))
+          use Nil <- result_try(validate_raw_events(events, policy))
+          Ok(Batch(
+            mode: mode,
+            event_count: list.length(events),
+            canonical: raw_canonical(mode, policy, events),
+            privacy: RawBatch("", policy),
+            events: events,
+          ))
+        }
+      }
+    }
+    _, _ -> Error("privacy_mismatch")
+  }
 }
 
 fn valid_mode_and_size(

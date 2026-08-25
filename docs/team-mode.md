@@ -12,7 +12,7 @@ Set `BEAMTRACE_TEAM=1`, then provide:
 - `BEAMTRACE_OIDC_GROUP_ROLES`, for example `beam-viewers:viewer,beam-investigators:investigator,beam-raw:raw,beam-admins:admin`
 - `BEAMTRACE_PROJECT` and `BEAMTRACE_ENVIRONMENT`
 
-Optional bounded settings are `BEAMTRACE_RETENTION_DAYS`, `BEAMTRACE_RELAY_MAX_EVENTS`, `BEAMTRACE_RELAY_MAX_BYTES`, and `BEAMTRACE_ENROLLMENT_TTL_MS`. Client secrets, distribution cookies, and S3 credentials are rejected if supplied through BeamTrace configuration.
+Optional bounded settings are `BEAMTRACE_RETENTION_DAYS` (default 7), `BEAMTRACE_RAW_RETENTION_DAYS` (default 1 and never greater than metadata retention), `BEAMTRACE_RELAY_MAX_EVENTS`, `BEAMTRACE_RELAY_MAX_BYTES`, and `BEAMTRACE_ENROLLMENT_TTL_MS`. Client secrets, distribution cookies, and S3 credentials are rejected if supplied through BeamTrace configuration.
 
 At startup the hub prints a one-time relay enrollment code. Deliver it through an authenticated operational channel; it is consumed atomically when the relay's Ed25519 public key is committed.
 
@@ -44,7 +44,7 @@ beamtrace relay https://hub.example --enroll ENROLLMENT_CODE \
   --where 'message.tag == call' --cookie-file /run/secrets/beam.cookie
 ```
 
-The relay injects the bounded agent, captures one armed operation, sends batches only when it has hub credit, and reports success only after durable acknowledgement. Exact capture truncates instead of sampling when any budget is exhausted.
+The relay injects the bounded agent, captures one armed operation, opens a signed v2 session, and sends batches only when it has hub credit. It reports success only after the hub durably commits `session_end` and returns the matching `session_ack`. Exact capture truncates instead of sampling when any budget is exhausted. One relay owns at most one active session; the hub-wide default is 64. Disconnect without an end marks the session `incomplete`, and a reconnect may resume only with identical immutable metadata and idempotent sequence replays.
 
 ## Raw relay capture
 
@@ -69,8 +69,28 @@ Example request body:
 }
 ```
 
-Hard ceilings are 30 seconds, 100,000 events, 64 MB, depth 32, binary metadata 1 MiB, 128 redaction keys, and 128 events per relay batch. The grant is bound to one enrolled relay and its exact canonical policy. Event and byte consumption is reserved atomically, so replay, expiry, relay mismatch, policy drift, or exhaustion is denied generically.
+Hard ceilings are 30 seconds, 100,000 events, 64 MB, depth 32, binary metadata 1 MiB, 128 redaction keys, and 128 events per relay batch. The grant is bound to one enrolled relay and its exact canonical policy. Event and byte consumption is reserved atomically. An exact retry of an already durable session sequence is accepted without consuming the grant twice; a conflicting replay, expiry, relay mismatch, policy drift, or exhaustion is denied generically.
+
+## Team trace library
+
+The Web and TUI trace selectors use these bounded routes:
+
+- `GET /api/v1/traces` uses an opaque cursor, defaults to 50 rows, and accepts at most 100.
+- `GET /api/v1/traces/:id` returns status, node/MFA, privacy, completeness, event count, receive time, and hold state.
+- `GET /api/v1/traces/:id/events` returns at most 200 events.
+- `POST` and `DELETE /api/v1/traces/:id/hold` require Admin, an exact Origin, CSRF cookie/header agreement, and an audit write.
+
+The former `/api/v1/relays/:id/frames` representation is gone and returns
+`410 Gone`. Viewer, Investigator-only, and Raw-only sessions see raw or legacy
+`unknown` content as locked. Only Admin or the combined Investigator and Raw
+Capture roles can retrieve it. The server makes that decision before reading
+an in-memory value or fetching a filesystem/S3 blob, returns a whole-request
+`403` on denial, and audits allowed and denied reads.
+
+The browser uses its HttpOnly OIDC session cookie. For the native TUI, place the current session ID in a regular, non-empty `0600` file and run `beamtrace tui --server https://trace.example --session-cookie-file /secure/path/session`. The cookie value is never accepted directly on the command line. Non-TLS Team URLs are rejected except for loopback development origins.
 
 ## Shutdown and retention
 
-Disconnect, heartbeat timeout, capture timeout, or budget exhaustion destroys the owned trace session and compare-and-restores only BeamTrace-owned tracer state. Startup retention prunes expired relay frames and their filesystem or S3 blobs. Audit records and metadata follow the configured project/environment retention policy; external S3 lifecycle rules should be no shorter than the BeamTrace policy unless deliberate gaps are acceptable.
+SIGINT and SIGTERM stop capture, listeners, SQLite, and the selected blob backend. Disconnect, heartbeat timeout, capture timeout, or budget exhaustion compare-and-restores only BeamTrace-owned tracer state; a relay disconnect also persists the trace as `incomplete` rather than deleting evidence.
+
+Retention runs at startup and hourly using the hub's receive timestamp, not a relay-provided clock. Metadata defaults to seven days and raw to one day; raw retention cannot exceed metadata retention. Legal hold prevents BeamTrace from deleting data until an Admin removes it, and every hold change is audited. Pruning deletes validated filesystem or S3 blob keys and their indexes without touching held sessions. Do not apply an independent expiration rule to the configured S3 prefix: an external lifecycle rule cannot see SQLite legal holds and can permanently remove held evidence. If an operator deliberately permits external deletion, BeamTrace can preserve the held metadata and audit record but cannot promise that the corresponding events remain readable.
