@@ -91,3 +91,14 @@ pub fn signed_envelopes_are_bounded_tamper_evident_and_strictly_ordered_test() {
   relay_wire.decode_envelope(string.repeat("x", 1_114_113))
   |> should.equal(Error("frame_too_large"))
 }
+
+pub fn version_one_clients_receive_an_explicit_upgrade_error_test() {
+  relay_wire.decode_hello(
+    "{\"type\":\"hello\",\"protocol_version\":1,\"relay_id\":\"relay-old\",\"timestamp_ms\":0,\"nonce\":\"\",\"signature\":\"\"}",
+  )
+  |> should.equal(Error("upgrade_required"))
+  relay_wire.decode_envelope(
+    "{\"type\":\"message\",\"protocol_version\":1,\"sequence\":1,\"payload\":\"{}\",\"signature\":\"\"}",
+  )
+  |> should.equal(Error("upgrade_required"))
+}

@@ -8,10 +8,12 @@ pub fn immutable_blob_is_atomic_and_content_addressed_test() {
   let key = "sessions/session-blob-test/events/000001.ndjson"
   let payload = "{\"event\":1}\n"
 
+  blob_store.delete(root, key) |> should.equal(Ok(Nil))
   let assert Ok(stored) = blob_store.put(root, key, payload)
   stored.key |> should.equal(key)
   stored.bytes |> should.equal(string.byte_size(payload))
   stored.sha256 |> string.length |> should.equal(64)
+  stored.created |> should.be_true()
   blob_store.read(root, key) |> should.equal(Ok(payload))
   blob_store.read_verified(root, key, stored.sha256, stored.bytes)
   |> should.equal(Ok(payload))
@@ -26,7 +28,8 @@ pub fn immutable_blob_is_atomic_and_content_addressed_test() {
   |> should.equal(Error("blob_checksum_mismatch"))
 
   // A retry with the same bytes is idempotent, but an existing key is immutable.
-  blob_store.put(root, key, payload) |> should.equal(Ok(stored))
+  let assert Ok(replayed) = blob_store.put(root, key, payload)
+  replayed |> should.equal(blob_store.Blob(..stored, created: False))
   blob_store.put(root, key, "different")
   |> should.equal(Error("blob_conflict"))
 }

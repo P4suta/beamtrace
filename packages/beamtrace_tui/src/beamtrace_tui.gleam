@@ -39,6 +39,16 @@ pub fn run_remote(server_url: String) {
   run_model(session.unavailable(), model.remote([], server_url))
 }
 
+pub fn run_remote_with_traces(
+  server_url: String,
+  traces: List(model.TeamTrace),
+) {
+  run_model(
+    session.unavailable(),
+    model.remote_with_traces([], server_url, traces),
+  )
+}
+
 fn run_model(driver: session.Driver, initial: model.Model) {
   let _ =
     app.run_buffered(

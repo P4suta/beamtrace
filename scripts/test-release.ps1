@@ -21,6 +21,7 @@ foreach ($relative in @(
     'scripts/publish-hex.ps1',
     'scripts/verify-published-release.ps1',
     'scripts/build-distribution-metadata.ps1',
+    'packaging/archive-size-baselines.json',
     'packages/beamtrace_core/LICENSE'
 )) {
     if (-not (Test-Path -LiteralPath (Join-Path $repoRoot $relative) -PathType Leaf)) {
@@ -233,7 +234,7 @@ foreach ($marker in @(
     'runner: windows-latest',
     'runner: macos-15-intel',
     'runner: macos-15',
-    './scripts/package.ps1 -SkipTests',
+    './scripts/test-package.ps1',
     './scripts/test-hex-package.ps1',
     './scripts/test-oci.ps1 -Build',
     './scripts/build-distribution-metadata.ps1',
@@ -246,6 +247,25 @@ if ($candidate.Contains('types: [opened, synchronize, reopened, labeled]')) {
 }
 if ($candidate.Contains('runner: windows-11-arm')) {
     throw 'Release candidate workflow must not label an x64 Erlang runtime as native Windows ARM64.'
+}
+
+$archiveBaselines = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packaging/archive-size-baselines.json') | ConvertFrom-Json
+if (
+    $archiveBaselines.schema -ne 1 -or
+    $archiveBaselines.source_release -ne 'v0.1.0' -or
+    $archiveBaselines.maximum_growth_percent -ne 5
+) {
+    throw 'Native archive size baselines must remain tied to v0.1.0 with a 5% growth ceiling.'
+}
+$expectedArchiveTargets = @('linux-arm64', 'linux-x64', 'macos-arm64', 'macos-x64', 'windows-x64')
+if (@($archiveBaselines.archives.PSObject.Properties).Count -ne 5) {
+    throw 'Archive size baselines must cover exactly the five supported native targets.'
+}
+foreach ($target in $expectedArchiveTargets) {
+    $property = $archiveBaselines.archives.PSObject.Properties[$target]
+    if ($null -eq $property -or [long]$property.Value -le 0) {
+        throw "Archive size baseline is missing for $target."
+    }
 }
 
 $releaseWorkflow = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/workflows/release.yml')
@@ -265,8 +285,9 @@ foreach ($marker in @(
     'releases?per_page=100',
     'if length == 1 then .[0]',
     '.draft == true and .prerelease == true',
+    'gh release verify --help',
     './scripts/assert-release-version.ps1 -Tag',
-    './scripts/package.ps1 -SkipTests',
+    './scripts/test-package.ps1',
     './scripts/test-hex-package.ps1',
     'Get-Item -LiteralPath "packages/beamtrace_core/build/beamtrace_core-$version.tar"',
     './scripts/test-oci.ps1 -Build',
@@ -295,6 +316,10 @@ foreach ($marker in @(
     'version_digest',
     './scripts/verify-published-release.ps1',
     'gh release upload "$RELEASE_TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"',
+    'expected_assets=',
+    'remote_digest=',
+    '.immutable == true',
+    'gh release verify "$RELEASE_TAG"',
     '-F draft=false',
     '-F prerelease=true',
     '-f name="BeamTrace $RELEASE_TAG"',
@@ -318,7 +343,7 @@ $draftReleaseListCount = [regex]::Matches(
 if ($draftReleaseListCount -ne 2) {
     throw "Expected both the draft guard and final publisher to list draft releases; found $draftReleaseListCount lookups."
 }
-if ($releaseWorkflow -notmatch '(?ms)^  draft-release:.*?^    permissions:\s*\r?\n(?:\s*#.*\r?\n)?      contents: write\s*$') {
+if ($releaseWorkflow -notmatch '(?ms)^  draft-release:.*?^    permissions:\s*\r?\n(?:\s*#.*\r?\n)?      contents: write(?:[ \t]+#.*)?\r?$') {
     throw 'The draft release guard needs push-equivalent Contents access to see GitHub draft releases.'
 }
 $releaseCheckoutCount = [regex]::Matches(
@@ -343,14 +368,23 @@ foreach ($legacyContext in @('$GITHUB_REF_NAME', '$GITHUB_SHA')) {
         throw "Release workflow bypasses the verified recovery context: $legacyContext"
     }
 }
-if (
-    -not $releaseWorkflow.Contains("-name 'beamtrace-*.zip' | wc -l)`" -eq 5") -or
-    -not $releaseWorkflow.Contains("-name 'beamtrace-*.zip.sha256' | wc -l)`" -eq 5")
-) {
-    throw 'GitHub Release publication must require exactly five supported native archives and sidecars.'
+foreach ($target in @('linux-arm64', 'linux-x64', 'macos-arm64', 'macos-x64', 'windows-x64')) {
+    foreach ($suffix in @('.zip', '.zip.sha256')) {
+        if (-not $releaseWorkflow.Contains("beamtrace-`$version-$target$suffix")) {
+            throw "GitHub Release publication is missing the exact native asset: $target$suffix"
+        }
+    }
+}
+foreach ($asset in @('beamtrace_core-$version.tar', 'beamtrace_core-$version.tar.sha256', 'beamtrace.json', 'beamtrace.rb', 'release-checksums.json')) {
+    if (-not $releaseWorkflow.Contains($asset)) {
+        throw "GitHub Release publication is missing the exact asset contract: $asset"
+    }
 }
 if ($releaseWorkflow.Contains('gh release create') -or $releaseWorkflow.Contains(':latest')) {
     throw 'The tag workflow must use the existing draft and must not publish a mutable latest image.'
+}
+if ($releaseWorkflow -notmatch '(?ms)expected_assets=.*?gh release upload.*?remote_digest=.*?resolved_sha=.*?-F draft=false.*?\.immutable == true.*?gh release verify') {
+    throw 'The GitHub Release must verify exact assets and tag identity before immutable publication, then verify its attestation.'
 }
 if ($releaseWorkflow.Contains('runner: windows-11-arm')) {
     throw 'Release workflow must not label an x64 Erlang runtime as native Windows ARM64.'

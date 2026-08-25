@@ -36,6 +36,29 @@ pub fn listener_start_failure_closes_bootstrap_store_test() {
   |> should.equal(Error("closed"))
 }
 
+pub fn occupied_listener_returns_a_descriptive_error_test() {
+  let result =
+    with_occupied_loopback_port(fn(port) {
+      server.start(
+        bind: "127.0.0.1",
+        port: port,
+        mode: api.Local,
+        secret_key_base: "test-secret-key-base",
+        static_root: None,
+        archive_path: None,
+      )
+    })
+
+  let assert Error(error) = result
+  error
+  |> string.starts_with("could not bind 127.0.0.1:")
+  |> should.be_true()
+}
+
+pub fn local_server_becomes_ready_then_closes_cleanly_on_sigterm_test() {
+  server_signal_lifecycle() |> should.equal(Ok(Nil))
+}
+
 pub fn local_runtime_owns_and_closes_the_attached_capture_session_test() {
   let capture_store =
     capture_session.new_with_backend(fn(_spec) {
@@ -257,6 +280,7 @@ fn team_configuration(data_dir: String, retention_days: Int) {
     project: "shop",
     environment: "prod",
     retention_days: retention_days,
+    raw_retention_days: 1,
     relay_max_events: 10_000,
     relay_max_bytes: 64_000_000,
     enrollment_ttl_ms: 60_000,
@@ -266,3 +290,9 @@ fn team_configuration(data_dir: String, retention_days: Int) {
 
 @external(erlang, "beamtrace_team_store_migration_test_ffi", "fresh_data_dir")
 fn fresh_data_dir() -> String
+
+@external(erlang, "beamtrace_server_test_ffi", "with_occupied_loopback_port")
+fn with_occupied_loopback_port(run: fn(Int) -> a) -> a
+
+@external(erlang, "beamtrace_server_test_ffi", "server_signal_lifecycle")
+fn server_signal_lifecycle() -> Result(Nil, String)

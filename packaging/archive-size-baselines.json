@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "source_release": "v0.1.0",
+  "source_url": "https://github.com/P4suta/beamtrace/releases/tag/v0.1.0",
+  "maximum_growth_percent": 5,
+  "archives": {
+    "linux-arm64": 40571459,
+    "linux-x64": 41924432,
+    "macos-arm64": 24600599,
+    "macos-x64": 23722612,
+    "windows-x64": 25580426
+  }
+}

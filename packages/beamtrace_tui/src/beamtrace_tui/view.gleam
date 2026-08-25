@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace_tui/model
 import etui/buffer
-import etui/geometry.{type Rect, Fill, Horizontal, Length, Vertical}
+import etui/geometry.{type Rect, Breakpoint, Fill, Length, Vertical}
+import etui/span
 import etui/style
+import etui/text
 import etui/widgets/block
+import etui/widgets/help
 import etui/widgets/paragraph
+import etui/widgets/statusbar
 import etui/widgets/tabs
 import gleam/int
 import gleam/list
@@ -22,23 +26,32 @@ const muted = style.Rgb(157, 149, 162)
 const background = style.Rgb(12, 11, 18)
 
 pub fn render(state: model.Model, screen: Rect) -> buffer.Buffer {
-  let rows = geometry.split(Vertical, screen, [Length(3), Fill, Length(1)])
+  let rows = geometry.split(Vertical, screen, [Length(3), Fill, Length(2)])
   let #(header, body, footer) = case rows {
     [header, body, footer, ..] -> #(header, body, footer)
     _ -> #(screen, screen, screen)
   }
-  let columns = geometry.split(Horizontal, body, [Length(24), Fill, Length(31)])
-  let #(sidebar, timeline, inspector) = case columns {
-    [sidebar, timeline, inspector, ..] -> #(sidebar, timeline, inspector)
-    _ -> #(body, body, body)
+  let columns =
+    geometry.split_responsive(body, [
+      Breakpoint(100, [Length(24), Fill, Length(31)]),
+      Breakpoint(72, [Fill, Length(31)]),
+      Breakpoint(0, [Fill]),
+    ])
+  let target = buffer.buffer_new(screen) |> render_header(header, state)
+  let target = case columns {
+    [sidebar, timeline, inspector] ->
+      target
+      |> render_sidebar(sidebar, state)
+      |> render_timeline(timeline, state)
+      |> render_inspector(inspector, state)
+    [timeline, inspector] ->
+      target
+      |> render_timeline(timeline, state)
+      |> render_inspector(inspector, state)
+    [timeline] -> render_timeline(target, timeline, state)
+    _ -> render_timeline(target, body, state)
   }
-
-  buffer.buffer_new(screen)
-  |> render_header(header, state)
-  |> render_sidebar(sidebar, state)
-  |> render_timeline(timeline, state)
-  |> render_inspector(inspector, state)
-  |> render_footer(footer, state)
+  render_footer(target, footer, state)
 }
 
 fn render_header(
@@ -53,10 +66,11 @@ fn render_header(
     |> block.with_style(amber, background)
   let active = case state.screen {
     model.LiveScreen | model.AnomalyScreen -> 1
+    model.TraceLibraryScreen -> 2
     _ -> 0
   }
   let tabs =
-    tabs.tabs_new(["CAPTURE", "LIVE", "COMPARE → Web"])
+    tabs.tabs_new(["CAPTURE", "LIVE", "TEAM TRACES", "COMPARE → Web"])
     |> tabs.with_active(active)
     |> tabs.with_active_style(style.new(background, amber, style.bold()))
     |> tabs.with_colors(muted, background)
@@ -116,13 +130,16 @@ fn render_timeline(
     model.CaptureScreen -> " CAPTURE · VERTICAL CAUSAL CHAIN "
     model.LiveScreen -> " LIVE · RUNTIME SIGNALS "
     model.AnomalyScreen -> " LIVE · ANOMALIES "
+    model.TraceLibraryScreen -> " TEAM · TRACE LIBRARY "
   }
   let frame = panel(title, amber)
+  let content_width = block.inner(area, frame).size.width
   let content = case state.screen {
     model.AttachScreen -> attach_content(state)
-    model.AnomalyScreen -> anomaly_content(state)
-    model.LiveScreen -> live_content(state)
-    model.CaptureScreen -> causal_content(state)
+    model.AnomalyScreen -> anomaly_content(state, content_width)
+    model.LiveScreen -> live_content(state, content_width)
+    model.CaptureScreen -> causal_content(state, content_width)
+    model.TraceLibraryScreen -> team_trace_content(state, content_width)
   }
 
   target
@@ -172,18 +189,38 @@ fn render_footer(
   state: model.Model,
 ) -> buffer.Buffer {
   let status = case state.connected {
-    True -> "connected"
-    False -> "offline"
+    True -> "● connected"
+    False -> "○ offline"
   }
-  paragraph.render(
-    target,
-    area,
-    paragraph.paragraph_new(
-      " a attach   r arm   x cancel   ! anomalies   / search   s save   w Web   q quit  │  "
-      <> status,
-    )
-      |> paragraph.with_style(style.new(background, amber, style.bold())),
-  )
+  let rows = geometry.split(Vertical, area, [Length(1), Length(1)])
+  let #(help_area, status_area) = case rows {
+    [help_area, status_area, ..] -> #(help_area, status_area)
+    _ -> #(area, area)
+  }
+  let shortcuts =
+    help.help_new([
+      help.binding(["a"], "attach"),
+      help.binding(["r"], "arm"),
+      help.binding(["t"], "traces"),
+      help.binding(["!"], "anomalies"),
+      help.binding(["/"], "search"),
+      help.binding(["s"], "save"),
+      help.binding(["w"], "Web"),
+      help.binding(["q"], "quit"),
+    ])
+    |> help.with_key_color(amber)
+    |> help.with_description_color(muted)
+    |> help.with_bg(background)
+  let bar =
+    statusbar.statusbar_new()
+    |> statusbar.with_left([span.line_plain(status)])
+    |> statusbar.with_center([span.line_plain(state.notice)])
+    |> statusbar.with_right([span.line_plain("BeamTrace")])
+    |> statusbar.with_style(amber, background)
+
+  target
+  |> help.render(help_area, shortcuts)
+  |> statusbar.render(status_area, bar)
 }
 
 fn panel(title: String, colour: style.Color) -> block.Block {
@@ -203,24 +240,31 @@ fn attach_content(state: model.Model) -> String {
   <> "It is never accepted as a plaintext CLI argument.\n\nEnter attach · Esc cancel"
 }
 
-fn causal_content(state: model.Model) -> String {
+fn causal_content(state: model.Model, width: Int) -> String {
   let rows = model.visible_events(state)
   case rows {
     [] -> "No causal events match the current search."
-    _ -> rows |> list.map(format_event) |> string.join("\n│\n")
+    _ ->
+      rows
+      |> list.map(fn(event) { format_event(event, width) })
+      |> string.join("\n│\n")
   }
 }
 
-fn anomaly_content(state: model.Model) -> String {
+fn anomaly_content(state: model.Model, width: Int) -> String {
   case model.anomalies(state) {
     [] -> "No active anomalies. Baselines are warming."
     rows ->
       "EXPLANATION                    EVIDENCE\n"
-      <> { rows |> list.map(format_event) |> string.join("\n\n") }
+      <> {
+        rows
+        |> list.map(fn(event) { format_event(event, width) })
+        |> string.join("\n\n")
+      }
   }
 }
 
-fn live_content(state: model.Model) -> String {
+fn live_content(state: model.Model, width: Int) -> String {
   case model.visible_live_events(state) {
     [] ->
       state.live_summary
@@ -230,7 +274,11 @@ fn live_content(state: model.Model) -> String {
       <> "\nGeneration "
       <> int.to_string(state.live_generation)
       <> "\n\n"
-      <> { rows |> list.map(format_event) |> string.join("\n│\n") }
+      <> {
+        rows
+        |> list.map(fn(event) { format_event(event, width) })
+        |> string.join("\n│\n")
+      }
   }
 }
 
@@ -247,24 +295,63 @@ fn capture_phase(phase: model.CapturePhase) -> String {
   }
 }
 
-fn format_event(event: model.Event) -> String {
+fn format_event(event: model.Event, max_width: Int) -> String {
   let marker = case event.anomalous {
     True -> "!"
     False -> "●"
   }
-  "+"
-  <> pad_offset(event.offset_us)
-  <> " μs  "
-  <> marker
-  <> " "
-  <> event.id
-  <> "\n└─ "
-  <> event.actor
-  <> " · "
-  <> event.kind
-  <> " ["
-  <> event.evidence
-  <> "]"
+  let first =
+    "+" <> pad_offset(event.offset_us) <> " μs  " <> marker <> " " <> event.id
+  let second = "└─ " <> event.actor <> " · " <> event.kind
+  let third = "   evidence: " <> event.evidence
+  text.truncate(first, max_width, "…")
+  <> "\n"
+  <> text.truncate(second, max_width, "…")
+  <> "\n"
+  <> text.truncate(third, max_width, "…")
+}
+
+fn team_trace_content(state: model.Model, width: Int) -> String {
+  case state.team_traces {
+    [] ->
+      "No team traces are available.\n\nAuthenticate in the Team workspace, then refresh the bounded trace list."
+    traces ->
+      "TRACE · STATUS · NODE / MFA · PRIVACY · EVENTS · RECEIVED\n"
+      <> {
+        traces
+        |> list.index_map(fn(trace, index) {
+          let marker = case index == state.selected_trace {
+            True -> "› "
+            False -> "  "
+          }
+          let privacy = case trace.locked {
+            True -> trace.privacy <> " 🔒"
+            False -> trace.privacy
+          }
+          let row_width = int.max(width, 1)
+          text.truncate(marker <> trace.id, row_width, "…")
+          <> "\n"
+          <> text.truncate(
+            "  " <> trace.status <> " · " <> trace.node <> " " <> trace.mfa,
+            row_width,
+            "…",
+          )
+          <> "\n"
+          <> text.truncate(
+            "  "
+              <> privacy
+              <> " · "
+              <> int.to_string(trace.event_count)
+              <> " events · "
+              <> int.to_string(trace.received_at_ms),
+            row_width,
+            "…",
+          )
+        })
+        |> string.join("\n\n")
+      }
+      <> "\n\n↑/↓ select · Enter inspect"
+  }
 }
 
 fn pad_offset(value: Int) -> String {

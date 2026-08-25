@@ -21,8 +21,8 @@ $expectations = [ordered]@{
         'bundled ERTS'
     )
     'docs/architecture.md' = @(
-        'relay_frames.event_count',
-        'SQLite WAL schema version 7',
+        'session event counts',
+        'SQLite WAL schema version 9',
         'Audit chains are verified when the team runtime opens',
         'Registered relay public keys are restored after a hub restart',
         'Credit is replenished only after durable acceptance',

@@ -81,6 +81,111 @@ test("workspace has no serious accessibility violations", async ({ page }) => {
   expect(serious).toEqual([]);
 });
 
+test("Team trace library keeps raw content locked and pages permitted events", async ({ page }) => {
+  const eventRequests = [];
+  let holdRequest;
+  const teamEvent = {
+    id: "team-event-7",
+    root_id: "team-root",
+    node: "orders@team",
+    process: {
+      physical: { node: "orders@team", pid: "<0.7.0>" },
+      logical: { id: "checkout-worker", label: "Checkout worker" },
+      evidence: [],
+    },
+    local_timestamp_ns: 700,
+    event: { kind: "send" },
+    evidence: { kind: "exact" },
+  };
+  const traces = [
+    {
+      id: "trace-metadata",
+      status: "complete",
+      node: "orders@team",
+      mfa: { module: "orders", function: "checkout", arity: 1 },
+      privacy: "metadata",
+      completeness: "complete",
+      event_count: 1,
+      received_at_ms: 1_774_000_000_000,
+      legal_hold: false,
+      locked: false,
+    },
+    {
+      id: "trace-raw-locked",
+      status: "incomplete",
+      node: "payments@team",
+      mfa: { module: "payments", function: "charge", arity: 2 },
+      privacy: "raw",
+      completeness: "incomplete",
+      event_count: 80,
+      received_at_ms: 1_774_000_000_001,
+      legal_hold: false,
+      locked: true,
+    },
+  ];
+
+  await page.route(/\/api\/v1\/traces(?:[/?].*)?$/, async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (url.pathname === "/api/v1/traces") {
+      await route.fulfill({ json: { traces, next_cursor: null } });
+      return;
+    }
+    if (url.pathname === "/api/v1/traces/trace-metadata/events") {
+      eventRequests.push(url.pathname);
+      expect(url.searchParams.get("limit")).toBe("200");
+      await route.fulfill({
+        json: {
+          trace_id: "trace-metadata",
+          events: [teamEvent],
+          next_cursor: null,
+        },
+      });
+      return;
+    }
+    if (
+      url.pathname === "/api/v1/traces/trace-metadata/hold" &&
+      request.method() === "POST"
+    ) {
+      holdRequest = {
+        accept: request.headers().accept,
+        csrf: request.headers()["x-beamtrace-csrf"],
+      };
+      await route.fulfill({ json: { ...traces[0], legal_hold: true } });
+      return;
+    }
+    eventRequests.push(url.pathname);
+    await route.fulfill({ status: 500, json: { error: "unexpected_request" } });
+  });
+
+  await page.goto("/");
+  await page.evaluate(() => { document.cookie = "beamtrace_csrf=e2e-token; SameSite=Strict"; });
+  await page.getByRole("button", { name: "Team traces" }).click();
+
+  const table = page.getByRole("table", { name: "Team traces" });
+  await expect(table).toContainText("orders@team · orders:checkout/1");
+  await expect(table).toContainText("payments@team · payments:charge/2");
+  await expect(table.getByLabel("Content locked")).toBeVisible();
+
+  await page.getByRole("button", { name: "trace-raw-locked" }).click();
+  await expect(page.getByRole("heading", { name: "Trace contents locked" })).toBeVisible();
+  expect(eventRequests).toEqual([]);
+
+  await page.getByRole("button", { name: "trace-metadata" }).click();
+  await expect(page.getByRole("button", { name: "team-event-7" })).toBeVisible();
+  expect(eventRequests).toEqual(["/api/v1/traces/trace-metadata/events"]);
+
+  await page.getByRole("button", { name: "Place legal hold" }).click();
+  await expect(page.getByText("enabled", { exact: true })).toBeVisible();
+  expect(holdRequest).toEqual({ accept: "application/json", csrf: "e2e-token" });
+
+  const results = await new AxeBuilder({ page }).analyze();
+  const serious = results.violations.filter(({ impact }) =>
+    impact === "serious" || impact === "critical"
+  );
+  expect(serious).toEqual([]);
+});
+
 test("Live polls bounded process metadata and exposes evidence in DOM", async ({ page }) => {
   const liveLimits = [];
   page.on("request", (request) => {

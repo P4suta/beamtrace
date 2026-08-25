@@ -31,6 +31,20 @@ pub fn append(
   outcome: String,
 ) -> Nil
 
+/// Append an entry only if its caller-provided durable transaction succeeds.
+/// The store advances its in-memory chain after the transaction commits, so
+/// privileged state and its audit evidence cannot diverge.
+@external(erlang, "beamtrace_audit_store_ffi", "append_transactional")
+pub fn append_transactional(
+  store: Store,
+  timestamp_ms: Int,
+  actor: String,
+  action: String,
+  resource: String,
+  outcome: String,
+  persist: fn(audit.AuditLog) -> Result(value, String),
+) -> Result(value, String)
+
 @external(erlang, "beamtrace_audit_store_ffi", "snapshot")
 pub fn snapshot(store: Store) -> audit.AuditLog
 

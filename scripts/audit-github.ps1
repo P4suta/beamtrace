@@ -39,6 +39,16 @@ Assert-Policy ($repo.allow_squash_merge -and -not $repo.allow_merge_commit -and 
 Assert-Policy ($repo.allow_auto_merge -and $repo.delete_branch_on_merge -and $repo.allow_update_branch) 'Pull request automation settings drifted.'
 Assert-Policy $repo.web_commit_signoff_required 'Web commit signoff is disabled.'
 
+$immutableOutput = @(& gh api --method GET --header 'Accept: application/vnd.github+json' --header "X-GitHub-Api-Version: $apiVersion" "repos/$Repository/immutable-releases" 2>&1)
+$immutableStatus = $LASTEXITCODE
+if ($immutableStatus -ne 0) {
+    Assert-Policy $false 'Immutable releases are disabled or cannot be audited.'
+}
+else {
+    $immutable = ($immutableOutput -join [Environment]::NewLine) | ConvertFrom-Json
+    Assert-Policy ($immutable.enabled -eq $true) 'Immutable releases are disabled.'
+}
+
 $requiredTopics = @('beam', 'causal-tracing', 'debugging', 'distributed-tracing', 'elixir', 'erlang', 'gleam', 'observability', 'otp', 'tdd')
 foreach ($topic in $requiredTopics) {
     Assert-Policy (@($repo.topics) -contains $topic) "Repository topic is missing: $topic"

@@ -50,7 +50,7 @@ put_valid(Config, Key, Payload, Retry) ->
     ],
     case signed_request(Config, put, Key, Payload, Headers) of
         {ok, Status, _ResponseHeaders, _Body} when Status >= 200, Status < 300 ->
-            {ok, {Key, Digest, byte_size(Payload)}};
+            {ok, {Key, Digest, byte_size(Payload), true}};
         {ok, 412, _ResponseHeaders, _Body} -> compare_existing(Config, Key, Payload);
         {ok, 409, _ResponseHeaders, _Body} when Retry < 1 ->
             put_valid(Config, Key, Payload, Retry + 1);
@@ -63,7 +63,7 @@ compare_existing(Config, Key, Payload) ->
     case read_valid(Config, Key) of
         {ok, Payload} ->
             Digest = hex(crypto:hash(sha256, Payload)),
-            {ok, {Key, Digest, byte_size(Payload)}};
+            {ok, {Key, Digest, byte_size(Payload), false}};
         {ok, _Different} -> {error, <<"blob_conflict">>};
         Error -> Error
     end.

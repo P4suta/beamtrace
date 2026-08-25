@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+import beamtrace_runtime/crypto
+
 pub opaque type Attempt {
   Attempt(
     state: String,
@@ -53,9 +55,9 @@ pub fn begin(
   now_ms: Int,
   ttl_ms: Int,
 ) -> AuthorizationStart {
-  let state = random_url_token(32)
-  let nonce = random_url_token(32)
-  let verifier = random_url_token(32)
+  let state = crypto.random_base64url(32)
+  let nonce = crypto.random_base64url(32)
+  let verifier = crypto.random_base64url(32)
   AuthorizationStart(
     attempt: new(
       state,
@@ -68,11 +70,9 @@ pub fn begin(
   )
 }
 
-@external(erlang, "beamtrace_oidc_ffi", "pkce_s256")
-pub fn pkce_s256(verifier: String) -> String
-
-@external(erlang, "beamtrace_oidc_ffi", "random_url_token")
-fn random_url_token(bytes: Int) -> String
+pub fn pkce_s256(verifier: String) -> String {
+  crypto.sha256_base64url(verifier)
+}
 
 @external(erlang, "beamtrace_oidc_ffi", "authorization_url")
 pub fn authorization_url(
@@ -109,10 +109,13 @@ pub fn validate(
   case
     attempt.used,
     now_ms > attempt.expires_at_ms,
-    presented_state == attempt.state,
-    id_token_nonce == attempt.nonce,
+    crypto.constant_time_equal_string(presented_state, attempt.state),
+    crypto.constant_time_equal_string(id_token_nonce, attempt.nonce),
     redirect_uri == attempt.redirect_uri,
-    challenge(code_verifier) == attempt.code_challenge
+    crypto.constant_time_equal_string(
+      challenge(code_verifier),
+      attempt.code_challenge,
+    )
   {
     True, _, _, _, _, _ -> Error(AlreadyUsed)
     _, True, _, _, _, _ -> Error(Expired)

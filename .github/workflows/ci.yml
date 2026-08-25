@@ -53,6 +53,12 @@ jobs:
           otp-version: ${{ matrix.otp }}
           gleam-version: '1.18.1'
           rebar3-version: '3.27.0'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install locked MCP client
+        run: npm ci --ignore-scripts
       - name: TDD gate
         shell: pwsh
         run: ./scripts/test-all.ps1 -SkipBrowserE2E
@@ -77,7 +83,9 @@ jobs:
           rebar3-version: '3.27.0'
       - name: Distribution capture tests
         shell: pwsh
-        run: ./scripts/test-agent.ps1 -Distribution '${{ matrix.distribution }}'
+        env:
+          BEAMTRACE_DISTRIBUTION_MATRIX: ${{ matrix.distribution }}
+        run: ./scripts/test-agent.ps1 -Distribution $env:BEAMTRACE_DISTRIBUTION_MATRIX
 
   language-fixtures:
     name: Gleam / Elixir / Erlang fixtures
@@ -96,6 +104,11 @@ jobs:
       - name: Fixture acceptance tests
         shell: pwsh
         run: ./scripts/test-fixtures.ps1
+        env:
+          BEAMTRACE_REQUIRE_ELIXIR: '1'
+      - name: Mix record wrapper acceptance
+        shell: pwsh
+        run: ./scripts/test-runtime.ps1
         env:
           BEAMTRACE_REQUIRE_ELIXIR: '1'
 

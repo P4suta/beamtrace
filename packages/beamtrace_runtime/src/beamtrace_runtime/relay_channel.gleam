@@ -2,7 +2,7 @@
 import gleam/list
 import gleam/option.{type Option, None, Some}
 
-pub const protocol_version = 1
+pub const protocol_version = 2
 
 pub type Identity {
   Identity(public_key: BitArray, private_key: BitArray)

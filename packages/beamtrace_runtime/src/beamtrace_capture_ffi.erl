@@ -15,8 +15,6 @@
 
 -define(IDLE_AFTER_ROOT_MS, 250).
 -define(DISTRIBUTED_IDLE_AFTER_ROOT_MS, 1000).
--define(INITIAL_BATCH_CREDITS, 1024).
--define(CREDIT_REPLENISH_AT, 512).
 
 wait_remote_armed(NodeBinary, CookieBinary, TimeoutMs)
         when is_integer(TimeoutMs), TimeoutMs > 0, TimeoutMs =< 30000 ->
@@ -256,7 +254,9 @@ run_distributed(
     %% Keep labels inside the historical immediate-integer range. This is
     %% understood by every supported distribution peer and avoids silently
     %% dropping a token when mixed runtimes negotiate conservative encoding.
-    Label = 1 + (binary:decode_unsigned(crypto:strong_rand_bytes(4)) rem 134217726),
+    Label = 1 + (binary:decode_unsigned(
+        'beamtrace_runtime@crypto':random_bytes(4)
+    ) rem 134217726),
     Options = maps:merge(#{
         capture_id => CaptureId,
         trace_label => Label,
@@ -337,7 +337,7 @@ setup_distributed(Prepared, MFA, Label, CaptureId, WindowMs) ->
 
 grant_all([]) -> ok;
 grant_all([{Node, _Digest, Agent, _Disposition} | Rest]) ->
-    case beamtrace_relay:grant(Node, Agent, ?INITIAL_BATCH_CREDITS) of
+    case beamtrace_relay:grant(Node, Agent, initial_batch_credits()) of
         ok -> grant_all(Rest);
         {error, Reason} -> {error, Reason}
     end.
@@ -620,7 +620,7 @@ run_injected(Node, MFA, WindowMs, Digest, Disposition, CaptureId, Options) ->
     case beamtrace_relay:start_agent(Node, self(), Options) of
         {ok, Agent} ->
             try
-                case beamtrace_relay:grant(Node, Agent, ?INITIAL_BATCH_CREDITS) of
+                case beamtrace_relay:grant(Node, Agent, initial_batch_credits()) of
                     ok ->
                         case beamtrace_relay:arm_agent(Node, Agent, MFA) of
                             {ok, armed} ->
@@ -721,13 +721,21 @@ collect_batches(Node, Agent, CaptureId, Deadline, IdleDeadline, SeenRoot, Acc, C
 finish_collect(true, Acc) -> {ok, {flatten(Acc), <<"complete">>}};
 finish_collect(false, _Acc) -> {error, <<"trigger_timeout">>}.
 
-replenish_credit(Node, Agent, Debt) when Debt >= ?CREDIT_REPLENISH_AT ->
-    case beamtrace_relay:grant(Node, Agent, Debt) of
-        ok -> {ok, 0};
-        {error, Reason} -> {error, Reason}
-    end;
-replenish_credit(_Node, _Agent, Debt) ->
-    {ok, Debt}.
+replenish_credit(Node, Agent, Debt) ->
+    case Debt >= refill_batch_count() of
+        true ->
+            case beamtrace_relay:grant(Node, Agent, Debt) of
+                ok -> {ok, 0};
+                {error, Reason} -> {error, Reason}
+            end;
+        false -> {ok, Debt}
+    end.
+
+initial_batch_credits() ->
+    'beamtrace_runtime@credit_policy':initial_window().
+
+refill_batch_count() ->
+    'beamtrace_runtime@credit_policy':refill_batch_count().
 
 replenish_multi_credit(Batch, Prepared, CreditDebt) ->
     case batch_node(Batch) of

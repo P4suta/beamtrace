@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace_web/view
 import beamtrace_web/workspace
+import gleam/option.{None}
 import gleam/string
 import gleeunit/should
 import lustre/element
@@ -28,9 +29,45 @@ pub fn workspace_has_primary_regions_and_modes_test() {
   html |> string.contains("Capture") |> should.be_true()
   html |> string.contains("Live") |> should.be_true()
   html |> string.contains("Compare") |> should.be_true()
+  html |> string.contains("Team traces") |> should.be_true()
   html |> string.contains("Session navigator") |> should.be_true()
   html |> string.contains("Event inspector") |> should.be_true()
   html |> string.contains("Time minimap") |> should.be_true()
+}
+
+pub fn team_workspace_renders_trace_policy_locks_and_admin_hold_action_test() {
+  let trace =
+    workspace.TeamTrace(
+      "trace-raw",
+      "incomplete",
+      "app@host",
+      "shop",
+      "checkout",
+      1,
+      "raw",
+      "incomplete",
+      12,
+      1000,
+      False,
+      True,
+    )
+  let html =
+    workspace.init_remote()
+    |> workspace.update(workspace.UserSelectedMode(workspace.Team))
+    |> workspace.update(
+      workspace.TeamTracesLoaded(workspace.TeamTracePage([trace], None)),
+    )
+    |> workspace.update(workspace.UserSelectedTeamTrace(trace.id))
+    |> view.workspace
+    |> element.to_string
+
+  html |> string.contains("aria-label=\"Team traces\"") |> should.be_true()
+  html |> string.contains("trace-raw") |> should.be_true()
+  html |> string.contains("Content locked") |> should.be_true()
+  html |> string.contains("Trace contents locked") |> should.be_true()
+  html |> string.contains("Place legal hold") |> should.be_true()
+  html |> string.contains("Admin role") |> should.be_true()
+  html |> string.contains("event-team-secret") |> should.be_false()
 }
 
 pub fn canvas_has_accessible_dom_equivalent_test() {

@@ -49,13 +49,25 @@ function Invoke-McpStdio {
     [PSCustomObject]@{ Stdout = $stdout; Stderr = $stderr }
 }
 
-$listed = Invoke-McpStdio @('{"jsonrpc":"2.0","id":1,"method":"tools/list"}')
+$listed = Invoke-McpStdio @(
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"beamtrace-smoke","version":"1"}}}',
+    '{"jsonrpc":"2.0","method":"notifications/initialized"}',
+    '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+)
 $lines = @($listed.Stdout -split "`r?`n" | Where-Object { $_ -ne '' })
-if ($lines.Count -ne 1) {
-    throw "MCP stdout must contain exactly one JSON-RPC line, got $($lines.Count): $($listed.Stdout)"
+if ($lines.Count -ne 2) {
+    throw "MCP legacy initialize/list must contain exactly two JSON-RPC lines, got $($lines.Count): $($listed.Stdout)"
 }
-$message = $lines[0] | ConvertFrom-Json -Depth 32
-if ($message.jsonrpc -ne '2.0' -or $message.id -ne 1 -or $message.result.tools.Count -ne 3) {
+$initialized = $lines[0] | ConvertFrom-Json -Depth 32
+if (
+    $initialized.jsonrpc -ne '2.0' -or
+    $initialized.id -ne 1 -or
+    $initialized.result.protocolVersion -ne '2025-11-25'
+) {
+    throw 'MCP initialize response is malformed.'
+}
+$message = $lines[1] | ConvertFrom-Json -Depth 32
+if ($message.jsonrpc -ne '2.0' -or $message.id -ne 2 -or $message.result.tools.Count -ne 4) {
     throw 'MCP tools/list response is malformed.'
 }
 foreach ($tool in $message.result.tools) {
@@ -67,6 +79,17 @@ foreach ($tool in $message.result.tools) {
 $notified = Invoke-McpStdio @('{"jsonrpc":"2.0","method":"notifications/initialized"}')
 if ($notified.Stdout -ne '') {
     throw "MCP notification unexpectedly wrote to stdout: $($notified.Stdout)"
+}
+
+$previousAgentBeam = $env:BEAMTRACE_AGENT_BEAM
+try {
+    $env:BEAMTRACE_AGENT_BEAM = & (Join-Path $PSScriptRoot 'build-agent.ps1')
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & npm run test:mcp
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+finally {
+    $env:BEAMTRACE_AGENT_BEAM = $previousAgentBeam
 }
 
 exit 0

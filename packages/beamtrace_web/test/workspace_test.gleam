@@ -71,11 +71,81 @@ pub fn keyboard_shortcuts_cover_modes_search_and_palette_test() {
   |> should.equal(Some(workspace.UserSelectedMode(workspace.Live)))
   workspace.keyboard_shortcut("3")
   |> should.equal(Some(workspace.UserSelectedMode(workspace.Compare)))
+  workspace.keyboard_shortcut("4")
+  |> should.equal(Some(workspace.UserSelectedMode(workspace.Team)))
   workspace.keyboard_shortcut("/")
   |> should.equal(Some(workspace.UserFocusedSearch))
   workspace.keyboard_shortcut("k")
   |> should.equal(Some(workspace.UserOpenedPalette))
   workspace.keyboard_shortcut("x") |> should.equal(None)
+}
+
+pub fn team_trace_selection_never_loads_locked_contents_and_ignores_stale_pages_test() {
+  let metadata =
+    workspace.TeamTrace(
+      "metadata-trace",
+      "complete",
+      "app@host",
+      "shop",
+      "checkout",
+      1,
+      "metadata",
+      "complete",
+      10,
+      1000,
+      False,
+      False,
+    )
+  let raw =
+    workspace.TeamTrace(
+      "raw-trace",
+      "incomplete",
+      "app@host",
+      "shop",
+      "raw",
+      0,
+      "raw",
+      "incomplete",
+      5,
+      2000,
+      True,
+      True,
+    )
+  let model =
+    workspace.init_remote()
+    |> workspace.update(workspace.UserSelectedMode(workspace.Team))
+    |> workspace.update(
+      workspace.TeamTracesLoaded(workspace.TeamTracePage([metadata, raw], None)),
+    )
+    |> workspace.update(workspace.UserSelectedTeamTrace("raw-trace"))
+  model.team_events_loading |> should.be_false()
+  model.team_events_error
+  |> should.equal(Some("Raw trace content is locked for this role"))
+
+  let model =
+    workspace.update(model, workspace.UserSelectedTeamTrace("metadata-trace"))
+  model.team_events_loading |> should.be_true()
+  let stale =
+    workspace.update(
+      model,
+      workspace.TeamEventsLoaded(workspace.TeamEventPage(
+        "raw-trace",
+        [event(1, False)],
+        None,
+      )),
+    )
+  stale.team_events |> should.equal([])
+  let loaded =
+    workspace.update(
+      stale,
+      workspace.TeamEventsLoaded(workspace.TeamEventPage(
+        "metadata-trace",
+        [event(2, False)],
+        Some("next"),
+      )),
+    )
+  loaded.team_events |> should.equal([event(2, False)])
+  loaded.team_events_next_cursor |> should.equal(Some("next"))
 }
 
 pub fn zoom_is_clamped_for_readability_test() {

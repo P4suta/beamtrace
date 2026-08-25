@@ -128,7 +128,9 @@ pub fn durable_quota_rejects_before_blob_or_inbox_publication_test() {
   blob_store.read(blobs, "relays/relay-876543210fedcba987654321/frames/2.json")
   |> should.equal(Error("blob_not_found"))
   relay_inbox.snapshot(inbox, relay_id)
-  |> should.equal([relay_inbox.Payload(1, relay_inbox.Metadata, first, 4000)])
+  |> should.equal([
+    relay_inbox.Payload(1, relay_inbox.Metadata, first, 4000),
+  ])
 
   relay_inbox.close(inbox)
   team_store.close(metadata) |> should.equal(Ok(Nil))
@@ -187,6 +189,178 @@ pub fn raw_ingest_requires_matching_grant_and_never_persists_the_token_test() {
   relay_inbox.snapshot(inbox, relay_id)
   |> list.length
   |> should.equal(1)
+
+  relay_inbox.close(inbox)
+  team_store.close(metadata) |> should.equal(Ok(Nil))
+}
+
+pub fn session_reconnect_replay_is_idempotent_before_quota_and_inbox_test() {
+  let assert Ok(metadata) = team_store.open(":memory:")
+  let inbox = relay_inbox.new(max_frames: 4, max_bytes: 1_000_000)
+  let backend = blob_store.filesystem("build/beamtrace-session-replay-blobs")
+  let relay_id = "relay-00112233445566778899aabb"
+  let session_id = "1234567890abcdef1234567890abcdef"
+  let session =
+    team_store.TraceSession(
+      id: session_id,
+      relay_id: relay_id,
+      project: "beamtrace",
+      environment: "test",
+      node: "fixture@host",
+      module_: "fixture",
+      function_: "run",
+      arity: 0,
+      mode: "exact",
+      privacy: "metadata",
+      started_at_ms: 6000,
+      received_at_ms: 6000,
+      ended_at_ms: 0,
+      last_received_at_ms: 6000,
+      completeness: "active",
+      event_count: 0,
+      legal_hold: False,
+      active: True,
+    )
+  let assert Ok(_) = team_store.begin_trace_session(metadata, session, 64)
+  let payload = batch("exact", 1)
+  let quota = relay_ingest.Quota(max_events: 1, max_bytes: 1_000_000)
+
+  relay_ingest.accept_session_with_backend_quota(
+    metadata,
+    backend,
+    inbox,
+    session_id,
+    relay_id,
+    1,
+    relay_inbox.Exact,
+    payload,
+    6001,
+    quota,
+  )
+  |> should.equal(Ok(relay_inbox.Accepted))
+  relay_ingest.accept_session_with_backend_quota(
+    metadata,
+    backend,
+    inbox,
+    session_id,
+    relay_id,
+    1,
+    relay_inbox.Exact,
+    payload,
+    7000,
+    quota,
+  )
+  |> should.equal(Ok(relay_inbox.Accepted))
+
+  team_store.trace_usage(metadata, session_id)
+  |> should.equal(Ok(#(1, string.byte_size(payload))))
+  relay_inbox.session_snapshot(inbox, session_id)
+  |> should.equal([
+    relay_inbox.Payload(1, relay_inbox.Metadata, payload, 6001),
+  ])
+
+  relay_ingest.accept_session_with_backend_quota(
+    metadata,
+    backend,
+    inbox,
+    session_id,
+    relay_id,
+    1,
+    relay_inbox.Exact,
+    string.replace(payload, "event-1", "event-conflict"),
+    7001,
+    quota,
+  )
+  |> should.equal(Error("relay_frame_conflict"))
+
+  relay_inbox.close(inbox)
+  team_store.close(metadata) |> should.equal(Ok(Nil))
+}
+
+pub fn raw_session_replay_does_not_charge_an_exhausted_grant_twice_test() {
+  let assert Ok(metadata) = team_store.open(":memory:")
+  let inbox = relay_inbox.new(max_frames: 4, max_bytes: 1_000_000)
+  let backend =
+    blob_store.filesystem("build/beamtrace-raw-session-replay-blobs")
+  let relay_id = "relay-fedcba987654321001234567"
+  let session_id = "fedcba98765432100123456789abcdef"
+  let policy = types.RawPolicy(["token"], 3, 64)
+  let assert Ok(issued) =
+    raw_grant.issue(
+      metadata,
+      relay_id: relay_id,
+      actor: "investigator-raw",
+      now_ms: 8000,
+      duration_ms: 1000,
+      max_events: 1,
+      max_bytes: 100_000,
+      policy: policy,
+    )
+  let assert Ok(payload) =
+    relay_payload.encode_raw("exact", issued.token, issued.policy, [event(1)])
+  let assert Ok(decoded) = relay_payload.decode_for_ingest(payload)
+  let session =
+    team_store.TraceSession(
+      id: session_id,
+      relay_id: relay_id,
+      project: "beamtrace",
+      environment: "test",
+      node: "fixture@host",
+      module_: "fixture",
+      function_: "run",
+      arity: 0,
+      mode: "exact",
+      privacy: "raw",
+      started_at_ms: 8000,
+      received_at_ms: 8000,
+      ended_at_ms: 0,
+      last_received_at_ms: 8000,
+      completeness: "active",
+      event_count: 0,
+      legal_hold: False,
+      active: True,
+    )
+  let assert Ok(_) = team_store.begin_trace_session(metadata, session, 64)
+  let quota = relay_ingest.Quota(max_events: 1, max_bytes: 100_000)
+
+  relay_ingest.accept_session_with_backend_quota(
+    metadata,
+    backend,
+    inbox,
+    session_id,
+    relay_id,
+    1,
+    relay_inbox.Exact,
+    payload,
+    8100,
+    quota,
+  )
+  |> should.equal(Ok(relay_inbox.Accepted))
+  relay_ingest.accept_session_with_backend_quota(
+    metadata,
+    backend,
+    inbox,
+    session_id,
+    relay_id,
+    1,
+    relay_inbox.Exact,
+    payload,
+    8200,
+    quota,
+  )
+  |> should.equal(Ok(relay_inbox.Accepted))
+
+  let assert Ok(Some(grant)) =
+    team_store.raw_capture_grant(metadata, raw_grant.token_hash(issued.token))
+  grant.used_events |> should.equal(1)
+  grant.used_bytes |> should.equal(string.byte_size(decoded.canonical))
+  grant.status |> should.equal("exhausted")
+  team_store.trace_usage(metadata, session_id)
+  |> should.equal(Ok(#(1, string.byte_size(decoded.canonical))))
+  relay_inbox.session_snapshot(inbox, session_id)
+  |> should.equal([
+    relay_inbox.Payload(1, relay_inbox.Raw, decoded.canonical, 8100),
+  ])
 
   relay_inbox.close(inbox)
   team_store.close(metadata) |> should.equal(Ok(Nil))

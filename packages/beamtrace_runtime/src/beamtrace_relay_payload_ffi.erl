@@ -54,14 +54,26 @@ decode_raw(Batch, Mode, Items) ->
         <<"policy">>,
         <<"items">>
     ],
+    StoredAllowed = [
+        <<"type">>,
+        <<"mode">>,
+        <<"privacy">>,
+        <<"policy">>,
+        <<"items">>
+    ],
     Grant = maps:get(<<"grant">>, Batch, undefined),
     Policy = maps:get(<<"policy">>, Batch, undefined),
-    case {exact_keys(Batch, Allowed), is_binary(Grant), decode_policy(Policy)} of
-        {true, true, {ok, RedactKeys, MaxDepth, MaxBinaryBytes}} ->
+    Shape = case {exact_keys(Batch, Allowed), exact_keys(Batch, StoredAllowed)} of
+        {true, _} when is_binary(Grant) -> {ok, Grant};
+        {_, true} -> {ok, <<>>};
+        _ -> error
+    end,
+    case {Shape, decode_policy(Policy)} of
+        {{ok, DecodedGrant}, {ok, RedactKeys, MaxDepth, MaxBinaryBytes}} ->
             decode_items(
                 Mode,
                 <<"raw">>,
-                Grant,
+                DecodedGrant,
                 RedactKeys,
                 MaxDepth,
                 MaxBinaryBytes,

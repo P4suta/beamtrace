@@ -97,8 +97,16 @@ if (-not (Test-Path -LiteralPath $ertsBinSource -PathType Container)) {
     throw "ERTS executable directory is missing: $ertsBinSource"
 }
 New-Item -ItemType Directory -Path $ertsBinDestination -Force | Out-Null
+$excludedErtsDevelopmentCommands = @(
+    'ct_run',
+    'dialyzer',
+    'erlc',
+    'typer',
+    'yielding_c_fun'
+)
 foreach ($entry in Get-ChildItem -LiteralPath $ertsBinSource -Force) {
     if ($entry.Extension -eq '.pdb' -or $entry.Name -match '\.debug\.') { continue }
+    if ($entry.BaseName -in $excludedErtsDevelopmentCommands) { continue }
     Copy-Item -LiteralPath $entry.FullName -Destination $ertsBinDestination -Recurse -Force
 }
 
@@ -230,6 +238,24 @@ else {
         Pop-Location
     }
 }
+$baselinePath = Join-Path $repoRoot 'packaging/archive-size-baselines.json'
+$baselines = Get-Content -Raw -LiteralPath $baselinePath | ConvertFrom-Json
+$baselineKey = "$platform-$architecture"
+$baselineProperty = $baselines.archives.PSObject.Properties[$baselineKey]
+if ($null -eq $baselineProperty -or [long]$baselineProperty.Value -le 0) {
+    throw "Archive size baseline is missing for $baselineKey."
+}
+$growthPercent = [double]$baselines.maximum_growth_percent
+if ($growthPercent -lt 0 -or $growthPercent -gt 100) {
+    throw "Archive growth percentage is invalid: $growthPercent"
+}
+$baselineBytes = [long]$baselineProperty.Value
+$maximumBytes = [long][Math]::Floor($baselineBytes * (1.0 + ($growthPercent / 100.0)))
+$archiveBytes = (Get-Item -LiteralPath $archive).Length
+if ($archiveBytes -gt $maximumBytes) {
+    throw "Archive $baselineKey is $archiveBytes bytes; maximum is $maximumBytes bytes ($growthPercent% above the $($baselines.source_release) baseline of $baselineBytes)."
+}
+Write-Host "Archive size gate passed for ${baselineKey}: $archiveBytes / $maximumBytes bytes."
 $archiveHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
 "$archiveHash  $([IO.Path]::GetFileName($archive))" | Set-Content -LiteralPath "$archive.sha256" -Encoding ascii
 Write-Output $archive

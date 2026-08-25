@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace/types
+import beamtrace_runtime/crypto
 import beamtrace_runtime/team_store
 import gleam/json
 import gleam/list
@@ -41,7 +42,7 @@ pub fn issue(
     valid_policy(policy)
   {
     True, True, True, True, True -> {
-      let token = new_token()
+      let token = crypto.random_base64url(32)
       let expires_at_ms = now_ms + duration_ms
       let grant =
         team_store.RawCaptureGrant(
@@ -116,11 +117,11 @@ pub fn canonical_policy(policy: types.RawPolicy) -> String {
 }
 
 pub fn policy_hash(policy: types.RawPolicy) -> String {
-  hash(canonical_policy(policy))
+  crypto.sha256_hex(canonical_policy(policy))
 }
 
 pub fn token_hash(token: String) -> String {
-  hash(token)
+  crypto.sha256_hex(token)
 }
 
 @external(erlang, "beamtrace_raw_grant_ffi", "valid_token")
@@ -159,9 +160,3 @@ fn unique(
       }
   }
 }
-
-@external(erlang, "beamtrace_raw_grant_ffi", "new_token")
-fn new_token() -> String
-
-@external(erlang, "beamtrace_raw_grant_ffi", "sha256_hex")
-fn hash(value: String) -> String

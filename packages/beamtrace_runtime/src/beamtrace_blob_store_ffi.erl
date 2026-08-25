@@ -180,7 +180,7 @@ put_valid(Target, Key, Payload) ->
 
 compare_existing(Target, Key, Payload) ->
     case file:read_file(Target) of
-        {ok, Payload} -> {ok, blob(Key, Payload)};
+        {ok, Payload} -> {ok, blob(Key, Payload, false)};
         {ok, _Different} -> {error, <<"blob_conflict">>};
         {error, Reason} -> {error, reason_binary(Reason)}
     end.
@@ -194,7 +194,7 @@ create_immutable(Target, Key, Payload) ->
     Result = case write_synced(Temporary, Payload) of
         ok ->
             case file:make_link(Temporary, Target) of
-                ok -> {ok, blob(Key, Payload)};
+                ok -> {ok, blob(Key, Payload, true)};
                 {error, eexist} -> compare_existing(Target, Key, Payload);
                 {error, Reason} -> {error, reason_binary(Reason)}
             end;
@@ -233,8 +233,8 @@ read_regular_blob(Target) ->
         {error, Reason} -> {error, reason_binary(Reason)}
     end.
 
-blob(Key, Payload) ->
-    {blob, Key, hex(crypto:hash(sha256, Payload)), byte_size(Payload)}.
+blob(Key, Payload, Created) ->
+    {blob, Key, hex(crypto:hash(sha256, Payload)), byte_size(Payload), Created}.
 
 hex(Binary) ->
     iolist_to_binary([io_lib:format("~2.16.0b", [Byte]) || <<Byte>> <= Binary]).

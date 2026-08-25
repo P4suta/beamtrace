@@ -49,4 +49,4 @@ close(Store) when is_reference(Store) ->
     catch error:badarg -> nil
     end.
 
-hash(Value) -> crypto:hash(sha256, Value).
+hash(Value) -> 'beamtrace_runtime@crypto':sha256(Value).

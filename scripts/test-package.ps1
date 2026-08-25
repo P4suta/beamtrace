@@ -103,6 +103,12 @@ try {
     if (-not (Test-Path -LiteralPath $bundledEscript -PathType Leaf)) {
         throw 'Package is missing its bundled escript executable.'
     }
+    $packagedErtsCommands = @(Get-ChildItem -LiteralPath (Join-Path $ertsDirectories[0].FullName 'bin') -File)
+    foreach ($developmentCommand in @('ct_run', 'dialyzer', 'erlc', 'typer', 'yielding_c_fun')) {
+        if ($packagedErtsCommands.BaseName -contains $developmentCommand) {
+            throw "Package contains the ERTS development command $developmentCommand."
+        }
+    }
 
     $sbom = Get-Content -Raw -LiteralPath (Join-Path $root.FullName 'SBOM.spdx.json') | ConvertFrom-Json
     if (
@@ -151,9 +157,101 @@ try {
         }
         $env:PATH = $previousPath
 
+        $configRoot = Join-Path $resolvedTestRoot 'project-config'
+        New-Item -ItemType Directory -Path $configRoot -Force | Out-Null
+        Push-Location $configRoot
+        try {
+            & $launcher init
+            if ($LASTEXITCODE -ne 0) {
+                throw "Packaged beamtrace init failed with exit code $LASTEXITCODE."
+            }
+            $configPath = Join-Path $configRoot 'beamtrace.toml'
+            if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
+                throw 'Packaged beamtrace init did not create beamtrace.toml.'
+            }
+            $initialConfigHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $configPath).Hash
+            $configCheck = (& $launcher config check | Out-String)
+            if ($LASTEXITCODE -ne 0 -or $configCheck -notmatch '^valid beamtrace\.toml: 1 profile\(s\)') {
+                throw 'Packaged beamtrace config check did not validate the generated profile.'
+            }
+            & $launcher init | Out-Null
+            if ($LASTEXITCODE -ne 2) {
+                throw "A second packaged beamtrace init must exit 2, got $LASTEXITCODE."
+            }
+            $finalConfigHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $configPath).Hash
+            if ($finalConfigHash -ne $initialConfigHash) {
+                throw 'A second packaged beamtrace init modified the existing configuration.'
+            }
+        }
+        finally {
+            Pop-Location
+        }
+
         & (Join-Path $PSScriptRoot 'test-record-dogfood.ps1') -Launcher $launcher
         if ($LASTEXITCODE -ne 0) {
             throw "Self-contained package record dogfood failed with exit code $LASTEXITCODE."
+        }
+
+        if (-not $IsWindows) {
+            $signalTemp = Join-Path $resolvedTestRoot 'record-signal-temp'
+            New-Item -ItemType Directory -Path $signalTemp -Force | Out-Null
+            $signalInfo = [Diagnostics.ProcessStartInfo]::new()
+            $signalInfo.FileName = $launcher
+            foreach ($argument in @(
+                'record',
+                '--trigger', 'erlang:system_time/0',
+                '--out', (Join-Path $signalTemp 'unused.beamtrace'),
+                '--', (Get-Command erl -ErrorAction Stop).Source,
+                '-noshell', '-eval', 'receive beamtrace_never -> ok end.'
+            )) {
+                $signalInfo.ArgumentList.Add($argument)
+            }
+            $signalInfo.UseShellExecute = $false
+            $signalInfo.RedirectStandardOutput = $true
+            $signalInfo.RedirectStandardError = $true
+            $signalInfo.Environment['TMPDIR'] = $signalTemp
+            $signalProcess = [Diagnostics.Process]::new()
+            $signalProcess.StartInfo = $signalInfo
+            if (-not $signalProcess.Start()) {
+                throw 'Could not start the packaged record signal fixture.'
+            }
+            try {
+                $gateSeen = $false
+                foreach ($attempt in 1..500) {
+                    if (@(Get-ChildItem -LiteralPath $signalTemp -Directory -Filter 'beamtrace-record-*').Count -gt 0) {
+                        $gateSeen = $true
+                        break
+                    }
+                    if ($signalProcess.HasExited) { break }
+                    Start-Sleep -Milliseconds 20
+                }
+                if (-not $gateSeen) {
+                    throw 'Packaged record did not create its private signal-test gate.'
+                }
+                & kill -TERM $signalProcess.Id
+                if ($LASTEXITCODE -ne 0) {
+                    throw 'Could not send SIGTERM to the packaged record launcher.'
+                }
+                if (-not $signalProcess.WaitForExit(10000)) {
+                    throw 'Packaged record did not stop after SIGTERM within 10 seconds.'
+                }
+                $signalOutput = $signalProcess.StandardOutput.ReadToEnd()
+                $signalError = $signalProcess.StandardError.ReadToEnd()
+                if ($signalProcess.ExitCode -ne 143) {
+                    throw "Packaged record exited with $($signalProcess.ExitCode), expected 143 after SIGTERM:`n$signalOutput`n$signalError"
+                }
+                $remainingGates = @(Get-ChildItem -LiteralPath $signalTemp -Directory -Filter 'beamtrace-record-*')
+                if ($remainingGates.Count -ne 0) {
+                    throw "Packaged record left $($remainingGates.Count) private gate director$(if ($remainingGates.Count -eq 1) { 'y' } else { 'ies' }) after SIGTERM."
+                }
+            }
+            finally {
+                if (-not $signalProcess.HasExited) {
+                    $signalProcess.Kill($true)
+                    $signalProcess.WaitForExit(10000) | Out-Null
+                }
+                $signalProcess.Dispose()
+            }
         }
 
         $teamData = Join-Path $resolvedTestRoot 'team-data'
@@ -208,6 +306,24 @@ try {
             }
             if (-not (Test-Path -LiteralPath (Join-Path $teamData 'metadata.sqlite3') -PathType Leaf)) {
                 throw 'Packaged team server did not create its SQLite metadata store.'
+            }
+            if (-not $IsWindows) {
+                & kill -INT $teamProcess.Id
+                if ($LASTEXITCODE -ne 0) {
+                    throw 'Could not send SIGINT to the packaged team server.'
+                }
+                if (-not $teamProcess.WaitForExit(10000)) {
+                    throw 'Packaged team server did not stop after SIGINT within 10 seconds.'
+                }
+                if ($teamProcess.ExitCode -ne 0) {
+                    $teamError = $teamProcess.StandardError.ReadToEnd()
+                    throw "Packaged team server exited with $($teamProcess.ExitCode) after SIGINT: $teamError"
+                }
+                $teamOutput = $teamProcess.StandardOutput.ReadToEnd()
+                $teamError = $teamProcess.StandardError.ReadToEnd()
+                if ("$teamOutput`n$teamError" -notmatch 'server\.closed') {
+                    throw 'Packaged team server did not log a clean close after SIGINT.'
+                }
             }
         }
         finally {

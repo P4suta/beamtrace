@@ -21,6 +21,12 @@ pub type ExportFormat {
   Otlp
 }
 
+pub type DemoMode {
+  DemoWeb
+  DemoTui
+  DemoNoUi
+}
+
 pub type RelayTarget {
   RelayTarget(
     node: String,
@@ -34,7 +40,7 @@ pub type RelayTarget {
 }
 
 pub type Command {
-  Attach(node: String, mode: UiMode, cookie_file: Option(String))
+  Attach(node: String, mode: UiMode, cookie_file: Option(String), port: Int)
   Capture(
     node: String,
     trigger: Mfa,
@@ -45,7 +51,7 @@ pub type Command {
     preset: types.Preset,
   )
   Record(
-    node: String,
+    node: Option(String),
     trigger: Mfa,
     where_aql: Option(String),
     out: String,
@@ -54,13 +60,16 @@ pub type Command {
     preset: types.Preset,
     command: List(String),
   )
-  Open(path: String, mode: UiMode)
+  Open(path: String, mode: UiMode, port: Int)
   Compare(left: String, right: String)
   Export(path: String, format: ExportFormat)
-  Serve
+  Serve(port: Int)
+  Demo(mode: DemoMode, out: String, port: Int)
   Relay(hub_url: String, enrollment_token: String, target: Option(RelayTarget))
-  Tui(server: Option(String))
-  Doctor
+  Tui(server: Option(String), session_cookie_file: Option(String))
+  Init
+  ConfigCheck
+  Doctor(json: Bool)
   Mcp
   Help
   Version
@@ -72,6 +81,7 @@ pub type ParseError {
 
 type CaptureOptions {
   CaptureOptions(
+    node: Option(String),
     trigger: Option(Mfa),
     where_aql: Option(String),
     out: Option(String),
@@ -122,30 +132,67 @@ fn parse_command(arguments: List(String)) -> Result(Command, ParseError) {
     ["help"] | ["--help"] | ["-h"] -> Ok(Help)
     ["version"] | ["--version"] | ["-V"] -> Ok(Version)
     ["attach", node, ..options] -> parse_attach(node, options)
-    ["capture", node, ..options] -> parse_capture(node, options)
+    ["capture", ..options] -> parse_capture_command(options)
     ["record", ..options] -> parse_record(options)
     ["open", path, ..options] -> parse_open(path, options)
     ["compare", left, right] -> Ok(Compare(left, right))
     ["export", path, "--format", format] ->
       parse_export_format(format)
       |> map_result(fn(format) { Export(path, format) })
-    ["serve"] -> Ok(Serve)
+    ["serve", ..options] -> parse_serve(options)
+    ["demo", ..options] ->
+      parse_demo(options, DemoWeb, "beamtrace-demo.beamtrace", 4040)
     ["relay", hub_url, "--enroll", token, ..options] ->
       parse_relay(hub_url, token, options)
-    ["tui"] -> Ok(Tui(None))
-    ["tui", "--server", server] -> Ok(Tui(Some(server)))
-    ["doctor"] -> Ok(Doctor)
+    ["tui", ..options] -> parse_tui(options, None, None)
+    ["init"] -> Ok(Init)
+    ["config", "check"] -> Ok(ConfigCheck)
+    ["doctor"] -> Ok(Doctor(False))
+    ["doctor", "--json"] -> Ok(Doctor(True))
     ["mcp"] -> Ok(Mcp)
     [known, ..]
       if known == "attach"
       || known == "capture"
+      || known == "record"
       || known == "open"
       || known == "compare"
       || known == "export"
       || known == "relay"
       || known == "tui"
+      || known == "serve"
+      || known == "config"
+      || known == "doctor"
+      || known == "demo"
     -> Error(usage("invalid arguments for '" <> known <> "'"))
     [unknown, ..] -> Error(usage("unknown command '" <> unknown <> "'"))
+  }
+}
+
+fn parse_tui(
+  options: List(String),
+  server: Option(String),
+  session_cookie_file: Option(String),
+) -> Result(Command, ParseError) {
+  case options {
+    [] -> Ok(Tui(server, session_cookie_file))
+    ["--server", value, ..rest] ->
+      parse_tui(rest, Some(value), session_cookie_file)
+    ["--session-cookie-file", value, ..rest] ->
+      parse_tui(rest, server, Some(value))
+    [option, ..] -> Error(usage("unknown tui option '" <> option <> "'"))
+  }
+}
+
+fn parse_capture_command(
+  arguments: List(String),
+) -> Result(Command, ParseError) {
+  case arguments {
+    [] -> parse_capture(None, [])
+    [first, ..rest] ->
+      case string.starts_with(first, "--") {
+        True -> parse_capture(None, arguments)
+        False -> parse_capture(Some(first), rest)
+      }
   }
 }
 
@@ -284,15 +331,14 @@ fn finish_record(
   command: List(String),
 ) -> Result(Command, ParseError) {
   use _ <- try_result(validate_where(parsed.where_aql))
-  case parsed.node, parsed.trigger, parsed.out, command {
-    None, _, _, _ -> Error(usage("record requires --node <node>"))
-    _, None, _, _ ->
+  case parsed.trigger, parsed.out, command {
+    None, _, _ ->
       Error(usage("record requires --trigger Module:function/arity"))
-    _, _, None, _ -> Error(usage("record requires --out <file.beamtrace>"))
-    _, _, _, [] -> Error(usage("record requires '-- <command>'"))
-    Some(node), Some(trigger), Some(out), [_, ..] ->
+    _, None, _ -> Error(usage("record requires --out <file.beamtrace>"))
+    _, _, [] -> Error(usage("record requires '-- <command>'"))
+    Some(trigger), Some(out), [_, ..] ->
       Ok(Record(
-        node: node,
+        node: parsed.node,
         trigger: trigger,
         where_aql: parsed.where_aql,
         out: out,
@@ -308,10 +354,10 @@ fn parse_attach(
   node: String,
   options: List(String),
 ) -> Result(Command, ParseError) {
-  parse_attach_options(options, Web, None)
+  parse_attach_options(options, Web, None, 4040)
   |> map_result(fn(parsed) {
-    let #(mode, cookie_file) = parsed
-    Attach(node, mode, cookie_file)
+    let #(mode, cookie_file, port) = parsed
+    Attach(node, mode, cookie_file, port)
   })
 }
 
@@ -319,26 +365,31 @@ fn parse_attach_options(
   options: List(String),
   mode: UiMode,
   cookie_file: Option(String),
-) -> Result(#(UiMode, Option(String)), ParseError) {
+  port: Int,
+) -> Result(#(UiMode, Option(String), Int), ParseError) {
   case options {
-    [] -> Ok(#(mode, cookie_file))
-    ["--web", ..rest] -> parse_attach_options(rest, Web, cookie_file)
-    ["--tui", ..rest] -> parse_attach_options(rest, TuiMode, cookie_file)
+    [] -> Ok(#(mode, cookie_file, port))
+    ["--web", ..rest] -> parse_attach_options(rest, Web, cookie_file, port)
+    ["--tui", ..rest] -> parse_attach_options(rest, TuiMode, cookie_file, port)
     ["--cookie-file", path, ..rest] ->
-      parse_attach_options(rest, mode, Some(path))
+      parse_attach_options(rest, mode, Some(path), port)
+    ["--port", value, ..rest] -> {
+      use port <- try_result(parse_port(value))
+      parse_attach_options(rest, mode, cookie_file, port)
+    }
     [option, ..] -> Error(usage("unknown attach option '" <> option <> "'"))
   }
 }
 
 fn parse_capture(
-  node: String,
+  node: Option(String),
   options: List(String),
 ) -> Result(Command, ParseError) {
-  let initial = CaptureOptions(None, None, None, None, 1, types.Generic)
+  let initial = CaptureOptions(node, None, None, None, None, 1, types.Generic)
   use parsed <- try_result(parse_capture_options(options, initial))
   use _ <- try_result(validate_where(parsed.where_aql))
-  case parsed.trigger, parsed.out {
-    Some(trigger), Some(out) ->
+  case parsed.node, parsed.trigger, parsed.out {
+    Some(node), Some(trigger), Some(out) ->
       Ok(Capture(
         node: node,
         trigger: trigger,
@@ -348,8 +399,10 @@ fn parse_capture(
         max_roots: parsed.max_roots,
         preset: parsed.preset,
       ))
-    None, _ -> Error(usage("capture requires --trigger Module:function/arity"))
-    _, None -> Error(usage("capture requires --out <file.beamtrace>"))
+    None, _, _ -> Error(usage("capture requires a node or --node <node>"))
+    _, None, _ ->
+      Error(usage("capture requires --trigger Module:function/arity"))
+    _, _, None -> Error(usage("capture requires --out <file.beamtrace>"))
   }
 }
 
@@ -376,6 +429,8 @@ fn parse_capture_options(
 ) -> Result(CaptureOptions, ParseError) {
   case options {
     [] -> Ok(parsed)
+    ["--node", value, ..rest] ->
+      parse_capture_options(rest, CaptureOptions(..parsed, node: Some(value)))
     ["--trigger", value, ..rest] -> {
       use mfa <- try_result(parse_mfa(value))
       parse_capture_options(rest, CaptureOptions(..parsed, trigger: Some(mfa)))
@@ -440,10 +495,59 @@ fn parse_open(
   path: String,
   options: List(String),
 ) -> Result(Command, ParseError) {
+  parse_open_options(path, options, Web, 4040)
+}
+
+fn parse_open_options(
+  path: String,
+  options: List(String),
+  mode: UiMode,
+  port: Int,
+) -> Result(Command, ParseError) {
   case options {
-    [] | ["--web"] -> Ok(Open(path, Web))
-    ["--tui"] -> Ok(Open(path, TuiMode))
+    [] -> Ok(Open(path, mode, port))
+    ["--web", ..rest] -> parse_open_options(path, rest, Web, port)
+    ["--tui", ..rest] -> parse_open_options(path, rest, TuiMode, port)
+    ["--port", value, ..rest] -> {
+      use port <- try_result(parse_port(value))
+      parse_open_options(path, rest, mode, port)
+    }
     [option, ..] -> Error(usage("unknown open option '" <> option <> "'"))
+  }
+}
+
+fn parse_serve(options: List(String)) -> Result(Command, ParseError) {
+  case options {
+    [] -> Ok(Serve(4040))
+    ["--port", value] -> parse_port(value) |> map_result(Serve)
+    [option, ..] -> Error(usage("unknown serve option '" <> option <> "'"))
+  }
+}
+
+fn parse_port(value: String) -> Result(Int, ParseError) {
+  case int.parse(value) {
+    Ok(port) if port >= 0 && port <= 65_535 -> Ok(port)
+    _ -> Error(usage("--port must be between 0 and 65535"))
+  }
+}
+
+fn parse_demo(
+  options: List(String),
+  mode: DemoMode,
+  out: String,
+  port: Int,
+) -> Result(Command, ParseError) {
+  case options {
+    [] -> Ok(Demo(mode, out, port))
+    ["--web", ..rest] -> parse_demo(rest, DemoWeb, out, port)
+    ["--tui", ..rest] -> parse_demo(rest, DemoTui, out, port)
+    ["--no-ui", ..rest] -> parse_demo(rest, DemoNoUi, out, port)
+    ["--out", path, ..rest] if path != "" -> parse_demo(rest, mode, path, port)
+    ["--port", value, ..rest] -> {
+      use port <- try_result(parse_port(value))
+      parse_demo(rest, mode, out, port)
+    }
+    [option, ..] -> Error(usage("unknown demo option '" <> option <> "'"))
   }
 }
 

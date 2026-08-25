@@ -18,6 +18,7 @@ import beamtrace_runtime/relay_archive
 import beamtrace_runtime/relay_channel
 import beamtrace_runtime/relay_client
 import beamtrace_runtime/relay_inbox
+import beamtrace_runtime/relay_payload
 import beamtrace_runtime/storage
 import beamtrace_runtime/team_auth
 import beamtrace_runtime/team_store
@@ -30,6 +31,7 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
+import sqlight
 import wisp/simulate
 
 pub type TestSigner
@@ -54,11 +56,11 @@ fn sign_test_token(
 @external(erlang, "beamtrace_id_token_test_ffi", "jwks")
 fn test_signer_jwks(signer: TestSigner) -> String
 
-@external(erlang, "beamtrace_team_store_migration_test_ffi", "fresh_store_path")
-fn fresh_store_path() -> String
-
 @external(erlang, "beamtrace_team_store_migration_test_ffi", "fresh_data_dir")
 fn fresh_data_dir() -> String
+
+@external(erlang, "beamtrace_team_store_migration_test_ffi", "fresh_store_path")
+fn fresh_store_path() -> String
 
 pub fn health_is_versioned_json_with_security_headers_test() {
   let result =
@@ -100,6 +102,19 @@ pub fn health_rejects_wrong_method_test() {
     simulate.request(http.Post, "/api/v1/health")
     |> api.handle(api.test_context())
   response.status |> should.equal(405)
+}
+
+pub fn ready_is_versioned_and_available_after_the_handler_is_installed_test() {
+  let response =
+    simulate.request(http.Get, "/api/v1/ready")
+    |> api.handle(api.test_context())
+  response.status |> should.equal(200)
+  simulate.read_body(response) |> should.equal("{\"status\":\"ready\"}")
+
+  simulate.request(http.Post, "/api/v1/ready")
+  |> api.handle(api.test_context())
+  |> fn(response) { response.status }
+  |> should.equal(405)
 }
 
 pub fn workspace_assets_are_served_only_from_fixed_routes_test() {
@@ -636,207 +651,145 @@ pub fn relay_enrollment_endpoint_consumes_code_once_without_echoing_it_test() {
   enrollment_store.close(store)
 }
 
-pub fn team_relay_frames_are_authenticated_paged_and_keep_gap_evidence_test() {
-  let sessions = team_auth.new()
-  let annotation_store = annotations.new()
-  let audit_log = audit_store.new()
-  let inbox = relay_inbox.new(max_frames: 2, max_bytes: 256)
-  let viewer = team_session(sessions, "viewer-frames", [rbac.Viewer])
-  let relay_id = "relay-aabbccddeeff001122334455"
-  relay_inbox.append(
-    inbox,
+pub fn team_trace_library_lists_locks_reads_holds_and_audits_test() {
+  let relay_id = "relay-11223344556677889900aabb"
+  let metadata_id = "00112233445566778899aabbccddeeff"
+  let raw_id = "ffeeddccbbaa99887766554433221100"
+  let blob_root = fresh_data_dir()
+  let backend = blob_store.filesystem(blob_root)
+  let assert Ok(metadata) = team_store.open(":memory:")
+  seed_trace(
+    metadata,
+    backend,
+    metadata_id,
     relay_id,
-    1,
-    relay_inbox.Live,
-    relay_inbox.Metadata,
-    "{\"event\":\"one\"}",
+    "metadata",
+    "metadata-event",
     1000,
   )
-  |> should.equal(Ok(relay_inbox.Accepted))
-  relay_inbox.append(
-    inbox,
-    relay_id,
-    2,
-    relay_inbox.Live,
-    relay_inbox.Metadata,
-    "{\"event\":\"two\"}",
-    1001,
-  )
-  |> should.equal(Ok(relay_inbox.Accepted))
-  relay_inbox.append(
-    inbox,
-    relay_id,
-    3,
-    relay_inbox.Live,
-    relay_inbox.Metadata,
-    "{\"event\":\"three\"}",
-    1002,
-  )
-  |> should.equal(Ok(relay_inbox.Accepted))
-  let context =
-    api.Context(
-      "0.1.0",
-      api.Team,
-      None,
-      None,
-      None,
-      None,
-      Some(api.TeamSecurity(
-        sessions,
-        annotation_store,
-        audit_log,
-        "https://hub.example",
-        None,
-        Some(inbox),
-        None,
-      )),
-      None,
-    )
-  let url = "/api/v1/relays/" <> relay_id <> "/frames?start=0&limit=2"
-
-  simulate.request(http.Get, url)
-  |> api.handle_at(context, 1003)
-  |> fn(response) { response.status }
-  |> should.equal(401)
-
-  let authorized =
-    simulate.request(http.Get, url)
-    |> request.set_header("cookie", "beamtrace_session=" <> viewer.id)
-    |> api.handle_at(context, 1003)
-  authorized.status |> should.equal(200)
-  let body = simulate.read_body(authorized)
-  body |> string.contains("\"total\":3") |> should.be_true()
-  body |> string.contains("\"kind\":\"gap\"") |> should.be_true()
-  body |> string.contains("\"dropped_frames\":1") |> should.be_true()
-  body |> string.contains("\\\"event\\\":\\\"two\\\"") |> should.be_true()
-  body |> string.contains("event\\\":\\\"three") |> should.be_false()
-
-  simulate.request(
-    http.Get,
-    "/api/v1/relays/" <> relay_id <> "/frames?start=0&limit=201",
-  )
-  |> request.set_header("cookie", "beamtrace_session=" <> viewer.id)
-  |> api.handle_at(context, 1003)
-  |> fn(response) { response.status }
-  |> should.equal(400)
-
-  relay_inbox.close(inbox)
-  audit_store.close(audit_log)
-  annotations.close(annotation_store)
-  team_auth.close(sessions)
-}
-
-pub fn raw_and_unknown_inbox_frames_require_combined_role_and_audit_test() {
+  seed_trace(metadata, backend, raw_id, relay_id, "raw", "raw-event", 2000)
   let sessions = team_auth.new()
   let annotation_store = annotations.new()
-  let audit_log = audit_store.new()
-  let inbox = relay_inbox.new(max_frames: 8, max_bytes: 4096)
-  let relay_id = "relay-001100110011001100110011"
-  let raw_payload = "{\"private\":\"raw-secret\"}"
-  relay_inbox.append(
-    inbox,
-    relay_id,
-    1,
-    relay_inbox.Exact,
-    relay_inbox.Metadata,
-    "{\"safe\":true}",
-    3000,
-  )
-  |> should.equal(Ok(relay_inbox.Accepted))
-  relay_inbox.append(
-    inbox,
-    relay_id,
-    2,
-    relay_inbox.Exact,
-    relay_inbox.Raw,
-    raw_payload,
-    3001,
-  )
-  |> should.equal(Ok(relay_inbox.Accepted))
-  relay_inbox.append(
-    inbox,
-    relay_id,
-    3,
-    relay_inbox.Exact,
-    relay_inbox.Unknown,
-    "{\"private\":\"legacy-secret\"}",
-    3002,
-  )
-  |> should.equal(Ok(relay_inbox.Accepted))
-  let viewer = team_session(sessions, "raw-read-viewer", [rbac.Viewer])
+  let assert Ok(audit_log) = audit_store.persistent(metadata)
+  let viewer = team_session(sessions, "trace-viewer", [rbac.Viewer])
   let investigator =
-    team_session(sessions, "raw-read-investigator", [rbac.Investigator])
-  let raw_only =
-    team_session(sessions, "raw-read-role-only", [rbac.RawCaptureRole])
+    team_session(sessions, "trace-investigator", [rbac.Investigator])
+  let raw_only = team_session(sessions, "trace-raw-only", [rbac.RawCaptureRole])
   let combined =
-    team_session(sessions, "raw-read-combined", [
+    team_session(sessions, "trace-combined", [
       rbac.Investigator,
       rbac.RawCaptureRole,
     ])
-  let admin = team_session(sessions, "raw-read-admin", [rbac.Admin])
+  let admin = team_session(sessions, "trace-admin", [rbac.Admin])
   let context =
-    api.Context(
-      "0.1.1",
-      api.Team,
-      None,
-      None,
-      None,
-      None,
-      Some(api.TeamSecurity(
-        sessions,
-        annotation_store,
-        audit_log,
-        "https://hub.example",
-        None,
-        Some(inbox),
-        None,
-      )),
-      None,
-    )
-  let metadata_url = "/api/v1/relays/" <> relay_id <> "/frames?start=0&limit=1"
-  let mixed_url = "/api/v1/relays/" <> relay_id <> "/frames?start=0&limit=10"
+    team_trace_context(sessions, annotation_store, audit_log, metadata, backend)
 
-  [viewer, investigator, raw_only, combined, admin]
-  |> list.each(fn(session) {
-    let response =
-      simulate.request(http.Get, metadata_url)
-      |> request.set_header("cookie", "beamtrace_session=" <> session.id)
-      |> api.handle_at(context, 3009)
-    response.status |> should.equal(200)
-    simulate.read_body(response)
-    |> string.contains("\\\"safe\\\":true")
-    |> should.be_true()
-  })
+  simulate.request(http.Get, "/api/v1/traces")
+  |> api.handle_at(context, 3000)
+  |> fn(response) { response.status }
+  |> should.equal(401)
+
+  let listed =
+    trace_request(http.Get, "/api/v1/traces?limit=1", viewer)
+    |> api.handle_at(context, 3000)
+  listed.status |> should.equal(200)
+  let list_body = simulate.read_body(listed)
+  list_body |> string.contains(raw_id) |> should.be_true()
+  list_body |> string.contains("\"locked\":true") |> should.be_true()
+  list_body |> string.contains("\"next_cursor\":\"") |> should.be_true()
+  let final_page =
+    trace_request(http.Get, "/api/v1/traces?limit=1&cursor=MQ", viewer)
+    |> api.handle_at(context, 3000)
+  final_page.status |> should.equal(200)
+  simulate.read_body(final_page)
+  |> string.contains("\"next_cursor\":null")
+  |> should.be_true()
+  trace_request(http.Get, "/api/v1/traces?cursor=eA", viewer)
+  |> api.handle_at(context, 3000)
+  |> fn(response) { response.status }
+  |> should.equal(400)
+
+  let detail =
+    trace_request(http.Get, "/api/v1/traces/" <> raw_id, viewer)
+    |> api.handle_at(context, 3000)
+  detail.status |> should.equal(200)
+  simulate.read_body(detail)
+  |> string.contains("\"locked\":true")
+  |> should.be_true()
+
+  let metadata_events =
+    trace_request(
+      http.Get,
+      "/api/v1/traces/" <> metadata_id <> "/events",
+      viewer,
+    )
+    |> api.handle_at(context, 3001)
+  metadata_events.status |> should.equal(200)
+  simulate.read_body(metadata_events)
+  |> string.contains("metadata-event")
+  |> should.be_true()
 
   [viewer, investigator, raw_only]
   |> list.each(fn(session) {
     let denied =
-      simulate.request(http.Get, mixed_url)
-      |> request.set_header("cookie", "beamtrace_session=" <> session.id)
-      |> api.handle_at(context, 3010)
+      trace_request(http.Get, "/api/v1/traces/" <> raw_id <> "/events", session)
+      |> api.handle_at(context, 3002)
     denied.status |> should.equal(403)
-    let body = simulate.read_body(denied)
-    body |> string.contains("raw-secret") |> should.be_false()
-    body |> string.contains("safe") |> should.be_false()
+    simulate.read_body(denied)
+    |> string.contains("raw-event")
+    |> should.be_false()
   })
-
   [combined, admin]
   |> list.each(fn(session) {
-    let response =
-      simulate.request(http.Get, mixed_url)
-      |> request.set_header("cookie", "beamtrace_session=" <> session.id)
-      |> api.handle_at(context, 3011)
-    response.status |> should.equal(200)
-    let body = simulate.read_body(response)
-    body |> string.contains("raw-secret") |> should.be_true()
-    body |> string.contains("legacy-secret") |> should.be_true()
-    body |> string.contains("\"privacy\":\"unknown\"") |> should.be_true()
+    let allowed =
+      trace_request(
+        http.Get,
+        "/api/v1/traces/" <> raw_id <> "/events?limit=200",
+        session,
+      )
+      |> api.handle_at(context, 3003)
+    allowed.status |> should.equal(200)
+    simulate.read_body(allowed)
+    |> string.contains("raw-event")
+    |> should.be_true()
   })
 
-  let reads = audit_store.snapshot(audit_log)
-  audit.verify(reads) |> should.equal(Ok(Nil))
-  reads.entries |> list.length |> should.equal(5)
-  reads.entries
+  trace_hold_request(http.Post, raw_id, viewer, viewer.csrf_token)
+  |> api.handle_at(context, 3004)
+  |> fn(response) { response.status }
+  |> should.equal(403)
+  trace_hold_request(http.Post, raw_id, admin, "wrong")
+  |> api.handle_at(context, 3004)
+  |> fn(response) { response.status }
+  |> should.equal(403)
+  trace_hold_request(
+    http.Post,
+    "00000000000000000000000000000000",
+    admin,
+    admin.csrf_token,
+  )
+  |> api.handle_at(context, 3004)
+  |> fn(response) { response.status }
+  |> should.equal(404)
+  let held =
+    trace_hold_request(http.Post, raw_id, admin, admin.csrf_token)
+    |> api.handle_at(context, 3004)
+  held.status |> should.equal(200)
+  simulate.read_body(held)
+  |> string.contains("\"legal_hold\":true")
+  |> should.be_true()
+  let released =
+    trace_hold_request(http.Delete, raw_id, admin, admin.csrf_token)
+    |> api.handle_at(context, 3005)
+  released.status |> should.equal(200)
+  simulate.read_body(released)
+  |> string.contains("\"legal_hold\":false")
+  |> should.be_true()
+
+  let recorded = audit_store.snapshot(audit_log)
+  audit.verify(recorded) |> should.equal(Ok(Nil))
+  recorded.entries
+  |> list.filter(fn(entry) { entry.action == "raw_trace.read" })
   |> list.map(fn(entry) { entry.outcome })
   |> should.equal([
     "denied_rbac",
@@ -845,145 +798,20 @@ pub fn raw_and_unknown_inbox_frames_require_combined_role_and_audit_test() {
     "allowed",
     "allowed",
   ])
-  reads.entries
-  |> list.all(fn(entry) { entry.action == "raw_trace.read" })
-  |> should.be_true()
-
-  relay_inbox.close(inbox)
-  audit_store.close(audit_log)
-  annotations.close(annotation_store)
-  team_auth.close(sessions)
-}
-
-pub fn raw_inbox_read_fails_closed_when_audit_persistence_is_unavailable_test() {
-  let assert Ok(database) = team_store.open(":memory:")
-  let assert Ok(audit_log) = audit_store.persistent(database)
-  team_store.close(database) |> should.equal(Ok(Nil))
-  let sessions = team_auth.new()
-  let annotation_store = annotations.new()
-  let inbox = relay_inbox.new(max_frames: 2, max_bytes: 256)
-  let relay_id = "relay-acde00000000fade00000000"
-  relay_inbox.append(
-    inbox,
-    relay_id,
-    1,
-    relay_inbox.Exact,
-    relay_inbox.Raw,
-    "{\"private\":\"must-not-escape\"}",
-    3500,
-  )
-  |> should.equal(Ok(relay_inbox.Accepted))
-  let authorized =
-    team_session(sessions, "raw-read-audit-failure", [
-      rbac.Investigator,
-      rbac.RawCaptureRole,
-    ])
-  let context =
-    api.Context(
-      "0.1.1",
-      api.Team,
-      None,
-      None,
-      None,
-      None,
-      Some(api.TeamSecurity(
-        sessions,
-        annotation_store,
-        audit_log,
-        "https://hub.example",
-        None,
-        Some(inbox),
-        None,
-      )),
-      None,
-    )
-
-  let response =
-    simulate.request(
-      http.Get,
-      "/api/v1/relays/" <> relay_id <> "/frames?start=0&limit=10",
-    )
-    |> request.set_header("cookie", "beamtrace_session=" <> authorized.id)
-    |> api.handle_at(context, 3501)
-  response.status |> should.equal(503)
-  simulate.read_body(response)
-  |> string.contains("must-not-escape")
-  |> should.be_false()
-
-  relay_inbox.close(inbox)
-  audit_store.close(audit_log)
-  annotations.close(annotation_store)
-  team_auth.close(sessions)
-}
-
-pub fn archive_privacy_is_checked_before_filesystem_or_s3_blob_fetch_test() {
-  let relay_id = "relay-abcdef000000abcdef000000"
-  let frame =
-    team_store.RelayFrameIndex(
-      relay_id: relay_id,
-      sequence: 1,
-      received_at_ms: 5000,
-      mode: "exact",
-      privacy: "raw",
-      blob_key: "relays/relay-abcdef000000abcdef000000/frames/missing.json",
-      event_count: 1,
-      bytes: 10,
-      sha256: "0000000000000000000000000000000000000000000000000000000000000000",
-    )
-  let assert Ok(metadata) = team_store.open(":memory:")
-  team_store.put_relay_frame(metadata, frame) |> should.equal(Ok(Nil))
-  let sessions = team_auth.new()
-  let annotation_store = annotations.new()
-  let audit_log = audit_store.new()
-  let viewer = team_session(sessions, "prefetch-viewer", [rbac.Viewer])
-  let assert Ok(s3) =
-    blob_store.s3(
-      endpoint: "https://127.0.0.1:1",
-      bucket: "beamtrace-test",
-      region: "ap-northeast-1",
-      prefix: "pre-fetch",
-    )
-  let backends = [
-    blob_store.filesystem("build/missing-hotfix-blobs"),
-    s3,
-  ]
-
-  backends
-  |> list.each(fn(backend) {
-    let context =
-      api.Context(
-        "0.1.1",
-        api.Team,
-        None,
-        None,
-        None,
-        None,
-        Some(api.TeamSecurity(
-          sessions,
-          annotation_store,
-          audit_log,
-          "https://hub.example",
-          None,
-          None,
-          Some(api.RelayArchiveBackend(metadata, backend)),
-        )),
-        None,
-      )
-    simulate.request(
-      http.Get,
-      "/api/v1/relays/" <> relay_id <> "/frames?start=0&limit=10",
-    )
-    |> request.set_header("cookie", "beamtrace_session=" <> viewer.id)
-    |> api.handle_at(context, 5001)
-    |> fn(response) { response.status }
-    |> should.equal(403)
-  })
-
-  let reads = audit_store.snapshot(audit_log)
-  reads.entries
+  recorded.entries
+  |> list.filter(fn(entry) { entry.action == "trace.hold.create" })
   |> list.map(fn(entry) { entry.outcome })
-  |> should.equal(["denied_rbac", "denied_rbac"])
-  audit.verify(reads) |> should.equal(Ok(Nil))
+  |> should.equal(["denied_rbac", "denied_csrf", "unknown_session", "allowed"])
+  recorded.entries
+  |> list.filter(fn(entry) { entry.action == "trace.hold.delete" })
+  |> list.map(fn(entry) { entry.outcome })
+  |> should.equal(["allowed"])
+  team_store.audit_log(metadata) |> should.equal(Ok(recorded))
+
+  simulate.request(http.Get, "/api/v1/relays/" <> relay_id <> "/frames")
+  |> api.handle_at(context, 3006)
+  |> fn(response) { response.status }
+  |> should.equal(410)
 
   audit_store.close(audit_log)
   annotations.close(annotation_store)
@@ -991,94 +819,209 @@ pub fn archive_privacy_is_checked_before_filesystem_or_s3_blob_fetch_test() {
   team_store.close(metadata) |> should.equal(Ok(Nil))
 }
 
-pub fn team_relay_frames_fall_back_to_durable_archive_after_restart_test() {
-  let database = fresh_store_path()
-  let blobs = fresh_data_dir()
-  let relay_id = "relay-abcdefabcdefabcdefabcdef"
-  let payload = "{\"type\":\"batch\",\"mode\":\"exact\",\"event\":\"durable\"}"
-  let assert Ok(initial) = team_store.open(database)
-  relay_archive.persist(
-    initial,
-    blobs,
-    relay_id,
-    1,
-    relay_archive.Exact,
-    payload,
-    4000,
-  )
-  |> should.be_ok
-  team_store.close(initial) |> should.equal(Ok(Nil))
-
-  let assert Ok(reopened) = team_store.open(database)
+pub fn raw_trace_acl_runs_before_filesystem_or_s3_fetch_test() {
+  let relay_id = "relay-abcdef000000abcdef000000"
+  let trace_id = "abcdefabcdefabcdefabcdefabcdefab"
+  let assert Ok(metadata) = team_store.open(":memory:")
+  let start = trace_start(trace_id, relay_id, "raw", 5000)
+  let assert Ok(_) = team_store.begin_trace_session(metadata, start, 64)
+  let missing =
+    team_store.RelayFrameIndex(
+      session_id: trace_id,
+      relay_id: relay_id,
+      sequence: 2,
+      received_at_ms: 5001,
+      mode: "exact",
+      privacy: "raw",
+      blob_key: "sessions/" <> trace_id <> "/events/missing.json",
+      event_count: 1,
+      bytes: 10,
+      sha256: "0000000000000000000000000000000000000000000000000000000000000000",
+    )
+  team_store.put_trace_frame(metadata, missing) |> should.equal(Ok(missing))
   let sessions = team_auth.new()
   let annotation_store = annotations.new()
-  let assert Ok(audit_log) = audit_store.persistent(reopened)
-  let empty_inbox = relay_inbox.new(max_frames: 2, max_bytes: 256)
-  let viewer = team_session(sessions, "viewer-durable", [rbac.Viewer])
-  let authorized =
-    team_session(sessions, "raw-durable", [
-      rbac.Investigator,
-      rbac.RawCaptureRole,
-    ])
-  let context =
-    api.Context(
-      "0.1.0",
-      api.Team,
-      None,
-      None,
-      None,
-      None,
-      Some(api.TeamSecurity(
+  let assert Ok(audit_log) = audit_store.persistent(metadata)
+  let viewer = team_session(sessions, "trace-prefetch-viewer", [rbac.Viewer])
+  let assert Ok(s3) =
+    blob_store.s3(
+      endpoint: "https://objects.invalid",
+      bucket: "beamtrace-test",
+      region: "ap-northeast-1",
+      prefix: "pre-fetch",
+    )
+  [blob_store.filesystem(fresh_data_dir()), s3]
+  |> list.each(fn(backend) {
+    let context =
+      team_trace_context(
         sessions,
         annotation_store,
         audit_log,
-        "https://hub.example",
-        None,
-        Some(empty_inbox),
-        Some(api.RelayArchive(reopened, blobs)),
-      )),
-      None,
-    )
-
-  let denied =
-    simulate.request(
-      http.Get,
-      "/api/v1/relays/" <> relay_id <> "/frames?start=0&limit=10",
-    )
-    |> request.set_header("cookie", "beamtrace_session=" <> viewer.id)
-    |> api.handle_at(context, 4001)
-  denied.status |> should.equal(403)
-  simulate.read_body(denied) |> string.contains("durable") |> should.be_false()
-
-  let response =
-    simulate.request(
-      http.Get,
-      "/api/v1/relays/" <> relay_id <> "/frames?start=0&limit=10",
-    )
-    |> request.set_header("cookie", "beamtrace_session=" <> authorized.id)
-    |> api.handle_at(context, 4001)
-  response.status |> should.equal(200)
-  let body = simulate.read_body(response)
-  body |> string.contains("\"total\":1") |> should.be_true()
-  body |> string.contains("durable") |> should.be_true()
-
-  let reads = audit_store.snapshot(audit_log)
-  audit.verify(reads) |> should.equal(Ok(Nil))
-  let assert [denied_read, allowed_read] = reads.entries
-  [denied_read.action, allowed_read.action]
-  |> should.equal(["raw_trace.read", "raw_trace.read"])
-  [denied_read.outcome, allowed_read.outcome]
-  |> should.equal(["denied_rbac", "allowed"])
+        metadata,
+        backend,
+      )
+    trace_request(http.Get, "/api/v1/traces/" <> trace_id <> "/events", viewer)
+    |> api.handle_at(context, 5002)
+    |> fn(response) { response.status }
+    |> should.equal(403)
+  })
+  audit_store.snapshot(audit_log).entries
+  |> list.map(fn(entry) { entry.outcome })
+  |> should.equal(["denied_rbac", "denied_rbac"])
 
   audit_store.close(audit_log)
-  relay_inbox.close(empty_inbox)
-  team_store.close(reopened) |> should.equal(Ok(Nil))
-
-  let assert Ok(audit_database) = team_store.open(database)
-  team_store.audit_log(audit_database) |> should.equal(Ok(reads))
-  team_store.close(audit_database) |> should.equal(Ok(Nil))
   annotations.close(annotation_store)
   team_auth.close(sessions)
+  team_store.close(metadata) |> should.equal(Ok(Nil))
+}
+
+pub fn migrated_unknown_trace_is_incomplete_restart_safe_and_raw_locked_test() {
+  let relay_id = "relay-00112233445566778899aabb"
+  let trace_id = "legacy-" <> relay_id
+  let database = fresh_store_path()
+  let blob_root = fresh_data_dir()
+  let blob_key = "relays/" <> relay_id <> "/frames/1.json"
+  let policy = types.RawPolicy(["password"], 2, 64)
+  let assert Ok(transport) =
+    relay_payload.encode_raw("exact", string.repeat("C", 43), policy, [
+      session_event("legacy-unknown-event"),
+    ])
+  let assert Ok(batch) = relay_payload.decode_for_ingest(transport)
+  let assert Ok(blob) = blob_store.put(blob_root, blob_key, batch.canonical)
+
+  let assert Ok(connection) = sqlight.open(database)
+  sqlight.exec(
+    "CREATE TABLE relay_frames (
+       relay_id TEXT NOT NULL,
+       sequence INTEGER NOT NULL,
+       received_at_ms INTEGER NOT NULL,
+       mode TEXT NOT NULL,
+       blob_key TEXT NOT NULL,
+       bytes INTEGER NOT NULL,
+       sha256 TEXT NOT NULL,
+       PRIMARY KEY (relay_id, sequence)
+     );",
+    connection,
+  )
+  |> should.be_ok()
+  sqlight.query(
+    "INSERT INTO relay_frames (
+       relay_id, sequence, received_at_ms, mode, blob_key, bytes, sha256
+     ) VALUES (?, 1, 1000, 'exact', ?, ?, ?);",
+    on: connection,
+    with: [
+      sqlight.text(relay_id),
+      sqlight.text(blob.key),
+      sqlight.int(blob.bytes),
+      sqlight.text(blob.sha256),
+    ],
+    expecting: decode.success(Nil),
+  )
+  |> should.be_ok()
+  sqlight.close(connection) |> should.equal(Ok(Nil))
+
+  // Opening performs the v1 -> session-scoped migration. Reopen once more to
+  // prove the conservative privacy/completeness state is durable.
+  let assert Ok(migrated) = team_store.open(database)
+  team_store.close(migrated) |> should.equal(Ok(Nil))
+  let assert Ok(metadata) = team_store.open(database)
+  let assert Ok(Some(trace)) = team_store.trace_session(metadata, trace_id)
+  trace.privacy |> should.equal("unknown")
+  trace.completeness |> should.equal("incomplete")
+  trace.active |> should.be_false()
+
+  let sessions = team_auth.new()
+  let annotation_store = annotations.new()
+  let assert Ok(audit_log) = audit_store.persistent(metadata)
+  let viewer = team_session(sessions, "unknown-viewer", [rbac.Viewer])
+  let investigator =
+    team_session(sessions, "unknown-investigator", [rbac.Investigator])
+  let raw_only =
+    team_session(sessions, "unknown-raw-only", [
+      rbac.RawCaptureRole,
+    ])
+  let combined =
+    team_session(sessions, "unknown-combined", [
+      rbac.Investigator,
+      rbac.RawCaptureRole,
+    ])
+  let admin = team_session(sessions, "unknown-admin", [rbac.Admin])
+  let filesystem_context =
+    team_trace_context(
+      sessions,
+      annotation_store,
+      audit_log,
+      metadata,
+      blob_store.filesystem(blob_root),
+    )
+
+  let detail =
+    trace_request(http.Get, "/api/v1/traces/" <> trace_id, viewer)
+    |> api.handle_at(filesystem_context, 2000)
+  detail.status |> should.equal(200)
+  simulate.read_body(detail)
+  |> string.contains("\"locked\":true")
+  |> should.be_true()
+
+  [viewer, investigator, raw_only]
+  |> list.each(fn(session) {
+    let denied =
+      trace_request(
+        http.Get,
+        "/api/v1/traces/" <> trace_id <> "/events",
+        session,
+      )
+      |> api.handle_at(filesystem_context, 2001)
+    denied.status |> should.equal(403)
+    simulate.read_body(denied)
+    |> string.contains("legacy-unknown-event")
+    |> should.be_false()
+  })
+  [combined, admin]
+  |> list.each(fn(session) {
+    let allowed =
+      trace_request(
+        http.Get,
+        "/api/v1/traces/" <> trace_id <> "/events",
+        session,
+      )
+      |> api.handle_at(filesystem_context, 2002)
+    allowed.status |> should.equal(200)
+    simulate.read_body(allowed)
+    |> string.contains("legacy-unknown-event")
+    |> should.be_true()
+  })
+
+  let assert Ok(s3) =
+    blob_store.s3(
+      endpoint: "https://objects.invalid",
+      bucket: "beamtrace-test",
+      region: "ap-northeast-1",
+      prefix: "unknown-prefetch",
+    )
+  let s3_context =
+    team_trace_context(sessions, annotation_store, audit_log, metadata, s3)
+  trace_request(http.Get, "/api/v1/traces/" <> trace_id <> "/events", viewer)
+  |> api.handle_at(s3_context, 2003)
+  |> fn(response) { response.status }
+  |> should.equal(403)
+
+  audit_store.snapshot(audit_log).entries
+  |> list.filter(fn(entry) { entry.action == "raw_trace.read" })
+  |> list.map(fn(entry) { entry.outcome })
+  |> should.equal([
+    "denied_rbac",
+    "denied_rbac",
+    "denied_rbac",
+    "allowed",
+    "allowed",
+    "denied_rbac",
+  ])
+
+  audit_store.close(audit_log)
+  annotations.close(annotation_store)
+  team_auth.close(sessions)
+  team_store.close(metadata) |> should.equal(Ok(Nil))
 }
 
 pub fn team_annotations_enforce_session_rbac_origin_and_csrf_test() {
@@ -1573,6 +1516,141 @@ pub fn production_oidc_provider_rejects_an_insecure_token_endpoint_test() {
   )
   |> should.equal(Error("token_exchange_failed"))
   oidc_flow.close(attempts)
+}
+
+fn seed_trace(
+  store: team_store.Store,
+  backend: blob_store.Backend,
+  trace_id: String,
+  relay_id: String,
+  privacy: String,
+  event_id: String,
+  timestamp_ms: Int,
+) -> Nil {
+  let start = trace_start(trace_id, relay_id, privacy, timestamp_ms)
+  let assert Ok(_) = team_store.begin_trace_session(store, start, 64)
+  let #(payload, classification) = case privacy {
+    "metadata" -> {
+      let assert Ok(encoded) =
+        relay_payload.encode("exact", [session_event(event_id)])
+      #(encoded, relay_inbox.Metadata)
+    }
+    "raw" -> {
+      let policy = types.RawPolicy(["password"], 2, 64)
+      let assert Ok(transport) =
+        relay_payload.encode_raw("exact", string.repeat("A", 43), policy, [
+          session_event(event_id),
+        ])
+      let assert Ok(decoded) = relay_payload.decode_for_ingest(transport)
+      #(decoded.canonical, relay_inbox.Raw)
+    }
+    _ -> panic as "invalid test privacy"
+  }
+  let assert Ok(_) =
+    relay_archive.persist_session_events_classified_with(
+      store,
+      backend,
+      trace_id,
+      relay_id,
+      2,
+      relay_archive.Exact,
+      classification,
+      payload,
+      timestamp_ms + 2,
+      event_count: 1,
+    )
+  let assert Ok(_) =
+    team_store.finish_trace_session(
+      store,
+      trace_id,
+      relay_id,
+      "complete",
+      timestamp_ms + 3,
+      timestamp_ms + 4,
+    )
+  Nil
+}
+
+fn trace_start(
+  trace_id: String,
+  relay_id: String,
+  privacy: String,
+  timestamp_ms: Int,
+) -> team_store.TraceSession {
+  team_store.TraceSession(
+    id: trace_id,
+    relay_id: relay_id,
+    project: "shop",
+    environment: "prod",
+    node: "app@host",
+    module_: "shop",
+    function_: "checkout",
+    arity: 1,
+    mode: "exact",
+    privacy: privacy,
+    started_at_ms: timestamp_ms,
+    received_at_ms: timestamp_ms + 1,
+    ended_at_ms: 0,
+    last_received_at_ms: timestamp_ms + 1,
+    completeness: "active",
+    event_count: 0,
+    legal_hold: False,
+    active: True,
+  )
+}
+
+fn team_trace_context(
+  sessions: team_auth.Store,
+  annotation_store: annotations.Store,
+  audit_log: audit_store.Store,
+  metadata: team_store.Store,
+  backend: blob_store.Backend,
+) -> api.Context {
+  api.Context(
+    "0.2.0",
+    api.Team,
+    None,
+    None,
+    None,
+    None,
+    Some(api.TeamSecurity(
+      sessions,
+      annotation_store,
+      audit_log,
+      "https://hub.example",
+      None,
+      None,
+      Some(api.RelayArchiveBackend(metadata, backend)),
+    )),
+    None,
+  )
+}
+
+fn trace_request(
+  method: http.Method,
+  path: String,
+  session: team_auth.Session,
+) {
+  simulate.request(method, path)
+  |> request.set_header("cookie", "beamtrace_session=" <> session.id)
+}
+
+fn trace_hold_request(
+  method: http.Method,
+  trace_id: String,
+  session: team_auth.Session,
+  csrf_token: String,
+) {
+  trace_request(method, "/api/v1/traces/" <> trace_id <> "/hold", session)
+  |> request.set_header("origin", "https://hub.example")
+  |> request.set_header("x-beamtrace-csrf", csrf_token)
+  |> request.set_header(
+    "cookie",
+    "beamtrace_session="
+      <> session.id
+      <> "; beamtrace_csrf="
+      <> session.csrf_token,
+  )
 }
 
 fn annotation_request(

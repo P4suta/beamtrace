@@ -9,7 +9,8 @@ BeamTrace `0.x` releases are alpha prereleases. Merging a release pull request i
 2. Grant the App repository permissions for Contents, Pull requests, and Issues, each with read/write access. Do not grant organization-wide installation access.
 3. Create the `release-automation` environment, restrict it to the `main` branch, add the environment variable `RELEASE_PLEASE_APP_CLIENT_ID` with the App client ID, and add the environment secret `RELEASE_PLEASE_APP_PRIVATE_KEY` containing the App private key.
 4. Create the `release` environment, restrict it to tags matching `v*`, and add a short-lived `HEXPM_API_KEY` environment secret with API Write access only. The key must belong to the maintainer account intended to own `beamtrace_core`.
-5. Confirm that the `beamtrace_core` Hex package name is still available immediately before approving the first release pull request.
+5. Enable GitHub release immutability for the repository. It only protects future releases, so the setting must be enabled and audited before merging a release pull request.
+6. Confirm that the `beamtrace_core` Hex package name is still available immediately before approving the first release pull request.
 
 The environment and branch policies can be applied idempotently after the secrets have been created:
 
@@ -37,12 +38,13 @@ All later pull request titles must use `type(scope): subject`. Squash merging pr
 ## Automated sequence
 
 1. A push to `main` creates or updates the release pull request using the repository-scoped GitHub App token.
-2. A pull request carrying `autorelease: pending` builds all five supported native archives, the Hex tarball, the OCI image, and Homebrew/Scoop metadata without publishing anything. Windows ARM64 is excluded until CI can provision and verify a native Erlang/OTP runtime; the Windows x64 runtime must not be published under an ARM64 artifact name.
-3. Merging that pull request lets release-please create a protected `vX.Y.Z` tag and a draft GitHub prerelease.
-4. The tag workflow refuses to proceed unless exactly one matching GitHub Release is both draft and prerelease. It lists releases explicitly because GitHub's release-by-tag endpoint only returns published releases, then builds and attests every artifact before any registry write.
-5. The workflow publishes or verifies the immutable Hex package, then publishes or verifies GHCR tags `X.Y.Z` and `sha-<commit>` at one digest. Gleam requires the exact `I am not using semantic versioning` acknowledgement for every `0.x` publish even with `--yes`; the automation supplies it only after the release pull request approval and immutable tarball comparison.
-6. A clean exact-version Hex consumer build, HexDocs request, and registry-pulled OCI `version`, `doctor`, and non-root checks must pass.
-7. Only then are the release assets uploaded with replacement enabled and the existing draft published as `BeamTrace vX.Y.Z`.
+2. A pull request carrying `autorelease: pending` builds and smoke-tests all five supported native archives, the Hex tarball, the OCI image, and Homebrew/Scoop metadata without publishing anything. Every ZIP is limited to 5% growth over its published v0.1.0 target baseline. Windows ARM64 is excluded until CI can provision and verify a native Erlang/OTP runtime; the Windows x64 runtime must not be published under an ARM64 artifact name.
+3. Immediately before merging that pull request, rerun `audit-github.ps1` with a repository administrator token and require immutable releases to remain enabled. The workflow token intentionally cannot perform this check because GitHub's endpoint requires repository Administration (read), so this is part of the explicit human publication gate.
+4. Merging that pull request lets release-please create a protected `vX.Y.Z` tag and a draft GitHub prerelease.
+5. The tag workflow refuses to proceed unless exactly one matching GitHub Release is both draft and prerelease and the runner supports immutable-release attestation verification. It lists releases explicitly because GitHub's release-by-tag endpoint only returns published releases, then builds and attests every artifact before any registry write.
+6. The workflow publishes or verifies the immutable Hex package, then publishes or verifies GHCR tags `X.Y.Z` and `sha-<commit>` at one digest. Gleam requires the exact `I am not using semantic versioning` acknowledgement for every `0.x` publish even with `--yes`; the automation supplies it only after the release pull request approval and immutable tarball comparison.
+7. A clean exact-version Hex consumer runs the public codec/DAG/diagnostics example on both Erlang and JavaScript; a HexDocs request and registry-pulled OCI `version`, `doctor`, and non-root checks must also pass.
+8. Only then are the exact release assets uploaded to the existing draft. Their names, sizes, and GitHub-reported SHA-256 digests and the protected tag SHA are rechecked immediately before publication. The workflow publishes the draft as `BeamTrace vX.Y.Z` only when GitHub reports the resulting release as immutable, then verifies its release attestation.
 
 If any step fails, the GitHub Release remains a draft. A rerun may skip an existing Hex version only when its parsed metadata values match after normalizing unordered metadata collections and all expanded file names and hashes match exactly. It may reuse GHCR tags only when their revision and version labels match the immutable release inputs and both tags resolve to the same registry digest and image config; a missing partner tag is created only from the validated existing image. Timestamped Docker rebuild IDs are not used to reject an otherwise identical published release identity. The workflow never uses Hex `--replace` and never creates `latest`.
 

@@ -39,8 +39,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      packages: read
-      security-events: write
+      packages: read # Resolve package metadata used by CodeQL analysis.
+      security-events: write # Upload CodeQL findings to code scanning.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -61,8 +61,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      security-events: write
-      id-token: write
+      security-events: write # Upload the Scorecard SARIF report.
+      id-token: write # Publish an authenticated Scorecard result.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

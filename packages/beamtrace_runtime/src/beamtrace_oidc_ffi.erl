@@ -1,13 +1,7 @@
 %% SPDX-License-Identifier: Apache-2.0 OR MIT
 -module(beamtrace_oidc_ffi).
 
--export([pkce_s256/1, random_url_token/1, authorization_url/6]).
-
-pkce_s256(Verifier) when is_binary(Verifier) ->
-    base64url(crypto:hash(sha256, Verifier)).
-
-random_url_token(Bytes) when is_integer(Bytes), Bytes > 0, Bytes =< 128 ->
-    base64url(crypto:strong_rand_bytes(Bytes)).
+-export([authorization_url/6]).
 
 authorization_url(Endpoint, ClientId, RedirectUri, State, Nonce, Challenge)
         when is_binary(Endpoint), is_binary(ClientId), is_binary(RedirectUri),
@@ -62,9 +56,3 @@ encode_byte(Byte) ->
 
 hex_digit(Value) when Value < 10 -> $0 + Value;
 hex_digit(Value) -> $A + Value - 10.
-
-base64url(Binary) ->
-    Encoded = base64:encode(Binary),
-    NoPadding = binary:replace(Encoded, <<"=">>, <<>>, [global]),
-    WithDash = binary:replace(NoPadding, <<"+">>, <<"-">>, [global]),
-    binary:replace(WithDash, <<"/">>, <<"_">>, [global]).

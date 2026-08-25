@@ -9,6 +9,36 @@ pub type Mode {
   Capture
   Live
   Compare
+  Team
+}
+
+pub type TeamTrace {
+  TeamTrace(
+    id: String,
+    status: String,
+    node: String,
+    module_: String,
+    function_: String,
+    arity: Int,
+    privacy: String,
+    completeness: String,
+    event_count: Int,
+    received_at_ms: Int,
+    legal_hold: Bool,
+    locked: Bool,
+  )
+}
+
+pub type TeamTracePage {
+  TeamTracePage(traces: List(TeamTrace), next_cursor: Option(String))
+}
+
+pub type TeamEventPage {
+  TeamEventPage(
+    trace_id: String,
+    events: List(EventRow),
+    next_cursor: Option(String),
+  )
 }
 
 pub type Evidence {
@@ -173,6 +203,15 @@ pub type Model {
     compare_loading: Bool,
     compare_error: Option(String),
     compare_report: Option(CompareReport),
+    team_traces: List(TeamTrace),
+    team_next_cursor: Option(String),
+    team_loading: Bool,
+    team_error: Option(String),
+    selected_trace_id: Option(String),
+    team_events: List(EventRow),
+    team_events_next_cursor: Option(String),
+    team_events_loading: Bool,
+    team_events_error: Option(String),
   )
 }
 
@@ -215,6 +254,17 @@ pub type Msg {
   UserRequestedCompare
   CompareLoaded(CompareReport)
   CompareFailed(String)
+  UserRequestedTeamTraces
+  UserRequestedMoreTeamTraces
+  TeamTracesLoaded(TeamTracePage)
+  TeamTracesFailed(String)
+  UserSelectedTeamTrace(String)
+  UserRequestedMoreTeamEvents
+  TeamEventsLoaded(TeamEventPage)
+  TeamEventsFailed(trace_id: String, reason: String)
+  UserRequestedTraceHold(trace_id: String, enabled: Bool)
+  TraceHoldUpdated(TeamTrace)
+  TraceHoldFailed(String)
 }
 
 pub fn init(events: List(EventRow)) -> Model {
@@ -260,6 +310,15 @@ pub fn init(events: List(EventRow)) -> Model {
     compare_loading: False,
     compare_error: None,
     compare_report: None,
+    team_traces: [],
+    team_next_cursor: None,
+    team_loading: False,
+    team_error: None,
+    selected_trace_id: None,
+    team_events: [],
+    team_events_next_cursor: None,
+    team_events_loading: False,
+    team_events_error: None,
   )
 }
 
@@ -287,6 +346,14 @@ pub fn update(model: Model, message: Msg) -> Model {
         live_error: case mode {
           Live -> None
           _ -> model.live_error
+        },
+        team_loading: case mode, model.team_traces {
+          Team, [] -> True
+          _, _ -> model.team_loading
+        },
+        team_error: case mode {
+          Team -> None
+          _ -> model.team_error
         },
       )
     UserSelectedEvent(id) -> Model(..model, selected_event_id: Some(id))
@@ -456,6 +523,109 @@ pub fn update(model: Model, message: Msg) -> Model {
       )
     CompareFailed(reason) ->
       Model(..model, compare_loading: False, compare_error: Some(reason))
+    UserRequestedTeamTraces ->
+      Model(
+        ..model,
+        team_traces: [],
+        team_loading: True,
+        team_error: None,
+        team_next_cursor: None,
+      )
+    UserRequestedMoreTeamTraces ->
+      Model(..model, team_loading: True, team_error: None)
+    TeamTracesLoaded(page) ->
+      Model(
+        ..model,
+        team_traces: merge_team_traces(model.team_traces, page.traces),
+        team_next_cursor: page.next_cursor,
+        team_loading: False,
+        team_error: None,
+      )
+    TeamTracesFailed(reason) ->
+      Model(..model, team_loading: False, team_error: Some(reason))
+    UserSelectedTeamTrace(id) ->
+      case list.find(model.team_traces, fn(trace) { trace.id == id }) {
+        Error(_) -> model
+        Ok(trace) ->
+          Model(
+            ..model,
+            selected_trace_id: Some(id),
+            team_events: [],
+            team_events_next_cursor: None,
+            team_events_loading: !trace.locked,
+            team_events_error: case trace.locked {
+              True -> Some("Raw trace content is locked for this role")
+              False -> None
+            },
+          )
+      }
+    UserRequestedMoreTeamEvents ->
+      Model(..model, team_events_loading: True, team_events_error: None)
+    TeamEventsLoaded(page) ->
+      case model.selected_trace_id == Some(page.trace_id) {
+        False -> model
+        True -> {
+          let events =
+            list.append(model.team_events, page.events)
+            |> list.take(1000)
+          Model(
+            ..model,
+            team_events: events,
+            team_events_next_cursor: case list.length(events) >= 1000 {
+              True -> None
+              False -> page.next_cursor
+            },
+            team_events_loading: False,
+            team_events_error: None,
+          )
+        }
+      }
+    TeamEventsFailed(trace_id, reason) ->
+      case model.selected_trace_id == Some(trace_id) {
+        True ->
+          Model(
+            ..model,
+            team_events_loading: False,
+            team_events_error: Some(reason),
+          )
+        False -> model
+      }
+    UserRequestedTraceHold(_, _) -> model
+    TraceHoldUpdated(updated) ->
+      Model(
+        ..model,
+        team_traces: list.map(model.team_traces, fn(trace) {
+          case trace.id == updated.id {
+            True -> updated
+            False -> trace
+          }
+        }),
+        team_error: None,
+      )
+    TraceHoldFailed(reason) -> Model(..model, team_error: Some(reason))
+  }
+}
+
+fn merge_team_traces(
+  existing: List(TeamTrace),
+  incoming: List(TeamTrace),
+) -> List(TeamTrace) {
+  list.fold(incoming, existing, fn(traces, incoming_trace) {
+    case list.any(traces, fn(trace) { trace.id == incoming_trace.id }) {
+      True -> traces
+      False -> list.append(traces, [incoming_trace])
+    }
+  })
+  |> list.take(100)
+}
+
+pub fn selected_team_trace(model: Model) -> Option(TeamTrace) {
+  case model.selected_trace_id {
+    None -> None
+    Some(id) ->
+      model.team_traces
+      |> list.find(fn(trace) { trace.id == id })
+      |> result_to_option
   }
 }
 
@@ -583,6 +753,7 @@ pub fn keyboard_shortcut(key: String) -> Option(Msg) {
     "1" -> Some(UserSelectedMode(Capture))
     "2" -> Some(UserSelectedMode(Live))
     "3" -> Some(UserSelectedMode(Compare))
+    "4" -> Some(UserSelectedMode(Team))
     "/" -> Some(UserFocusedSearch)
     "k" -> Some(UserOpenedPalette)
     _ -> None

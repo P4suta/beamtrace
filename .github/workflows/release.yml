@@ -32,8 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      # GitHub only exposes draft releases to tokens with push-equivalent access.
-      contents: write
+      contents: write # Access the draft release; GitHub requires push-equivalent scope.
     steps:
       - name: Verify the corresponding prerelease is still a draft
         shell: bash
@@ -41,6 +40,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          gh release verify --help >/dev/null
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]
           [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
           resolved_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)"
@@ -90,8 +90,8 @@ jobs:
             architecture: arm64
     permissions:
       contents: read
-      id-token: write
-      attestations: write
+      id-token: write # Obtain the OIDC identity used by artifact attestations.
+      attestations: write # Publish provenance for the native archives and SBOMs.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -105,14 +105,17 @@ jobs:
       - name: Verify release version
         shell: pwsh
         run: ./scripts/assert-release-version.ps1 -Tag $env:RELEASE_TAG
-      - name: Build portable archive and SBOM
+      - name: Build and smoke-test portable archive and SBOM
         shell: pwsh
-        run: ./scripts/package.ps1 -SkipTests
+        run: ./scripts/test-package.ps1
       - name: Verify native artifact identity
         shell: pwsh
+        env:
+          PACKAGE_PLATFORM: ${{ matrix.platform }}
+          PACKAGE_ARCHITECTURE: ${{ matrix.architecture }}
         run: |
           $version = $env:RELEASE_TAG.Substring(1)
-          $archive = "dist/beamtrace-$version-${{ matrix.platform }}-${{ matrix.architecture }}.zip"
+          $archive = "dist/beamtrace-$version-$env:PACKAGE_PLATFORM-$env:PACKAGE_ARCHITECTURE.zip"
           if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) {
             throw "Native package was not produced: $archive"
           }
@@ -138,8 +141,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      id-token: write
-      attestations: write
+      id-token: write # Obtain the OIDC identity used by artifact attestations.
+      attestations: write # Publish provenance for the Hex tarball.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -185,8 +188,8 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
-      id-token: write
-      attestations: write
+      id-token: write # Obtain the OIDC identity used by artifact attestations.
+      attestations: write # Publish provenance for the OCI archive.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -235,8 +238,8 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
-      id-token: write
-      attestations: write
+      id-token: write # Obtain the OIDC identity used by artifact attestations.
+      attestations: write # Publish provenance for distribution metadata.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -251,8 +254,8 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/build-distribution-metadata.ps1 `
-            -BaseUrl "https://github.com/${{ github.repository }}/releases/download/$env:RELEASE_TAG" `
-            -Homepage "https://github.com/${{ github.repository }}"
+            -BaseUrl "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:RELEASE_TAG" `
+            -Homepage "https://github.com/$env:GITHUB_REPOSITORY"
       - name: Attest package-manager metadata
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
@@ -321,9 +324,9 @@ jobs:
     environment: release
     permissions:
       contents: read
-      packages: write
-      id-token: write
-      attestations: write
+      packages: write # Push the immutable version and commit tags to GHCR.
+      id-token: write # Obtain the OIDC identity used by the registry attestation.
+      attestations: write # Publish provenance for the pushed OCI digest.
     outputs:
       name: ${{ steps.publish.outputs.name }}
       digest: ${{ steps.publish.outputs.digest }}
@@ -450,7 +453,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
-      packages: read
+      packages: read # Pull the just-published OCI digest for boundary verification.
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -461,6 +464,10 @@ jobs:
           otp-version: '29'
           gleam-version: '1.18.1'
           rebar3-version: '3.27.0'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
       - name: Authenticate to GHCR for registry smoke tests
         shell: bash
         env:
@@ -468,12 +475,15 @@ jobs:
         run: echo "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
       - name: Verify clean Hex consumer, HexDocs, and pulled OCI digest
         shell: pwsh
+        env:
+          PUBLISHED_IMAGE: ${{ needs.publish-image.outputs.name }}
+          PUBLISHED_DIGEST: ${{ needs.publish-image.outputs.digest }}
         run: |
           $version = $env:RELEASE_TAG.Substring(1)
           ./scripts/verify-published-release.ps1 `
             -Version $version `
-            -Image '${{ needs.publish-image.outputs.name }}' `
-            -Digest '${{ needs.publish-image.outputs.digest }}'
+            -Image $env:PUBLISHED_IMAGE `
+            -Digest $env:PUBLISHED_DIGEST
 
   publish-release:
     name: Publish GitHub prerelease
@@ -482,7 +492,7 @@ jobs:
     timeout-minutes: 10
     environment: release
     permissions:
-      contents: write
+      contents: write # Upload final assets and publish the verified draft release.
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -503,6 +513,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          version="${RELEASE_TAG#v}"
           release_id="$(
             gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" |
               jq --exit-status --raw-output --arg tag "$RELEASE_TAG" '
@@ -511,11 +522,97 @@ jobs:
                 | if length == 1 then .[0].id else empty end
               '
           )"
-          [[ "$(find dist -maxdepth 1 -type f -name 'beamtrace-*.zip' | wc -l)" -eq 5 ]]
-          [[ "$(find dist -maxdepth 1 -type f -name 'beamtrace-*.zip.sha256' | wc -l)" -eq 5 ]]
-          [[ "$(find dist -maxdepth 1 -type f -name 'beamtrace_core-*.tar' | wc -l)" -eq 1 ]]
+          expected_assets="$(
+            printf '%s\n' \
+              "beamtrace-$version-linux-arm64.zip" \
+              "beamtrace-$version-linux-arm64.zip.sha256" \
+              "beamtrace-$version-linux-x64.zip" \
+              "beamtrace-$version-linux-x64.zip.sha256" \
+              "beamtrace-$version-macos-arm64.zip" \
+              "beamtrace-$version-macos-arm64.zip.sha256" \
+              "beamtrace-$version-macos-x64.zip" \
+              "beamtrace-$version-macos-x64.zip.sha256" \
+              "beamtrace-$version-windows-x64.zip" \
+              "beamtrace-$version-windows-x64.zip.sha256" \
+              "beamtrace_core-$version.tar" \
+              "beamtrace_core-$version.tar.sha256" \
+              'beamtrace.json' \
+              'beamtrace.rb' \
+              'release-checksums.json' |
+              sort
+          )"
+          actual_assets="$(find dist -maxdepth 1 -type f -printf '%f\n' | sort)"
+          if [[ "$actual_assets" != "$expected_assets" ]]; then
+            echo 'Release asset inventory differs from the reviewed contract.' >&2
+            diff --unified <(printf '%s\n' "$expected_assets") <(printf '%s\n' "$actual_assets") || true
+            exit 1
+          fi
+
+          resolved_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)"
+          if [[ "$resolved_sha" != "$RELEASE_SHA" ]]; then
+            echo "Release tag moved before asset upload: $resolved_sha != $RELEASE_SHA" >&2
+            exit 1
+          fi
           gh release upload "$RELEASE_TAG" dist/* --clobber --repo "$GITHUB_REPOSITORY"
-          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+
+          assets_verified=false
+          for _attempt in {1..12}; do
+            assets_json="$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100")"
+            if jq --exit-status --argjson expected 15 '
+              length == $expected
+              and ([.[].name] | unique | length == $expected)
+              and all(.[]; .state == "uploaded" and (.digest | test("^sha256:[0-9a-f]{64}$")))
+            ' <<<"$assets_json" >/dev/null; then
+              assets_verified=true
+              while IFS= read -r path; do
+                name="${path##*/}"
+                remote="$(jq --exit-status --compact-output --arg name "$name" '
+                  [.[] | select(.name == $name)]
+                  | if length == 1 then .[0] else empty end
+                ' <<<"$assets_json")" || { assets_verified=false; break; }
+                local_digest="sha256:$(sha256sum "$path" | cut -d' ' -f1)"
+                local_size="$(wc -c < "$path")"
+                remote_digest="$(jq --raw-output .digest <<<"$remote")"
+                remote_size="$(jq --raw-output .size <<<"$remote")"
+                if [[ "$remote_digest" != "$local_digest" || "$remote_size" != "$local_size" ]]; then
+                  echo "Uploaded asset does not match local candidate: $name" >&2
+                  assets_verified=false
+                  break
+                fi
+              done < <(find dist -maxdepth 1 -type f | sort)
+            fi
+            if [[ "$assets_verified" == true ]]; then
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$assets_verified" != true ]]; then
+            echo 'Could not verify every draft release asset by name, size, and SHA-256.' >&2
+            exit 1
+          fi
+
+          resolved_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)"
+          [[ "$resolved_sha" == "$RELEASE_SHA" ]]
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" |
+            jq --exit-status --arg tag "$RELEASE_TAG" '
+              .tag_name == $tag and .draft == true and .prerelease == true and .immutable == false
+            ' >/dev/null
+          published="$(gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
             -F draft=false \
             -F prerelease=true \
-            -f name="BeamTrace $RELEASE_TAG" >/dev/null
+            -f name="BeamTrace $RELEASE_TAG")"
+          jq --exit-status '
+            .draft == false and .prerelease == true and .immutable == true
+          ' <<<"$published" >/dev/null
+          resolved_sha="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)"
+          [[ "$resolved_sha" == "$RELEASE_SHA" ]]
+
+          release_verified=false
+          for _attempt in {1..12}; do
+            if gh release verify "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY"; then
+              release_verified=true
+              break
+            fi
+            sleep 5
+          done
+          [[ "$release_verified" == true ]]

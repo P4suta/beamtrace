@@ -15,8 +15,8 @@ new_with_relays_at(NowMs, TtlMs, Relays, Persist)
         when is_integer(NowMs), is_integer(TtlMs), is_list(Relays),
              is_function(Persist, 3) ->
     Table = ets:new(?MODULE, [set, public, {read_concurrency, true}, {write_concurrency, true}]),
-    Code = base64url(crypto:strong_rand_bytes(32)),
-    Hash = crypto:hash(sha256, Code),
+    Code = 'beamtrace_runtime@crypto':random_base64url(32),
+    Hash = 'beamtrace_runtime@crypto':sha256(Code),
     ExpiresAt = NowMs + erlang:max(TtlMs, 1),
     true = ets:insert(Table, [
         {enrollment, Hash, ExpiresAt, active},
@@ -61,7 +61,7 @@ authenticate_known(Table, RelayId, PublicKey, TimestampMs, Nonce, Signature, Now
         false -> {error, <<"invalid_signature">>};
         true ->
             _ = remove_expired_nonces(Table, NowMs),
-            NonceHash = crypto:hash(sha256, Nonce),
+            NonceHash = 'beamtrace_runtime@crypto':sha256(Nonce),
             Key = {nonce, RelayId, NonceHash},
             case ets:insert_new(Table, {Key, NowMs + 30000}) of
                 true -> {ok, {relay_record, RelayId, <<"Ed25519">>, PublicKey}};
@@ -71,7 +71,7 @@ authenticate_known(Table, RelayId, PublicKey, TimestampMs, Nonce, Signature, Now
 
 hello_payload(RelayId, TimestampMs, Nonce) ->
     NonceEncoded = base64url(Nonce),
-    <<"beamtrace-relay-v1\nhello\n", RelayId/binary, "\n",
+    <<"beamtrace-relay-v2\nhello\n", RelayId/binary, "\n",
       (integer_to_binary(TimestampMs))/binary, "\n", NonceEncoded/binary>>.
 
 verify(PublicKey, Payload, Signature) ->
@@ -88,8 +88,10 @@ remove_expired_nonces(Table, NowMs) ->
 consume_valid_key(Table, Code, PublicKey, NowMs) ->
     try ets:lookup(Table, enrollment) of
         [{enrollment, ExpectedHash, ExpiresAt, active}] ->
-            PresentedHash = crypto:hash(sha256, Code),
-            case crypto:hash_equals(ExpectedHash, PresentedHash) of
+            PresentedHash = 'beamtrace_runtime@crypto':sha256(Code),
+            case 'beamtrace_runtime@crypto':constant_time_equal(
+                ExpectedHash, PresentedHash
+            ) of
                 false -> {error, <<"invalid_token">>};
                 true when NowMs > ExpiresAt ->
                     _ = transition(Table, ExpectedHash, ExpiresAt, active, expired),
@@ -111,7 +113,10 @@ consume_valid_key(Table, Code, PublicKey, NowMs) ->
 register_once(Table, Hash, ExpiresAt, PublicKey, NowMs) ->
     case transition(Table, Hash, ExpiresAt, active, registering) of
         1 ->
-            RelayId = <<"relay-", (hex(crypto:strong_rand_bytes(12)))/binary>>,
+            RelayId = <<
+                "relay-",
+                ('beamtrace_runtime@crypto':random_hex(12))/binary
+            >>,
             [{persistence, Persist}] = ets:lookup(Table, persistence),
             case persist_identity(Persist, RelayId, PublicKey, NowMs) of
                 ok ->
@@ -161,9 +166,3 @@ base64url(Binary) ->
         <<"/">>, <<"_">>, [global]
     ),
     binary:replace(UrlSafe, <<"=">>, <<>>, [global]).
-
-hex(Binary) ->
-    << <<(hex_digit(Byte bsr 4)), (hex_digit(Byte band 16#0f))>> || <<Byte>> <= Binary >>.
-
-hex_digit(Value) when Value < 10 -> $0 + Value;
-hex_digit(Value) -> $a + Value - 10.
