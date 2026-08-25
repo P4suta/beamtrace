@@ -190,10 +190,16 @@ ensure_native_epmd() ->
     end.
 
 start_epmd_daemon() ->
-    %% Let the platform's standard erl launcher bootstrap EPMD. In particular,
-    %% erlexec uses a detached CreateProcess with handle inheritance disabled
-    %% on Windows; spawning `epmd -daemon` as a port bypasses that boundary and
-    %% leaves the daemon holding a caller's redirected stdout/stderr handles.
+    case os:type() of
+        {win32, _} -> start_epmd_via_runtime_launcher();
+        _ -> start_epmd_direct()
+    end.
+
+start_epmd_via_runtime_launcher() ->
+    %% On Windows, let the platform's standard erl launcher bootstrap EPMD.
+    %% erlexec uses a detached CreateProcess with handle inheritance disabled;
+    %% spawning `epmd -daemon` as a port bypasses that boundary and leaves the
+    %% daemon holding a caller's redirected stdout/stderr handles.
     case erl_executable_from_runtime() of
         false -> {error, erl_executable_not_found};
         Executable ->
@@ -217,6 +223,56 @@ start_epmd_daemon() ->
                 )
             catch
                 Class:Reason -> {error, {Class, Reason}}
+            end
+    end.
+
+start_epmd_direct() ->
+    case epmd_executable() of
+        false -> {error, epmd_executable_not_found};
+        Executable ->
+            try
+                Port = open_port(
+                    {spawn_executable, Executable},
+                    [
+                        binary,
+                        exit_status,
+                        stderr_to_stdout,
+                        use_stdio,
+                        {args, epmd_arguments()}
+                    ]
+                ),
+                collect_epmd_start(
+                    Port,
+                    <<>>,
+                    erlang:monotonic_time(millisecond)
+                        + ?EPMD_START_TIMEOUT_MS
+                )
+            catch
+                Class:Reason -> {error, {Class, Reason}}
+            end
+    end.
+
+epmd_executable() ->
+    case os:find_executable("epmd") of
+        false -> epmd_executable_from_runtime();
+        Executable -> Executable
+    end.
+
+epmd_executable_from_runtime() ->
+    case init:get_argument(bindir) of
+        {ok, [[Bindir] | _]} -> os:find_executable("epmd", Bindir);
+        _ -> false
+    end.
+
+epmd_arguments() ->
+    case os:getenv("ERL_EPMD_PORT") of
+        false -> ["-daemon"];
+        Value ->
+            Trimmed = string:trim(Value),
+            case string:to_integer(Trimmed) of
+                {Port, []} when Port >= 1, Port =< 65535 ->
+                    ["-port", Trimmed, "-daemon"];
+                _ -> erlang:error({invalid_record_epmd_port, Value})
             end
     end.
 
