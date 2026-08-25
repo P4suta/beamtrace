@@ -161,15 +161,31 @@ foreach ($file in @('README.md', 'CHANGELOG.md', 'SECURITY.md', 'CODE_OF_CONDUCT
 }
 
 $inventory = @{}
-foreach ($manifest in Get-ChildItem -LiteralPath (Join-Path $repoRoot 'packages') -Filter manifest.toml -Recurse) {
-    $content = Get-Content -Raw -LiteralPath $manifest.FullName
+foreach ($packageDirectory in Get-ChildItem -LiteralPath (Join-Path $repoRoot 'packages') -Directory | Sort-Object FullName) {
+    $manifestPath = Join-Path $packageDirectory.FullName 'manifest.toml'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { continue }
+
+    $content = Get-Content -Raw -LiteralPath $manifestPath
     foreach ($match in [regex]::Matches($content, '\{ name = "([^"]+)", version = "([^"]+)"[^\r\n]*source = "([^"]+)"')) {
         $name = $match.Groups[1].Value
+        $lockedVersion = $match.Groups[2].Value
+        $source = $match.Groups[3].Value
+        $downloadLocation = if ($source -eq 'hex') { "https://hex.pm/packages/$name" } else { 'NOASSERTION' }
+        if ($inventory.ContainsKey($name)) {
+            $existing = $inventory[$name]
+            if (
+                $existing.versionInfo -ne $lockedVersion -or
+                $existing.downloadLocation -ne $downloadLocation
+            ) {
+                throw "Immediate package manifests disagree on the locked source for ${name}."
+            }
+            continue
+        }
         $inventory[$name] = [pscustomobject]@{
             SPDXID = 'SPDXRef-Package-' + ($name -replace '[^A-Za-z0-9.-]', '-')
             name = $name
-            versionInfo = $match.Groups[2].Value
-            downloadLocation = if ($match.Groups[3].Value -eq 'hex') { "https://hex.pm/packages/$name" } else { 'NOASSERTION' }
+            versionInfo = $lockedVersion
+            downloadLocation = $downloadLocation
             filesAnalyzed = $false
             licenseConcluded = 'NOASSERTION'
             licenseDeclared = 'NOASSERTION'

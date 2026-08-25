@@ -119,6 +119,66 @@ try {
         throw 'Package SBOM is not a valid BeamTrace SPDX inventory.'
     }
 
+    $expectedSbomVersions = @{}
+    $expectedSbomLocations = @{}
+    foreach ($packageDirectory in Get-ChildItem -LiteralPath (Join-Path $repoRoot 'packages') -Directory) {
+        $manifestPath = Join-Path $packageDirectory.FullName 'manifest.toml'
+        if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) { continue }
+
+        $manifestContent = Get-Content -Raw -LiteralPath $manifestPath
+        foreach ($match in [regex]::Matches($manifestContent, '\{ name = "([^"]+)", version = "([^"]+)"[^\r\n]*source = "([^"]+)"')) {
+            $name = $match.Groups[1].Value
+            $lockedVersion = $match.Groups[2].Value
+            $source = $match.Groups[3].Value
+            $downloadLocation = if ($source -eq 'hex') { "https://hex.pm/packages/$name" } else { 'NOASSERTION' }
+            if (
+                $expectedSbomVersions.ContainsKey($name) -and
+                (
+                    $expectedSbomVersions[$name] -ne $lockedVersion -or
+                    $expectedSbomLocations[$name] -ne $downloadLocation
+                )
+            ) {
+                throw "Immediate package manifests disagree on the locked source for ${name}."
+            }
+            $expectedSbomVersions[$name] = $lockedVersion
+            $expectedSbomLocations[$name] = $downloadLocation
+        }
+    }
+    foreach ($name in @('beamtrace_core', 'beamtrace_runtime', 'beamtrace_web', 'beamtrace_tui', 'beamtrace_agent')) {
+        $expectedSbomVersions[$name] = $projectVersion
+        $expectedSbomLocations[$name] = 'NOASSERTION'
+    }
+    $expectedSbomVersions['erlang_otp'] = $otpVersion
+    $expectedSbomLocations['erlang_otp'] = 'https://github.com/erlang/otp'
+
+    $actualSbomPackages = @{}
+    foreach ($package in @($sbom.packages)) {
+        $name = [string]$package.name
+        if ($actualSbomPackages.ContainsKey($name)) {
+            throw "Package SBOM contains duplicate package entries for $name."
+        }
+        $actualSbomPackages[$name] = $package
+    }
+    $missingSbomPackages = @($expectedSbomVersions.Keys | Where-Object {
+        -not $actualSbomPackages.ContainsKey($_)
+    })
+    $unexpectedSbomPackages = @($actualSbomPackages.Keys | Where-Object {
+        -not $expectedSbomVersions.ContainsKey($_)
+    })
+    if ($missingSbomPackages.Count -gt 0 -or $unexpectedSbomPackages.Count -gt 0) {
+        throw "Package SBOM inventory differs from immediate manifests; missing=[$($missingSbomPackages -join ', ')] unexpected=[$($unexpectedSbomPackages -join ', ')]"
+    }
+    foreach ($name in $expectedSbomVersions.Keys) {
+        $actualVersion = [string]$actualSbomPackages[$name].versionInfo
+        if ($actualVersion -ne $expectedSbomVersions[$name]) {
+            throw "Package SBOM version mismatch for ${name}: expected $($expectedSbomVersions[$name]), found $actualVersion"
+        }
+        $actualLocation = [string]$actualSbomPackages[$name].downloadLocation
+        if ($actualLocation -ne $expectedSbomLocations[$name]) {
+            throw "Package SBOM source mismatch for ${name}: expected $($expectedSbomLocations[$name]), found $actualLocation"
+        }
+    }
+
     $checksumLines = Get-Content -LiteralPath (Join-Path $root.FullName 'checksums.sha256')
     foreach ($line in $checksumLines) {
         if ($line -notmatch '^([0-9a-f]{64})  (.+)$') {
