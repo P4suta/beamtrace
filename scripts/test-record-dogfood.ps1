@@ -20,7 +20,31 @@ $inspectRoot = Join-Path $workRoot 'inspect'
 $previousCleanupAssertion = $env:BEAMTRACE_RECORD_ASSERT_CLEANUP
 $previousEpmdPort = $env:ERL_EPMD_PORT
 $isolatedEpmdPort = $null
-$epmdCommand = (Get-Command epmd -ErrorAction Stop).Source
+$erlCommand = (Get-Command erl -ErrorAction Stop).Source
+
+function Resolve-EpmdCommand {
+    $pathCommand = Get-Command epmd -ErrorAction SilentlyContinue
+    if ($null -ne $pathCommand) {
+        return $pathCommand.Source
+    }
+
+    # setup-beam exposes erl.exe on Windows without adding the ERTS bindir
+    # containing epmd.exe to PATH. Resolve the same runtime bindir used by the
+    # production guard's fallback instead of assuming a platform layout.
+    $bindirExpression = 'case init:get_argument(bindir) of {ok, [[Bindir] | _]} -> io:format("~ts", [Bindir]), halt(0); _ -> halt(2) end.'
+    $bindir = (& $erlCommand -noshell -eval $bindirExpression 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($bindir)) {
+        throw 'Could not resolve the active Erlang runtime bindir for EPMD.'
+    }
+    $executable = if ($IsWindows) { 'epmd.exe' } else { 'epmd' }
+    $candidate = Join-Path $bindir $executable
+    if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+        throw "EPMD was not found on PATH or in the active runtime bindir: $candidate"
+    }
+    return [IO.Path]::GetFullPath($candidate)
+}
+
+$epmdCommand = Resolve-EpmdCommand
 $resolvedLauncher = $null
 if (-not [string]::IsNullOrWhiteSpace($Launcher)) {
     $resolvedLauncher = [IO.Path]::GetFullPath($Launcher)
@@ -28,7 +52,6 @@ if (-not [string]::IsNullOrWhiteSpace($Launcher)) {
         throw "BeamTrace dogfood launcher does not exist: $resolvedLauncher"
     }
 }
-$erlCommand = (Get-Command erl -ErrorAction Stop).Source
 
 function Invoke-CheckedBeamTrace {
     param(
