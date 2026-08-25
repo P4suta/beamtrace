@@ -70,13 +70,14 @@
     root_count = 0,
     owns_system_tracer = false,
     armed = false,
-    ttl_timer = undefined
-    ,clock_origin_ns = 0
-    ,sealed = false
-    ,seal_from = undefined
-    ,seal_reason = undefined
-    ,delivery_refs = []
-    ,drain_timer = undefined
+    ttl_timer = undefined,
+    clock_origin_ns = 0,
+    clock_origin_order = 0,
+    sealed = false,
+    seal_from = undefined,
+    seal_reason = undefined,
+    delivery_refs = [],
+    drain_timer = undefined
 }).
 
 start_link(Owner, Options) when is_pid(Owner), is_map(Options) ->
@@ -157,7 +158,8 @@ init({Owner, Options}) ->
         batch_size = positive_option(batch_size, Options, ?DEFAULT_BATCH_SIZE),
         label = maps:get(trace_label, Options, undefined),
         queue = queue:new(),
-        clock_origin_ns = erlang:monotonic_time(nanosecond)
+        clock_origin_ns = erlang:monotonic_time(nanosecond),
+        clock_origin_order = erlang:unique_integer([monotonic])
     }}.
 
 handle_call({arm, _MFA}, _From, State = #state{armed = true}) ->
@@ -608,7 +610,7 @@ event_actor('receive', _From, To) -> To;
 event_actor(_Kind, From, _To) -> From.
 
 base_event(Kind, Process, Timestamp, State) ->
-    {LocalNanoseconds, _TraceOrder} = timestamp_parts(Timestamp),
+    {LocalNanoseconds, TraceOrder} = timestamp_parts(Timestamp),
     #{
         id => new_event_id(),
         root_id => State#state.label,
@@ -616,10 +618,11 @@ base_event(Kind, Process, Timestamp, State) ->
         node => atom_to_binary(node(), utf8),
         process => process_identity(Process),
         local_offset_ns => erlang:max(0, LocalNanoseconds - State#state.clock_origin_ns),
-        %% The VM trace timestamp's unique component may be negative and is
-        %% process-global. Use the accepted-event index as the capture-local,
-        %% non-negative deterministic tie breaker exposed by schema v2.
-        local_order => State#state.event_count
+        %% strict_monotonic_timestamp is {monotonic nanoseconds, VM-global
+        %% monotonic unique integer}. Normalize both components to the
+        %% capture's node-local origins without replacing trace order with
+        %% collector mailbox arrival order.
+        local_order => erlang:max(0, TraceOrder - State#state.clock_origin_order)
     }.
 
 maybe_disarm_root(State = #state{root_count = Count, max_roots = Max, session = Session, trigger = MFA})
@@ -1155,7 +1158,7 @@ semantic({'DOWN', _Reference, process, _Pid, _Reason}, erlang_supervisor) ->
 semantic(Message, _Preset) -> classify_message(Message).
 
 timestamp_parts(Value) when is_integer(Value) ->
-    {Value, erlang:unique_integer([positive, monotonic])};
+    {Value, erlang:unique_integer([monotonic])};
 timestamp_parts({Monotonic, Unique}) when is_integer(Monotonic), is_integer(Unique) ->
     {Monotonic, Unique};
 timestamp_parts({MegaSeconds, Seconds, MicroSeconds}) ->
@@ -1166,10 +1169,10 @@ timestamp_parts({MegaSeconds, Seconds, MicroSeconds}) ->
     SystemNanoseconds =
         ((MegaSeconds * 1000000 + Seconds) * 1000000000) + MicroSeconds * 1000,
     {SystemNanoseconds - erlang:time_offset(nanosecond),
-        erlang:unique_integer([positive, monotonic])};
+        erlang:unique_integer([monotonic])};
 timestamp_parts(_Other) ->
     {erlang:monotonic_time(nanosecond),
-        erlang:unique_integer([positive, monotonic])}.
+        erlang:unique_integer([monotonic])}.
 
 new_capture_id() ->
     <<"capture-", (integer_to_binary(erlang:unique_integer([positive, monotonic])))/binary>>.
