@@ -4,7 +4,14 @@
 -include_lib("kernel/include/file.hrl").
 -include_lib("stdlib/include/zip.hrl").
 
--export([write_container/5, read_container/1, list_entries/1]).
+-export([
+    write_container/5,
+    read_container/1,
+    read_window/3,
+    search_container/4,
+    decode_events_parallel/1,
+    list_entries/1
+]).
 
 -define(MAX_ENTRIES, 10000).
 -define(MAX_UNCOMPRESSED_BYTES, 1073741824).
@@ -103,8 +110,13 @@ take_lines([_Invalid | _Rest], _Remaining, _Accumulator) ->
     erlang:error(invalid_event_line).
 
 index_json(Version, EventEntries) ->
-    {Items, _NextFirst} = lists:mapfoldl(fun({Name, Data}, First) ->
-        Count = length(split_ndjson(Data)),
+    index_json_counts(Version, [
+        {Name, length(split_ndjson(Data))}
+        || {Name, Data} <- EventEntries
+    ]).
+
+index_json_counts(Version, EventCounts) ->
+    {Items, _NextFirst} = lists:mapfoldl(fun({Name, Count}, First) ->
         Item = [
             <<"{\"path\":\"">>,
             unicode:characters_to_binary(Name),
@@ -115,7 +127,7 @@ index_json(Version, EventEntries) ->
             <<"}">>
         ],
         {Item, First + Count}
-    end, 0, EventEntries),
+    end, 0, EventCounts),
     iolist_to_binary([
         <<"{\"schema_version\":" >>,
         integer_to_binary(Version),
@@ -135,6 +147,171 @@ read_container(PathBinary) when is_binary(PathBinary) ->
         Error -> Error
     end;
 read_container(_Path) -> {error, <<"invalid_container">>}.
+
+%% Schema-v2 browsing validates the central directory and archive metadata,
+%% then inflates only the event segments intersecting the requested window.
+%% V1 requires global timestamp normalization and explicitly falls back to the
+%% full reader in Gleam.
+read_window(PathBinary, Start, Limit)
+        when is_binary(PathBinary), is_integer(Start), Start >= 0,
+             is_integer(Limit), Limit >= 1, Limit =< ?SEGMENT_EVENTS ->
+    with_validated_handle(PathBinary, fun(Handle, Files) ->
+        case prepare_selective_v2(Handle, Files) of
+            {ok, Selection} -> select_window(Handle, Selection, Start, Limit);
+            Error -> Error
+        end
+    end);
+read_window(_Path, _Start, _Limit) -> {error, <<"invalid_window">>}.
+
+%% Search verifies and scans one canonical event segment at a time. Only the
+%% requested page of matching event lines is retained.
+search_container(PathBinary, Query, Start, Limit)
+        when is_binary(PathBinary), is_binary(Query), byte_size(Query) > 0,
+             is_integer(Start), Start >= 0, is_integer(Limit), Limit >= 1,
+             Limit =< ?SEGMENT_EVENTS ->
+    with_validated_handle(PathBinary, fun(Handle, Files) ->
+        case prepare_selective_v2(Handle, Files) of
+            {ok, Selection} ->
+                search_segments(Handle, Selection, Query, Start, Limit);
+            Error -> Error
+        end
+    end);
+search_container(_Path, _Query, _Start, _Limit) ->
+    {error, <<"invalid_search">>}.
+
+%% Full archive event lines are independent. Decode contiguous chunks on the
+%% available schedulers, then join results (or select the first error) in input
+%% order. Bounded window/search paths stay serial to avoid process overhead.
+decode_events_parallel([]) -> {ok, []};
+decode_events_parallel(Lines) when is_list(Lines) ->
+    Length = length(Lines),
+    SchedulerCount = erlang:min(8, erlang:system_info(schedulers_online)),
+    WorkerCount = erlang:min(
+        SchedulerCount,
+        erlang:max(1, (Length + ?SEGMENT_EVENTS - 1) div ?SEGMENT_EVENTS)
+    ),
+    case WorkerCount of
+        1 -> decode_event_lines(Lines, []);
+        _ ->
+            ChunkSize = (Length + WorkerCount - 1) div WorkerCount,
+            Chunks = event_decode_chunks(Lines, ChunkSize, 1, []),
+            decode_event_chunks(Chunks)
+    end;
+decode_events_parallel(_Lines) ->
+    {error, {invalid_json, <<"parallel event decoder received invalid input">>}}.
+
+event_decode_chunks([], _ChunkSize, _Index, Accumulator) ->
+    lists:reverse(Accumulator);
+event_decode_chunks(Lines, ChunkSize, Index, Accumulator) ->
+    {Chunk, Rest} = take_lines(Lines, ChunkSize, []),
+    event_decode_chunks(
+        Rest, ChunkSize, Index + 1, [{Index, Chunk} | Accumulator]
+    ).
+
+decode_event_chunks(Chunks) ->
+    Parent = self(),
+    Reference = make_ref(),
+    {IndexMonitors, MonitorIndexes} = spawn_event_decode_workers(
+        Chunks, Parent, Reference, #{}, #{}
+    ),
+    collect_event_chunks(
+        Reference,
+        length(Chunks),
+        IndexMonitors,
+        MonitorIndexes,
+        #{},
+        length(Chunks)
+    ).
+
+spawn_event_decode_workers([], _Parent, _Reference, ByIndex, ByMonitor) ->
+    {ByIndex, ByMonitor};
+spawn_event_decode_workers(
+        [{Index, Chunk} | Rest], Parent, Reference, ByIndex, ByMonitor
+    ) ->
+    {Pid, Monitor} = spawn_monitor(fun() ->
+        Parent ! {Reference, Index, decode_event_lines(Chunk, [])}
+    end),
+    spawn_event_decode_workers(
+        Rest,
+        Parent,
+        Reference,
+        maps:put(Index, {Pid, Monitor}, ByIndex),
+        maps:put(Monitor, {Index, Pid}, ByMonitor)
+    ).
+
+decode_event_lines([], Accumulator) ->
+    {ok, lists:reverse(Accumulator)};
+decode_event_lines([Line | Rest], Accumulator) ->
+    case 'beamtrace@codec':decode_event(Line) of
+        {ok, Event} -> decode_event_lines(Rest, [Event | Accumulator]);
+        {error, _} = Error -> Error
+    end.
+
+collect_event_chunks(
+        _Reference, 0, _ByIndex, _ByMonitor, Results, Count
+    ) ->
+    join_event_chunks(1, Count, Results, []);
+collect_event_chunks(
+        Reference, Remaining, ByIndex, ByMonitor, Results, Count
+    ) ->
+    receive
+        {Reference, Index, Result} ->
+            {_Pid, Monitor} = maps:get(Index, ByIndex),
+            _ = erlang:demonitor(Monitor, [flush]),
+            collect_event_chunks(
+                Reference,
+                Remaining - 1,
+                maps:remove(Index, ByIndex),
+                maps:remove(Monitor, ByMonitor),
+                maps:put(Index, Result, Results),
+                Count
+            );
+        {'DOWN', Monitor, process, _Pid, Reason}
+                when is_map_key(Monitor, ByMonitor) ->
+            stop_event_decode_workers(ByIndex),
+            {error, {invalid_json,
+                unicode:characters_to_binary(io_lib:format(
+                    "parallel event decoder failed: ~0p", [Reason]
+                ))}}
+    end.
+
+stop_event_decode_workers(ByIndex) ->
+    lists:foreach(fun({_Index, {Pid, Monitor}}) ->
+        _ = erlang:exit(Pid, kill),
+        _ = erlang:demonitor(Monitor, [flush])
+    end, maps:to_list(ByIndex)).
+
+join_event_chunks(Index, Count, _Results, Chunks) when Index > Count ->
+    {ok, lists:append(lists:reverse(Chunks))};
+join_event_chunks(Index, Count, Results, Chunks) ->
+    case maps:get(Index, Results) of
+        {ok, Events} ->
+            join_event_chunks(Index + 1, Count, Results, [Events | Chunks]);
+        {error, _} = Error -> Error
+    end.
+
+with_validated_handle(PathBinary, Fun) ->
+    Path = unicode:characters_to_list(PathBinary),
+    case zip:zip_open(Path, [memory]) of
+        {ok, Handle} ->
+            try
+                case zip:zip_list_dir(Handle) of
+                    {ok, Entries} ->
+                        Files = [Entry || Entry <- Entries,
+                                          is_record(Entry, zip_file)],
+                        case validate_files(Files) of
+                            {ok, Validated} -> Fun(Handle, Validated);
+                            Error -> Error
+                        end;
+                    {error, _Reason} -> {error, <<"invalid_container">>}
+                end
+            catch
+                _:_ -> {error, <<"invalid_container">>}
+            after
+                _ = zip:zip_close(Handle)
+            end;
+        {error, _Reason} -> {error, <<"invalid_container">>}
+    end.
 
 list_entries(PathBinary) when is_binary(PathBinary) ->
     Path = unicode:characters_to_list(PathBinary),
@@ -160,6 +337,401 @@ validated_table(Path) ->
             Files = [Entry || Entry <- Entries, is_record(Entry, zip_file)],
             validate_files(Files);
         {error, _Reason} -> {error, <<"invalid_container">>}
+    end.
+
+prepare_selective_v2(Handle, Files) ->
+    Names = [unicode:characters_to_binary(File#zip_file.name) || File <- Files],
+    NamesMap = maps:from_list([{Name, true} || Name <- Names]),
+    case read_handle_entry(Handle, <<"manifest.json">>) of
+        {error, _} = Error -> Error;
+        {ok, Manifest} ->
+            case manifest_schema(Manifest) of
+                {ok, 1} -> {error, <<"legacy_fallback">>};
+                {ok, 2} ->
+                    prepare_selective_v2_entries(
+                        Handle, NamesMap, Manifest
+                    );
+                {ok, Version} ->
+                    {error, <<"unknown_schema_version:",
+                              (integer_to_binary(Version))/binary>>};
+                error -> {error, <<"invalid_container">>}
+            end
+    end.
+
+prepare_selective_v2_entries(Handle, NamesMap, Manifest) ->
+    case {
+        canonical_segments(NamesMap, <<"events/">>, <<".ndjson">>),
+        canonical_segments(NamesMap, <<"graph/">>, <<".json">>)
+    } of
+        {{ok, EventNames}, {ok, GraphNames}}
+                when length(EventNames) =:= length(GraphNames) ->
+            DataNames = [<<"manifest.json">>]
+                ++ EventNames
+                ++ GraphNames
+                ++ [
+                    <<"clocks.json">>,
+                    <<"indexes/events.idx">>,
+                    <<"annotations.json">>
+                ],
+            case exact_entries(NamesMap, DataNames) of
+                false -> {error, <<"invalid_container">>};
+                true ->
+                    prepare_selective_metadata(
+                        Handle, Manifest, EventNames, DataNames
+                    )
+            end;
+        _ -> {error, <<"invalid_container">>}
+    end.
+
+prepare_selective_metadata(
+        Handle, Manifest, EventNames, DataNames
+    ) ->
+    case read_handle_entries(Handle, [
+        <<"indexes/events.idx">>,
+        <<"checksums.json">>,
+        <<"annotations.json">>,
+        <<"clocks.json">>
+    ], #{}) of
+        {error, _} = Error -> Error;
+        {ok, Metadata} ->
+            Index = maps:get(<<"indexes/events.idx">>, Metadata),
+            Checksums = maps:get(<<"checksums.json">>, Metadata),
+            Annotations = maps:get(<<"annotations.json">>, Metadata),
+            Clocks = maps:get(<<"clocks.json">>, Metadata),
+            case {
+                parse_canonical_index(Index, EventNames),
+                parse_selective_checksums(Checksums, DataNames)
+            } of
+                {{ok, Segments, Total}, {ok, Digests}}
+                        when Annotations =:=
+                             <<"{\"schema_version\":2,\"annotations\":[]}">> ->
+                    Selected = [
+                        {<<"manifest.json">>, Manifest},
+                        {<<"indexes/events.idx">>, Index},
+                        {<<"annotations.json">>, Annotations},
+                        {<<"clocks.json">>, Clocks}
+                    ],
+                    case verify_selected_entries(Selected, Digests) of
+                        ok ->
+                            {ok, #{
+                                manifest => Manifest,
+                                clocks => Clocks,
+                                segments => Segments,
+                                total => Total,
+                                digests => Digests
+                            }};
+                        Error -> Error
+                    end;
+                {{error, _} = Error, _} -> Error;
+                {_, {error, _} = Error} -> Error;
+                _ -> {error, <<"invalid_container">>}
+            end
+    end.
+
+read_handle_entries(_Handle, [], Accumulator) -> {ok, Accumulator};
+read_handle_entries(Handle, [Name | Rest], Accumulator) ->
+    case read_handle_entry(Handle, Name) of
+        {ok, Data} ->
+            read_handle_entries(
+                Handle, Rest, maps:put(Name, Data, Accumulator)
+            );
+        Error -> Error
+    end.
+
+read_handle_entry(Handle, Name) ->
+    case zip:zip_get(Name, Handle) of
+        {ok, {_ReturnedName, Data}} when is_binary(Data) -> {ok, Data};
+        {error, _Reason} -> {error, <<"invalid_container">>};
+        _ -> {error, <<"invalid_container">>}
+    end.
+
+parse_canonical_index(Source, EventNames) ->
+    try json:decode(Source) of
+        Object when is_map(Object), map_size(Object) =:= 2 ->
+            case {
+                maps:get(<<"schema_version">>, Object, undefined),
+                maps:get(<<"segments">>, Object, undefined)
+            } of
+                {2, Items} when is_list(Items) ->
+                    case parse_index_segments(
+                        Items, EventNames, 0, length(EventNames), []
+                    ) of
+                        {ok, Segments, Total} ->
+                            case Source =:= index_json_segments(2, Segments) of
+                                true -> {ok, Segments, Total};
+                                false -> {error, <<"invalid_container">>}
+                            end;
+                        error -> {error, <<"invalid_container">>}
+                    end;
+                _ -> {error, <<"invalid_container">>}
+            end;
+        _ -> {error, <<"invalid_container">>}
+    catch
+        _:_ -> {error, <<"invalid_container">>}
+    end.
+
+parse_index_segments([], [], First, _Total, Accumulator) ->
+    {ok, lists:reverse(Accumulator), First};
+parse_index_segments(
+        [Item | Rest], [ExpectedName | RestNames], First, Total, Accumulator
+    ) when is_map(Item), map_size(Item) =:= 3 ->
+    Path = maps:get(<<"path">>, Item, undefined),
+    EncodedFirst = maps:get(<<"first">>, Item, undefined),
+    Count = maps:get(<<"count">>, Item, undefined),
+    Position = Total - length(RestNames),
+    ValidCount = is_integer(Count)
+        andalso Count >= 0
+        andalso Count =< ?SEGMENT_EVENTS
+        andalso (Position =:= Total orelse Count =:= ?SEGMENT_EVENTS),
+    case Path =:= ExpectedName
+         andalso EncodedFirst =:= First
+         andalso ValidCount of
+        true ->
+            parse_index_segments(
+                Rest,
+                RestNames,
+                First + Count,
+                Total,
+                [{Path, First, Count} | Accumulator]
+            );
+        false -> error
+    end;
+parse_index_segments(_Items, _Names, _First, _Total, _Accumulator) -> error.
+
+index_json_segments(Version, Segments) ->
+    Items = [
+        [
+            <<"{\"path\":\"">>, Path,
+            <<"\",\"first\":">>, integer_to_binary(First),
+            <<",\"count\":">>, integer_to_binary(Count), <<"}">>
+        ]
+        || {Path, First, Count} <- Segments
+    ],
+    iolist_to_binary([
+        <<"{\"schema_version\":" >>,
+        integer_to_binary(Version),
+        <<",\"segments\":[">>,
+        lists:join(<<",">>, Items),
+        <<"]}">>
+    ]).
+
+parse_selective_checksums(Source, ExpectedNames) ->
+    try json:decode(Source) of
+        Object when is_map(Object), map_size(Object) =:= 2 ->
+            case {
+                maps:get(<<"algorithm">>, Object, undefined),
+                maps:get(<<"files">>, Object, undefined)
+            } of
+                {<<"sha256">>, Files} when is_list(Files) ->
+                    case parse_selective_checksum_files(
+                        Files, ExpectedNames, #{}, []
+                    ) of
+                        {ok, Digests, Ordered} ->
+                            case Source =:= checksum_inventory_json(Ordered) of
+                                true -> {ok, Digests};
+                                false -> {error, <<"invalid_checksums">>}
+                            end;
+                        error -> {error, <<"invalid_checksums">>}
+                    end;
+                _ -> {error, <<"invalid_checksums">>}
+            end;
+        _ -> {error, <<"invalid_checksums">>}
+    catch
+        _:_ -> {error, <<"invalid_checksums">>}
+    end.
+
+parse_selective_checksum_files([], [], Digests, Accumulator) ->
+    {ok, Digests, lists:reverse(Accumulator)};
+parse_selective_checksum_files(
+        [Entry | Rest], [Expected | RestExpected], Digests, Accumulator
+    ) when is_map(Entry), map_size(Entry) =:= 2 ->
+    Path = maps:get(<<"path">>, Entry, undefined),
+    Digest = maps:get(<<"sha256">>, Entry, undefined),
+    case Path =:= Expected andalso valid_sha256(Digest) of
+        true ->
+            parse_selective_checksum_files(
+                Rest,
+                RestExpected,
+                maps:put(Path, Digest, Digests),
+                [{Path, Digest} | Accumulator]
+            );
+        false -> error
+    end;
+parse_selective_checksum_files(
+        _Files, _Expected, _Digests, _Accumulator
+    ) -> error.
+
+checksum_inventory_json(Files) ->
+    Items = [
+        [
+            <<"{\"path\":\"">>, Path,
+            <<"\",\"sha256\":\"">>, Digest, <<"\"}">>
+        ]
+        || {Path, Digest} <- Files
+    ],
+    iolist_to_binary([
+        <<"{\"algorithm\":\"sha256\",\"files\":[">>,
+        lists:join(<<",">>, Items),
+        <<"]}">>
+    ]).
+
+verify_selected_entries([], _Digests) -> ok;
+verify_selected_entries([{Name, Data} | Rest], Digests) ->
+    case maps:find(Name, Digests) of
+        {ok, Digest} ->
+            case sha256_hex(Data) =:= Digest of
+                true -> verify_selected_entries(Rest, Digests);
+                false -> {error, <<"checksum_mismatch">>}
+            end;
+        error -> {error, <<"invalid_checksums">>}
+    end.
+
+select_window(Handle, Selection, Start, Limit) ->
+    Segments = maps:get(segments, Selection),
+    Digests = maps:get(digests, Selection),
+    End = Start + Limit,
+    SelectedSegments = [
+        Segment
+        || Segment = {_Name, First, Count} <- Segments,
+           First < End,
+           First + Count > Start
+    ],
+    case window_segment_lines(
+        Handle, SelectedSegments, Digests, Start, End, []
+    ) of
+        {ok, ReversedLines} ->
+            {ok, {
+                maps:get(manifest, Selection),
+                lists:reverse(ReversedLines),
+                maps:get(clocks, Selection),
+                maps:get(total, Selection)
+            }};
+        Error -> Error
+    end.
+
+window_segment_lines(
+        _Handle, [], _Digests, _Start, _End, Accumulator
+    ) -> {ok, Accumulator};
+window_segment_lines(
+        Handle,
+        [Segment = {_Name, First, Count} | Rest],
+        Digests,
+        Start,
+        End,
+        Accumulator
+    ) ->
+    case read_verified_event_segment(Handle, Segment, Digests) of
+        {ok, Lines} ->
+            LocalStart = erlang:max(Start, First) - First,
+            LocalEnd = erlang:min(End, First + Count) - First,
+            Selected = lists:sublist(
+                lists:nthtail(LocalStart, Lines), LocalEnd - LocalStart
+            ),
+            window_segment_lines(
+                Handle,
+                Rest,
+                Digests,
+                Start,
+                End,
+                lists:reverse(Selected, Accumulator)
+            );
+        Error -> Error
+    end.
+
+search_segments(Handle, Selection, Query, Start, Limit) ->
+    End = Start + Limit,
+    case search_event_segments(
+        Handle,
+        maps:get(segments, Selection),
+        maps:get(digests, Selection),
+        Query,
+        Start,
+        End,
+        0,
+        []
+    ) of
+        {ok, MatchCount, ReversedLines} ->
+            {ok, {
+                maps:get(manifest, Selection),
+                lists:reverse(ReversedLines),
+                maps:get(clocks, Selection),
+                MatchCount
+            }};
+        Error -> Error
+    end.
+
+search_event_segments(
+        _Handle, [], _Digests, _Query, _Start, _End, MatchCount, Selected
+    ) -> {ok, MatchCount, Selected};
+search_event_segments(
+        Handle,
+        [Segment | Rest],
+        Digests,
+        Query,
+        Start,
+        End,
+        MatchCount,
+        Selected
+    ) ->
+    case read_verified_event_segment(Handle, Segment, Digests) of
+        {ok, Lines} ->
+            {NextCount, NextSelected} = search_event_lines(
+                Lines, Query, Start, End, MatchCount, Selected
+            ),
+            search_event_segments(
+                Handle,
+                Rest,
+                Digests,
+                Query,
+                Start,
+                End,
+                NextCount,
+                NextSelected
+            );
+        Error -> Error
+    end.
+
+search_event_lines([], _Query, _Start, _End, MatchCount, Selected) ->
+    {MatchCount, Selected};
+search_event_lines(
+        [Line | Rest], Query, Start, End, MatchCount, Selected
+    ) ->
+    case binary:match(string:lowercase(Line), Query) of
+        nomatch ->
+            search_event_lines(
+                Rest, Query, Start, End, MatchCount, Selected
+            );
+        {_Position, _Length} ->
+            NextSelected = case MatchCount >= Start andalso MatchCount < End of
+                true -> [Line | Selected];
+                false -> Selected
+            end,
+            search_event_lines(
+                Rest,
+                Query,
+                Start,
+                End,
+                MatchCount + 1,
+                NextSelected
+            )
+    end.
+
+read_verified_event_segment(
+        Handle, {Name, _First, ExpectedCount}, Digests
+    ) ->
+    case read_handle_entry(Handle, Name) of
+        {ok, Data} ->
+            case verify_selected_entries([{Name, Data}], Digests) of
+                ok ->
+                    Lines = split_ndjson(Data),
+                    case length(Lines) =:= ExpectedCount
+                         andalso Data =:= ndjson(Lines) of
+                        true -> {ok, Lines};
+                        false -> {error, <<"invalid_container">>}
+                    end;
+                Error -> Error
+            end;
+        Error -> Error
     end.
 
 validate_files(Files) when length(Files) > ?MAX_ENTRIES ->
@@ -274,22 +846,36 @@ decode_v1(Manifest, ByName) ->
                     <<"indexes/events.idx">>
                 ],
             case exact_entries(ByName, DataNames)
-                 andalso canonical_event_segments(ByName, EventNames)
                  andalso maps:get(<<"processes.ndjson">>, ByName, invalid) =:= <<>>
-                 andalso maps:get(<<"annotations.json">>, ByName, invalid) =:= <<"[]">>
-                 andalso maps:get(<<"indexes/events.idx">>, ByName, invalid)
-                     =:= index_json(1, named_data(EventNames, ByName)) of
+                 andalso maps:get(<<"annotations.json">>, ByName, invalid) =:= <<"[]">> of
                 false -> {error, <<"invalid_container">>};
                 true ->
-                    case verify_all_checksums(ByName, DataNames) of
-                        ok ->
-                            Events = lists:append([
-                                split_ndjson(maps:get(Name, ByName))
-                                || Name <- EventNames
-                            ]),
-                            {ok, {Manifest, Events, [], <<>>}};
-                        Error -> Error
+                    case validated_event_segments(ByName, EventNames) of
+                        {error, _} = Error -> Error;
+                        {ok, EventSegments} ->
+                            decode_v1_segments(
+                                Manifest,
+                                ByName,
+                                DataNames,
+                                EventSegments
+                            )
                     end
+            end
+    end.
+
+decode_v1_segments(Manifest, ByName, DataNames, EventSegments) ->
+    Counts = [{Name, Count} || {Name, Count, _Lines} <- EventSegments],
+    case maps:get(<<"indexes/events.idx">>, ByName, invalid)
+         =:= index_json_counts(1, Counts) of
+        false -> {error, <<"invalid_container">>};
+        true ->
+            case verify_all_checksums(ByName, DataNames) of
+                ok ->
+                    Events = lists:append([
+                        Lines || {_Name, _Count, Lines} <- EventSegments
+                    ]),
+                    {ok, {Manifest, Events, [], <<>>}};
+                Error -> Error
             end
     end.
 
@@ -309,26 +895,43 @@ decode_v2(Manifest, ByName) ->
                     <<"annotations.json">>
                 ],
             case exact_entries(ByName, DataNames)
-                 andalso canonical_event_segments(ByName, EventNames)
-                 andalso maps:get(<<"indexes/events.idx">>, ByName, invalid)
-                     =:= index_json(2, named_data(EventNames, ByName))
                  andalso maps:get(<<"annotations.json">>, ByName, invalid)
                      =:= <<"{\"schema_version\":2,\"annotations\":[]}">> of
                 false -> {error, <<"invalid_container">>};
                 true ->
-                    case verify_all_checksums(ByName, DataNames) of
-                        ok ->
-                            Events = lists:append([
-                                split_ndjson(maps:get(Name, ByName))
-                                || Name <- EventNames
-                            ]),
-                            Graphs = [maps:get(Name, ByName) || Name <- GraphNames],
-                            Clocks = maps:get(<<"clocks.json">>, ByName),
-                            {ok, {Manifest, Events, Graphs, Clocks}};
-                        Error -> Error
+                    case validated_event_segments(ByName, EventNames) of
+                        {error, _} = Error -> Error;
+                        {ok, EventSegments} ->
+                            decode_v2_segments(
+                                Manifest,
+                                ByName,
+                                DataNames,
+                                GraphNames,
+                                EventSegments
+                            )
                     end
             end;
         _ -> {error, <<"invalid_container">>}
+    end.
+
+decode_v2_segments(
+        Manifest, ByName, DataNames, GraphNames, EventSegments
+    ) ->
+    Counts = [{Name, Count} || {Name, Count, _Lines} <- EventSegments],
+    case maps:get(<<"indexes/events.idx">>, ByName, invalid)
+         =:= index_json_counts(2, Counts) of
+        false -> {error, <<"invalid_container">>};
+        true ->
+            case verify_all_checksums(ByName, DataNames) of
+                ok ->
+                    Events = lists:append([
+                        Lines || {_Name, _Count, Lines} <- EventSegments
+                    ]),
+                    Graphs = [maps:get(Name, ByName) || Name <- GraphNames],
+                    Clocks = maps:get(<<"clocks.json">>, ByName),
+                    {ok, {Manifest, Events, Graphs, Clocks}};
+                Error -> Error
+            end
     end.
 
 canonical_segments(ByName, Prefix, Suffix) ->
@@ -359,29 +962,37 @@ has_prefix_suffix(Name, Prefix, Suffix) ->
         andalso binary:part(Name, 0, PrefixSize) =:= Prefix
         andalso binary:part(Name, byte_size(Name) - SuffixSize, SuffixSize) =:= Suffix.
 
-canonical_event_segments(ByName, Names) ->
-    canonical_event_segments(ByName, Names, length(Names)).
+validated_event_segments(ByName, Names) ->
+    validated_event_segments(ByName, Names, 1, length(Names), []).
 
-canonical_event_segments(_ByName, [], _Total) -> false;
-canonical_event_segments(ByName, Names, Total) ->
-    lists:all(fun({Name, Position}) ->
-        Data = maps:get(Name, ByName),
-        Lines = split_ndjson(Data),
-        Count = length(Lines),
-        CanonicalCount = case Position < Total of
-            true -> Count =:= ?SEGMENT_EVENTS;
-            false -> Count >= 0 andalso Count =< ?SEGMENT_EVENTS
-        end,
-        CanonicalCount andalso Data =:= ndjson(Lines)
-    end, lists:zip(Names, lists:seq(1, Total))).
+validated_event_segments(_ByName, [], _Position, _Total, Accumulator) ->
+    {ok, lists:reverse(Accumulator)};
+validated_event_segments(
+        ByName, [Name | Rest], Position, Total, Accumulator
+    ) ->
+    Data = maps:get(Name, ByName),
+    Lines = split_ndjson(Data),
+    Count = length(Lines),
+    CanonicalCount = case Position < Total of
+        true -> Count =:= ?SEGMENT_EVENTS;
+        false -> Count >= 0 andalso Count =< ?SEGMENT_EVENTS
+    end,
+    case CanonicalCount andalso Data =:= ndjson(Lines) of
+        true ->
+            validated_event_segments(
+                ByName,
+                Rest,
+                Position + 1,
+                Total,
+                [{Name, Count, Lines} | Accumulator]
+            );
+        false -> {error, <<"invalid_container">>}
+    end.
 
 exact_entries(ByName, DataNames) ->
     Actual = lists:sort(maps:keys(ByName)),
     Expected = lists:sort([<<"checksums.json">> | DataNames]),
     Actual =:= Expected.
-
-named_data(Names, ByName) ->
-    [{unicode:characters_to_list(Name), maps:get(Name, ByName)} || Name <- Names].
 
 verify_all_checksums(ByName, DataNames) ->
     case maps:find(<<"checksums.json">>, ByName) of

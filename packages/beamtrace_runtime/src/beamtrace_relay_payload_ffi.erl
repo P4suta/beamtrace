@@ -1,7 +1,7 @@
 %% SPDX-License-Identifier: Apache-2.0 OR MIT
 -module(beamtrace_relay_payload_ffi).
 
--export([decode_batch_parts/1, raw_privacy/1]).
+-export([decode_batch_parts/1, decode_public_batch_parts/1]).
 
 -define(MAX_EVENTS, 128).
 
@@ -15,14 +15,19 @@ decode_batch_parts(Source) when is_binary(Source) ->
 decode_batch_parts(_Source) ->
     {error, <<"invalid_payload">>}.
 
-raw_privacy(Source) when is_binary(Source) ->
+decode_public_batch_parts(Source) when is_binary(Source) ->
     try json:decode(Source) of
-        Batch when is_map(Batch) -> maps:get(<<"privacy">>, Batch, undefined) =:= <<"raw">>;
-        _ -> false
+        Batch when is_map(Batch) ->
+            case maps:get(<<"privacy">>, Batch, undefined) of
+                <<"raw">> -> {error, <<"raw_capture_not_authorized">>};
+                _ -> decode_batch(Batch)
+            end;
+        _ -> {error, <<"invalid_payload">>}
     catch
-        _:_ -> false
+        _:_ -> {error, <<"invalid_payload">>}
     end;
-raw_privacy(_) -> false.
+decode_public_batch_parts(_Source) ->
+    {error, <<"invalid_payload">>}.
 
 decode_batch(Batch) ->
     Type = maps:get(<<"type">>, Batch, undefined),

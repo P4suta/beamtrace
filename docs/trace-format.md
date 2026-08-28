@@ -39,6 +39,21 @@ Container limits are 10,000 entries, 1 GiB total expanded bytes, 64 MiB per entr
 
 Saving uses a sibling temporary ZIP, syncs it, and atomically renames it over the destination. The destination is never unlinked first; a failed replace preserves the previous archive.
 
+Schema-v2 window reads open the ZIP once, validate its central directory,
+exact entry allowlist, canonical event index, and complete checksum inventory,
+then inflate only `manifest.json`, `clocks.json`, archive metadata, and the one
+or two event segments intersecting the requested range. Search verifies and
+scans event segments one at a time and retains only the requested page of
+matching canonical event lines. Every fetched event segment has its declared
+count checked, and every fetched data entry named by the canonical checksum
+inventory has its SHA-256 checked. Schema v1 falls back to a full read because
+its absolute timestamps require global per-node normalization.
+
+Selective reads prove the integrity of the entries they fetch; they do not
+claim that an unvisited compressed segment is intact. `load` and `validate`
+inflate and verify every archive entry and remain the explicit whole-archive
+integrity boundary.
+
 ## Tools and schemas
 
 - `beamtrace validate FILE --json` performs container, canonical JSON, checksum, graph/reference, and clock validation.

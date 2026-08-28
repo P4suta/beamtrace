@@ -61,38 +61,28 @@ pub fn save_with_clocks(
 ) -> Result(Nil, StorageError) {
   let manifest =
     codec.Manifest(..manifest, schema_version: codec.schema_version)
-  let manifest_json = codec.encode_manifest(manifest)
-  use validated_manifest <- try_result(
-    codec.decode_manifest(manifest_json)
+  use Nil <- try_result(
+    codec.validate_manifest(manifest)
     |> map_error(fn(error) { CodecError(string.inspect(error)) }),
   )
-  let event_lines = list.map(events, codec.encode_event)
-  use validated_events <- try_result(decode_events(event_lines, []))
-  use Nil <- try_result(validate_event_nodes(
-    validated_manifest,
-    validated_events,
-  ))
+  use Nil <- try_result(validate_typed_events(events))
+  use Nil <- try_result(validate_event_nodes(manifest, events))
   use graph <- try_result(
-    dag.build(validated_events)
+    dag.build(events)
     |> map_error(fn(error) { InvalidGraph(string.inspect(error)) }),
   )
-  let chunks = event_chunks(validated_events)
+  let chunks = event_chunks(events)
   let graph_segments = make_graph_segments(chunks, graph)
-  let graph_lines = list.map(graph_segments, codec.encode_graph_segment)
-  use validated_segments <- try_result(decode_graph_segments(graph_lines, []))
-  use _validated_graph <- try_result(validate_v2_graph(
-    validated_events,
-    validated_segments,
-  ))
-  let clocks_json = codec.encode_clocks(clocks)
-  use validated_clocks <- try_result(
-    codec.decode_clocks(clocks_json)
+  use Nil <- try_result(validate_typed_graph_segments(graph_segments))
+  use Nil <- try_result(
+    codec.validate_clocks(clocks)
     |> map_error(fn(error) { CodecError(string.inspect(error)) }),
   )
-  use Nil <- try_result(validate_clock_nodes(
-    validated_manifest,
-    validated_clocks,
-  ))
+  use Nil <- try_result(validate_clock_nodes(manifest, clocks))
+  let manifest_json = codec.encode_manifest(manifest)
+  let event_lines = list.map(events, codec.encode_event)
+  let graph_lines = list.map(graph_segments, codec.encode_graph_segment)
+  let clocks_json = codec.encode_clocks(clocks)
   write_container(path, manifest_json, event_lines, graph_lines, clocks_json)
   |> map_error(classify_error)
 }
@@ -106,7 +96,10 @@ pub fn load(path: String) -> Result(Archive, StorageError) {
     codec.decode_manifest(manifest_json)
     |> map_error(fn(error) { CodecError(string.inspect(error)) }),
   )
-  use decoded_events <- try_result(decode_events(event_lines, []))
+  use decoded_events <- try_result(
+    decode_events_parallel(event_lines)
+    |> map_error(fn(error) { CodecError(string.inspect(error)) }),
+  )
   case manifest.schema_version {
     1 -> {
       let events = normalize_legacy_instants(decoded_events)
@@ -118,12 +111,11 @@ pub fn load(path: String) -> Result(Archive, StorageError) {
     }
     2 -> {
       use Nil <- try_result(validate_event_nodes(manifest, decoded_events))
-      use segments <- try_result(decode_graph_segments(graph_lines, []))
       use clocks <- try_result(
         codec.decode_clocks(clocks_json)
         |> map_error(fn(error) { CodecError(string.inspect(error)) }),
       )
-      use graph <- try_result(validate_v2_graph(decoded_events, segments))
+      use graph <- try_result(validate_v2_graph(decoded_events, graph_lines))
       use Nil <- try_result(validate_clock_nodes(manifest, clocks))
       Ok(Archive(manifest, decoded_events, graph, clocks))
     }
@@ -171,16 +163,12 @@ pub fn window(
 ) -> Result(EventWindow, StorageError) {
   case start < 0 || limit < 1 || limit > 1000 {
     True -> Error(InvalidWindow)
-    False -> {
-      use archive <- try_result(load(path))
-      Ok(EventWindow(
-        events: archive.events |> list.drop(start) |> list.take(limit),
-        total: list.length(archive.events),
-        start: start,
-        limit: limit,
-        clocks: archive.clocks,
-      ))
-    }
+    False ->
+      case read_window_container(path, start, limit) {
+        Ok(payload) -> selective_window(payload, start, limit)
+        Error("legacy_fallback") -> full_window(path, start, limit)
+        Error(reason) -> Error(classify_error(reason))
+      }
   }
 }
 
@@ -197,25 +185,72 @@ pub fn search(
   {
     True, _ -> Error(InvalidWindow)
     _, True -> Error(InvalidSearch)
-    False, False -> {
-      use archive <- try_result(load(path))
-      let folded = string.lowercase(normalized)
-      let matches =
-        list.filter(archive.events, fn(event) {
-          event
-          |> codec.encode_event
-          |> string.lowercase
-          |> string.contains(folded)
-        })
-      Ok(EventWindow(
-        events: matches |> list.drop(start) |> list.take(limit),
-        total: list.length(matches),
-        start: start,
-        limit: limit,
-        clocks: archive.clocks,
-      ))
-    }
+    False, False ->
+      case search_container(path, string.lowercase(normalized), start, limit) {
+        Ok(payload) -> selective_window(payload, start, limit)
+        Error("legacy_fallback") -> full_search(path, normalized, start, limit)
+        Error(reason) -> Error(classify_error(reason))
+      }
   }
+}
+
+fn selective_window(
+  payload: #(String, List(String), String, Int),
+  start: Int,
+  limit: Int,
+) -> Result(EventWindow, StorageError) {
+  let #(manifest_json, event_lines, clocks_json, total) = payload
+  use manifest <- try_result(
+    codec.decode_manifest(manifest_json)
+    |> map_error(fn(error) { CodecError(string.inspect(error)) }),
+  )
+  use events <- try_result(decode_events(event_lines, []))
+  use clocks <- try_result(
+    codec.decode_clocks(clocks_json)
+    |> map_error(fn(error) { CodecError(string.inspect(error)) }),
+  )
+  use Nil <- try_result(validate_event_nodes(manifest, events))
+  use Nil <- try_result(validate_clock_nodes(manifest, clocks))
+  Ok(EventWindow(events, total, start, limit, clocks))
+}
+
+fn full_window(
+  path: String,
+  start: Int,
+  limit: Int,
+) -> Result(EventWindow, StorageError) {
+  use archive <- try_result(load(path))
+  Ok(EventWindow(
+    events: archive.events |> list.drop(start) |> list.take(limit),
+    total: list.length(archive.events),
+    start: start,
+    limit: limit,
+    clocks: archive.clocks,
+  ))
+}
+
+fn full_search(
+  path: String,
+  query: String,
+  start: Int,
+  limit: Int,
+) -> Result(EventWindow, StorageError) {
+  use archive <- try_result(load(path))
+  let folded = string.lowercase(query)
+  let matches =
+    list.filter(archive.events, fn(event) {
+      event
+      |> codec.encode_event
+      |> string.lowercase
+      |> string.contains(folded)
+    })
+  Ok(EventWindow(
+    events: matches |> list.drop(start) |> list.take(limit),
+    total: list.length(matches),
+    start: start,
+    limit: limit,
+    clocks: archive.clocks,
+  ))
 }
 
 fn event_chunks(
@@ -301,19 +336,27 @@ fn prepend_segment(
 
 fn validate_v2_graph(
   events: List(types.TraceEvent),
-  segments: List(codec.GraphSegment),
+  graph_lines: List(String),
 ) -> Result(dag.CausalGraph, StorageError) {
   use graph <- try_result(
     dag.build(events)
     |> map_error(fn(error) { InvalidGraph(string.inspect(error)) }),
   )
-  let expected = make_graph_segments(event_chunks(events), graph)
-  case segments == expected {
+  let expected =
+    make_graph_segments(event_chunks(events), graph)
+    |> list.map(codec.encode_graph_segment)
+  case graph_lines == expected {
     True -> Ok(graph)
-    False ->
+    False -> {
+      // The canonical encoding is unique. Valid archives can therefore avoid
+      // materializing every stored edge a second time. On mismatch, retain the
+      // old decode boundary so malformed/noncanonical input keeps its precise
+      // CodecError classification before reporting a valid-but-wrong graph.
+      use _segments <- try_result(decode_graph_segments(graph_lines, []))
       Error(InvalidGraph(
         "graph segments do not match event boundaries or causal references",
       ))
+    }
   }
 }
 
@@ -391,6 +434,32 @@ fn normalize_legacy_loop(
         [normalized, ..accumulator],
       )
     }
+  }
+}
+
+fn validate_typed_events(
+  events: List(types.TraceEvent),
+) -> Result(Nil, StorageError) {
+  case events {
+    [] -> Ok(Nil)
+    [event, ..rest] ->
+      case codec.validate_event(event) {
+        Ok(Nil) -> validate_typed_events(rest)
+        Error(error) -> Error(CodecError(string.inspect(error)))
+      }
+  }
+}
+
+fn validate_typed_graph_segments(
+  segments: List(codec.GraphSegment),
+) -> Result(Nil, StorageError) {
+  case segments {
+    [] -> Ok(Nil)
+    [segment, ..rest] ->
+      case codec.validate_graph_segment(segment) {
+        Ok(Nil) -> validate_typed_graph_segments(rest)
+        Error(error) -> Error(CodecError(string.inspect(error)))
+      }
   }
 }
 
@@ -474,3 +543,23 @@ fn read_container(
 
 @external(erlang, "beamtrace_storage_ffi", "list_entries")
 fn list_entries(path: String) -> Result(List(String), String)
+
+@external(erlang, "beamtrace_storage_ffi", "read_window")
+fn read_window_container(
+  path: String,
+  start: Int,
+  limit: Int,
+) -> Result(#(String, List(String), String, Int), String)
+
+@external(erlang, "beamtrace_storage_ffi", "search_container")
+fn search_container(
+  path: String,
+  query: String,
+  start: Int,
+  limit: Int,
+) -> Result(#(String, List(String), String, Int), String)
+
+@external(erlang, "beamtrace_storage_ffi", "decode_events_parallel")
+fn decode_events_parallel(
+  lines: List(String),
+) -> Result(List(types.TraceEvent), codec.CodecError)

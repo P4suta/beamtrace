@@ -298,10 +298,14 @@ pub fn normalize_v2(
   clocks: types.ClockCalibration,
   trigger: types.Mfa,
 ) -> CaptureResult {
-  let normalized =
-    list.map(events, fn(event) { normalize_event(event, trigger) })
+  let #(normalized, known_processes) =
+    normalize_events(events, trigger, dict.new(), dict.new(), [])
+  let rooted = disambiguate_roots(normalized)
   CaptureResult(
-    events: normalized |> disambiguate_roots |> propagate_process_identities,
+    events: case dict.is_empty(known_processes) {
+      True -> rooted
+      False -> propagate_process_identities(rooted, known_processes)
+    },
     outcome: normalize_outcome(outcome),
     clocks: clocks,
   )
@@ -311,37 +315,55 @@ fn disambiguate_roots(
   events: List(types.TraceEvent),
 ) -> List(types.TraceEvent) {
   let groups = root_groups(events)
-  let seeded =
-    list.map(events, fn(event) {
-      case event.kind, dict.get(groups, event.root_id) {
-        types.Root(_, _), Ok([_, _, ..]) ->
-          types.TraceEvent(..event, root_id: event.id)
-        _, _ -> event
-      }
-    })
-  case dag.build(seeded) {
-    Error(_) ->
-      mark_unattributed_roots(seeded, groups, "causal graph is cyclic")
-    Ok(graph) -> {
-      let reachable = exact_root_reachability(graph)
-      list.map(seeded, fn(event) {
-        case event.kind, dict.get(groups, event.root_id) {
-          types.Root(_, _), _ -> event
-          _, Ok(group) ->
-            case group {
-              [_, _, ..] -> {
-                let reached = dict_get_list(reachable, event.id)
-                let candidates =
-                  list.filter(group, fn(root) { list.contains(reached, root) })
-                attribute_reachable_root(event, candidates)
-              }
-              _ -> event
+  case has_duplicate_roots(groups) {
+    False -> events
+    True -> {
+      let seeded =
+        list.map(events, fn(event) {
+          case event.kind, dict.get(groups, event.root_id) {
+            types.Root(_, _), Ok([_, _, ..]) ->
+              types.TraceEvent(..event, root_id: event.id)
+            _, _ -> event
+          }
+        })
+      case dag.build(seeded) {
+        Error(_) ->
+          mark_unattributed_roots(seeded, groups, "causal graph is cyclic")
+        Ok(graph) -> {
+          let reachable = exact_root_reachability(graph)
+          list.map(seeded, fn(event) {
+            case event.kind, dict.get(groups, event.root_id) {
+              types.Root(_, _), _ -> event
+              _, Ok(group) ->
+                case group {
+                  [_, _, ..] -> {
+                    let reached = dict_get_list(reachable, event.id)
+                    let candidates =
+                      list.filter(group, fn(root) {
+                        list.contains(reached, root)
+                      })
+                    attribute_reachable_root(event, candidates)
+                  }
+                  _ -> event
+                }
+              _, Error(_) -> event
             }
-          _, Error(_) -> event
+          })
         }
-      })
+      }
     }
   }
+}
+
+fn has_duplicate_roots(groups: Dict(String, List(String))) -> Bool {
+  groups
+  |> dict.values
+  |> list.any(fn(group) {
+    case group {
+      [_, _, ..] -> True
+      _ -> False
+    }
+  })
 }
 
 fn root_groups(events: List(types.TraceEvent)) -> Dict(String, List(String)) {
@@ -455,25 +477,37 @@ fn exact_root_reachability(
         False -> Error(Nil)
       }
     })
-  propagate_root_sets(ready, adjacency, indegree, memberships)
+  propagate_root_sets(ready, [], adjacency, indegree, memberships)
 }
 
 fn propagate_root_sets(
   ready: List(String),
+  queued: List(String),
   adjacency: Dict(String, List(String)),
   indegree: Dict(String, Int),
   memberships: Dict(String, List(String)),
 ) -> Dict(String, List(String)) {
   case ready {
-    [] -> memberships
+    [] ->
+      case queued {
+        [] -> memberships
+        [_, ..] ->
+          propagate_root_sets(
+            list.reverse(queued),
+            [],
+            adjacency,
+            indegree,
+            memberships,
+          )
+      }
     [id, ..rest] -> {
       let roots = dict_get_list(memberships, id)
-      let #(next_indegree, next_memberships, newly_ready) =
+      let #(next_indegree, next_memberships, next_queued) =
         list.fold(
           dict_get_list(adjacency, id),
-          #(indegree, memberships, []),
+          #(indegree, memberships, queued),
           fn(state, target) {
-            let #(degrees, roots_by_event, zeroes) = state
+            let #(degrees, roots_by_event, queue) = state
             let degree = dict_get_int(degrees, target) - 1
             let propagated =
               unique_append(dict_get_list(roots_by_event, target), roots)
@@ -481,14 +515,15 @@ fn propagate_root_sets(
               dict.insert(degrees, target, degree),
               dict.insert(roots_by_event, target, propagated),
               case degree == 0 {
-                True -> [target, ..zeroes]
-                False -> zeroes
+                True -> [target, ..queue]
+                False -> queue
               },
             )
           },
         )
       propagate_root_sets(
-        list.append(rest, list.reverse(newly_ready)),
+        rest,
+        next_queued,
         adjacency,
         next_indegree,
         next_memberships,
@@ -525,19 +560,8 @@ fn dict_get_int(values: Dict(String, Int), key: String) -> Int {
 
 fn propagate_process_identities(
   events: List(types.TraceEvent),
+  known: Dict(String, types.ProcessIdentity),
 ) -> List(types.TraceEvent) {
-  let known =
-    list.fold(events, dict.new(), fn(known, event) {
-      case
-        event.process.logical,
-        dict.get(known, process_key(event.process.physical))
-      {
-        Some(_), Error(_) ->
-          dict.insert(known, process_key(event.process.physical), event.process)
-        _, _ -> known
-      }
-    })
-
   list.map(events, fn(event) {
     case dict.get(known, process_key(event.process.physical)) {
       Ok(process) -> types.TraceEvent(..event, process: process)
@@ -550,16 +574,59 @@ fn process_key(process: types.ProcessRef) -> String {
   process.node <> "\u{0}" <> process.pid
 }
 
-fn normalize_event(event: RawEvent, trigger: types.Mfa) -> types.TraceEvent {
+fn normalize_events(
+  events: List(RawEvent),
+  trigger: types.Mfa,
+  identity_cache: Dict(
+    String,
+    List(#(RawProcessMetadata, types.ProcessIdentity)),
+  ),
+  known: Dict(String, types.ProcessIdentity),
+  accumulator: List(types.TraceEvent),
+) -> #(List(types.TraceEvent), Dict(String, types.ProcessIdentity)) {
+  case events {
+    [] -> #(list.reverse(accumulator), known)
+    [event, ..rest] -> {
+      let #(normalized, next_cache) =
+        normalize_event(event, trigger, identity_cache)
+      let key = process_key(normalized.process.physical)
+      let next_known = case
+        normalized.process.logical,
+        dict.has_key(known, key)
+      {
+        Some(_), False -> dict.insert(known, key, normalized.process)
+        _, _ -> known
+      }
+      normalize_events(rest, trigger, next_cache, next_known, [
+        normalized,
+        ..accumulator
+      ])
+    }
+  }
+}
+
+fn normalize_event(
+  event: RawEvent,
+  trigger: types.Mfa,
+  identity_cache: Dict(
+    String,
+    List(#(RawProcessMetadata, types.ProcessIdentity)),
+  ),
+) -> #(
+  types.TraceEvent,
+  Dict(String, List(#(RawProcessMetadata, types.ProcessIdentity))),
+) {
   let physical = types.ProcessRef(event.node, event.process_pid)
-  let process = case event {
+  let #(process, next_cache) = case event {
     RawEventV2(_, _, _, _, _, _, _, _, _, _, _, _, metadata, _) ->
-      identity.resolve(physical, process_metadata(metadata))
-    RawEvent(_, _, _, _, _, _, _, _, _, _) ->
-      types.ProcessIdentity(physical: physical, logical: None, evidence: [])
+      resolve_process_identity(physical, metadata, identity_cache)
+    RawEvent(_, _, _, _, _, _, _, _, _, _) -> #(
+      types.ProcessIdentity(physical: physical, logical: None, evidence: []),
+      identity_cache,
+    )
     RawEventWithMetadata(_, _, _, _, _, _, _, _, _, _, metadata)
     | RawEventWithTerm(_, _, _, _, _, _, _, _, _, _, metadata, _) ->
-      identity.resolve(physical, process_metadata(metadata))
+      resolve_process_identity(physical, metadata, identity_cache)
   }
   let #(peer_node, peer_pid) = raw_event_peer(event)
   let peer = types.ProcessRef(peer_node, peer_pid)
@@ -583,15 +650,40 @@ fn normalize_event(event: RawEvent, trigger: types.Mfa) -> types.TraceEvent {
     unknown -> types.Gap(1, "unknown relay event: " <> unknown)
   }
 
-  types.TraceEvent(
-    id: event.id,
-    root_id: event.root_id,
-    node: event.node,
-    process: process,
-    local_instant: event_instant(event),
-    kind: kind,
-    evidence: types.Exact,
+  #(
+    types.TraceEvent(
+      id: event.id,
+      root_id: event.root_id,
+      node: event.node,
+      process: process,
+      local_instant: event_instant(event),
+      kind: kind,
+      evidence: types.Exact,
+    ),
+    next_cache,
   )
+}
+
+fn resolve_process_identity(
+  physical: types.ProcessRef,
+  metadata: RawProcessMetadata,
+  cache: Dict(String, List(#(RawProcessMetadata, types.ProcessIdentity))),
+) -> #(
+  types.ProcessIdentity,
+  Dict(String, List(#(RawProcessMetadata, types.ProcessIdentity))),
+) {
+  let key = process_key(physical)
+  let cached = case dict.get(cache, key) {
+    Ok(entries) -> entries
+    Error(_) -> []
+  }
+  case list.find(cached, fn(entry) { entry.0 == metadata }) {
+    Ok(entry) -> #(entry.1, cache)
+    Error(_) -> {
+      let resolved = identity.resolve(physical, process_metadata(metadata))
+      #(resolved, dict.insert(cache, key, [#(metadata, resolved), ..cached]))
+    }
+  }
 }
 
 fn raw_event_peer(event: RawEvent) -> #(String, String) {

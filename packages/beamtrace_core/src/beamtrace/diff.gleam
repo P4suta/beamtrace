@@ -47,8 +47,36 @@ type IndexedEvent {
   IndexedEvent(
     index: Int,
     event: types.TraceEvent,
-    fingerprint: String,
+    fingerprint: Int,
     alignment_key: String,
+  )
+}
+
+// Signatures remain reusable alignment keys, but keeping 100k of them on the
+// preparing process heap during DAG refinement makes GC dominate the workload.
+// This target-local cache is consumed and deleted before `prepare` returns.
+type SignatureCache
+
+/// Reusable analysis of a trace. Construction computes signatures, root
+/// origins, the causal graph and its four-round neighborhood fingerprints.
+/// The representation is intentionally opaque so it can evolve without
+/// exposing analysis internals.
+pub opaque type PreparedTrace {
+  PreparedTrace(
+    events: List(IndexedEvent),
+    root_origins: Dict(String, Int),
+    causal_incoming: Dict(String, String),
+    event_count: Int,
+  )
+}
+
+type DiffSummary {
+  DiffSummary(
+    added: Int,
+    removed: Int,
+    changed: Int,
+    ambiguity_count: Int,
+    first: Option(DiffItem),
   )
 }
 
@@ -80,162 +108,146 @@ pub fn compare(
   left: List(types.TraceEvent),
   right: List(types.TraceEvent),
 ) -> DiffReport {
-  let left_indexed = index_with_fingerprints(left)
-  let right_indexed = index_with_fingerprints(right)
-  let anchors = patience_anchors(left_indexed, right_indexed)
-  let items =
-    align_around_anchors(
-      left_indexed,
-      right_indexed,
-      anchors,
-      root_origins(left),
-      root_origins(right),
-      [],
-    )
-  let first = first_divergence(items, left, right)
-  DiffReport(
-    items,
-    count(items, fn(item) {
-      case item {
-        Added(_) -> True
-        _ -> False
-      }
-    }),
-    count(items, fn(item) {
-      case item {
-        Removed(_) -> True
-        _ -> False
-      }
-    }),
-    count(items, fn(item) {
-      case item {
-        Changed(_, _, _) -> True
-        _ -> False
-      }
-    }),
-    count(items, fn(item) {
-      case item {
-        AmbiguousRegion(_, _, _) -> True
-        _ -> False
-      }
-    }),
-    first,
+  compare_prepared(prepare(left), prepare(right))
+}
+
+/// Analyze a trace once for reuse across multiple comparisons.
+pub fn prepare(events: List(types.TraceEvent)) -> PreparedTrace {
+  let roots = root_signatures(events)
+  let #(base, signatures) = base_analysis(events, roots)
+  let #(fingerprints, causal_incoming) = case dag.build_analysis(events) {
+    Error(_) -> #(base, dict.new())
+    Ok(#(_, incoming, outgoing)) -> {
+      let fingerprints =
+        refine(base, incoming, outgoing, dict.keys(base), fingerprint_rounds)
+      #(fingerprints, compact_predecessors(incoming))
+    }
+  }
+  let indexed = index_events(events, signatures, fingerprints, 0, [])
+  delete_signature_cache(signatures)
+  PreparedTrace(
+    events: indexed,
+    root_origins: root_origins(events),
+    causal_incoming: causal_incoming,
+    event_count: list.length(events),
   )
 }
 
-fn index_with_fingerprints(
-  events: List(types.TraceEvent),
-) -> List(IndexedEvent) {
-  let fingerprints = refined_fingerprints(events)
-  events
-  |> list.index_map(fn(event, index) {
-    IndexedEvent(
-      index,
-      event,
-      dict.get(fingerprints, event.id) |> result.unwrap(signature(event)),
-      signature(event),
+/// Compare two traces whose reusable analysis has already been prepared.
+pub fn compare_prepared(
+  left: PreparedTrace,
+  right: PreparedTrace,
+) -> DiffReport {
+  let anchors = patience_anchors(left.events, right.events)
+  let items =
+    align_around_anchors(
+      left.events,
+      right.events,
+      anchors,
+      left.root_origins,
+      right.root_origins,
+      [],
     )
-  })
+  let summary = summarize(items, DiffSummary(0, 0, 0, 0, None))
+  DiffReport(
+    items,
+    summary.added,
+    summary.removed,
+    summary.changed,
+    summary.ambiguity_count,
+    first_divergence(summary.first, left, right),
+  )
 }
 
-fn refined_fingerprints(
+fn base_analysis(
   events: List(types.TraceEvent),
-) -> Dict(String, String) {
-  let roots = root_signatures(events)
-  let base =
-    list.fold(events, dict.new(), fn(index, event) {
-      dict.insert(
-        index,
-        event.id,
-        compact_fingerprint(
-          { dict.get(roots, event.root_id) |> result.unwrap("root:boundary") }
-          <> "|"
-          <> signature(event),
+  roots: Dict(String, String),
+) -> #(Dict(String, Int), SignatureCache) {
+  let signatures = new_signature_cache()
+  #(base_analysis_loop(events, roots, signatures, 0, dict.new()), signatures)
+}
+
+fn base_analysis_loop(
+  events: List(types.TraceEvent),
+  roots: Dict(String, String),
+  signatures: SignatureCache,
+  position: Int,
+  fingerprints: Dict(String, Int),
+) -> Dict(String, Int) {
+  case events {
+    [] -> fingerprints
+    [event, ..rest] -> {
+      let event_signature = signature(event)
+      put_signature(signatures, position, event_signature)
+      let root =
+        dict.get(roots, event.root_id) |> result.unwrap("root:boundary")
+      base_analysis_loop(
+        rest,
+        roots,
+        signatures,
+        position + 1,
+        dict.insert(
+          fingerprints,
+          event.id,
+          compact_base_fingerprint(root, event_signature),
         ),
       )
-    })
-  case dag.build(events) {
-    Error(_) -> base
-    Ok(graph) -> {
-      let #(incoming, outgoing) = adjacency(graph.edges)
-      refine(base, incoming, outgoing, dict.keys(base), fingerprint_rounds)
     }
   }
 }
 
-fn adjacency(
-  edges: List(types.CausalEdge),
-) -> #(Dict(String, List(String)), Dict(String, List(String))) {
-  list.fold(edges, #(dict.new(), dict.new()), fn(indexes, edge) {
-    let #(incoming, outgoing) = indexes
-    #(
-      put_string(incoming, edge.to, edge.from),
-      put_string(outgoing, edge.from, edge.to),
-    )
-  })
+fn index_events(
+  events: List(types.TraceEvent),
+  signatures: SignatureCache,
+  fingerprints: Dict(String, Int),
+  position: Int,
+  accumulator: List(IndexedEvent),
+) -> List(IndexedEvent) {
+  case events {
+    [] -> list.reverse(accumulator)
+    [event, ..rest] -> {
+      let indexed =
+        IndexedEvent(
+          position,
+          event,
+          dict.get(fingerprints, event.id) |> result.unwrap(0),
+          get_signature(signatures, position),
+        )
+      index_events(rest, signatures, fingerprints, position + 1, [
+        indexed,
+        ..accumulator
+      ])
+    }
+  }
 }
 
-fn put_string(
-  index: Dict(String, List(String)),
-  key: String,
-  value: String,
-) -> Dict(String, List(String)) {
-  dict.insert(index, key, [value, ..dict.get(index, key) |> result.unwrap([])])
+fn compact_predecessors(
+  incoming: Dict(String, List(String)),
+) -> Dict(String, String) {
+  incoming
+  |> dict.to_list
+  |> list.filter_map(fn(entry) {
+    entry.1
+    |> list.last
+    |> result.map(fn(predecessor) { #(entry.0, predecessor) })
+  })
+  |> dict.from_list
 }
 
 fn refine(
-  fingerprints: Dict(String, String),
+  fingerprints: Dict(String, Int),
   incoming: Dict(String, List(String)),
   outgoing: Dict(String, List(String)),
   ids: List(String),
   rounds: Int,
-) -> Dict(String, String) {
+) -> Dict(String, Int) {
   case rounds {
     0 -> fingerprints
     _ -> {
-      let next =
-        list.fold(ids, dict.new(), fn(next, id) {
-          let before = neighbor_fingerprints(incoming, fingerprints, id)
-          let after = neighbor_fingerprints(outgoing, fingerprints, id)
-          let current = dict.get(fingerprints, id) |> result.unwrap("")
-          dict.insert(
-            next,
-            id,
-            compact_fingerprint(
-              current
-              <> "<"
-              <> string.join(before, ",")
-              <> ">"
-              <> string.join(after, ","),
-            ),
-          )
-        })
+      let next = refine_fingerprint_round(fingerprints, incoming, outgoing, ids)
       refine(next, incoming, outgoing, ids, rounds - 1)
     }
   }
-}
-
-fn neighbor_fingerprints(
-  adjacency: Dict(String, List(String)),
-  fingerprints: Dict(String, String),
-  id: String,
-) -> List(String) {
-  adjacency
-  |> dict.get(id)
-  |> result.unwrap([])
-  |> list.map(fn(neighbor) {
-    dict.get(fingerprints, neighbor) |> result.unwrap("")
-  })
-  |> list.sort(string.compare)
-}
-
-fn compact_fingerprint(value: String) -> String {
-  value
-  |> string.to_utf_codepoints
-  |> list.fold(17, fn(hash, codepoint) {
-    { hash * 131 + string.utf_codepoint_to_int(codepoint) } % 2_147_483_647
-  })
-  |> int.to_string
 }
 
 fn patience_anchors(
@@ -260,11 +272,26 @@ fn patience_anchors(
         _, _, _ -> Error(Nil)
       }
     })
-    |> list.sort(fn(a, b) { int.compare(a.left, b.left) })
-  longest_increasing_anchors(candidates)
+  // `left` is already indexed in ascending order, so candidates are already
+  // left-sorted. When their right positions are also increasing (the common
+  // unchanged/additive case), the complete candidate list is the LIS and no
+  // patience frontier dictionaries are needed.
+  case anchors_are_increasing(candidates, -1) {
+    True -> candidates
+    False -> longest_increasing_anchors(candidates)
+  }
 }
 
-fn fingerprint_counts(items: List(IndexedEvent)) -> Dict(String, Int) {
+fn anchors_are_increasing(anchors: List(Anchor), previous: Int) -> Bool {
+  case anchors {
+    [] -> True
+    [anchor, ..rest] if anchor.right > previous ->
+      anchors_are_increasing(rest, anchor.right)
+    _ -> False
+  }
+}
+
+fn fingerprint_counts(items: List(IndexedEvent)) -> Dict(Int, Int) {
   list.fold(items, dict.new(), fn(counts, item) {
     let count = dict.get(counts, item.fingerprint) |> result.unwrap(0)
     dict.insert(counts, item.fingerprint, count + 1)
@@ -832,21 +859,64 @@ fn ambiguous(
   )
 }
 
-fn first_divergence(
-  items: List(DiffItem),
-  left: List(types.TraceEvent),
-  right: List(types.TraceEvent),
-) -> Option(Divergence) {
+fn summarize(items: List(DiffItem), summary: DiffSummary) -> DiffSummary {
   case items {
-    [] -> None
-    [Matched(_, _, _), ..rest] -> first_divergence(rest, left, right)
-    [Added(right_id), ..] ->
+    [] -> summary
+    [item, ..rest] -> {
+      let next = case item {
+        Matched(_, _, _) -> summary
+        Added(_) ->
+          DiffSummary(
+            ..summary,
+            added: summary.added + 1,
+            first: remember_first(summary.first, item),
+          )
+        Removed(_) ->
+          DiffSummary(
+            ..summary,
+            removed: summary.removed + 1,
+            first: remember_first(summary.first, item),
+          )
+        Changed(_, _, _) ->
+          DiffSummary(
+            ..summary,
+            changed: summary.changed + 1,
+            first: remember_first(summary.first, item),
+          )
+        AmbiguousRegion(_, _, _) ->
+          DiffSummary(
+            ..summary,
+            ambiguity_count: summary.ambiguity_count + 1,
+            first: remember_first(summary.first, item),
+          )
+      }
+      summarize(rest, next)
+    }
+  }
+}
+
+fn remember_first(first: Option(DiffItem), item: DiffItem) -> Option(DiffItem) {
+  case first {
+    None -> Some(item)
+    Some(_) -> first
+  }
+}
+
+fn first_divergence(
+  item: Option(DiffItem),
+  left: PreparedTrace,
+  right: PreparedTrace,
+) -> Option(Divergence) {
+  case item {
+    None -> None
+    Some(Matched(_, _, _)) -> None
+    Some(Added(right_id)) ->
       Some(Divergence(None, Some(right_id), causal_path(right, right_id)))
-    [Removed(left_id), ..] ->
+    Some(Removed(left_id)) ->
       Some(Divergence(Some(left_id), None, causal_path(left, left_id)))
-    [Changed(left_id, right_id, _), ..] ->
+    Some(Changed(left_id, right_id, _)) ->
       Some(Divergence(Some(left_id), Some(right_id), causal_path(left, left_id)))
-    [AmbiguousRegion(left_ids, right_ids, _), ..] -> {
+    Some(AmbiguousRegion(left_ids, right_ids, _)) -> {
       let left_id =
         list.first(left_ids) |> result.map(Some) |> result.unwrap(None)
       let right_id =
@@ -865,20 +935,8 @@ fn first_divergence(
   }
 }
 
-fn causal_path(events: List(types.TraceEvent), target: String) -> List(String) {
-  case dag.build(events) {
-    Error(_) -> [target]
-    Ok(graph) -> {
-      let incoming =
-        list.fold(graph.edges, dict.new(), fn(index, edge) {
-          case dict.has_key(index, edge.to) {
-            True -> index
-            False -> dict.insert(index, edge.to, edge.from)
-          }
-        })
-      causal_predecessors(incoming, target, [], list.length(events))
-    }
-  }
+fn causal_path(trace: PreparedTrace, target: String) -> List(String) {
+  causal_predecessors(trace.causal_incoming, target, [], trace.event_count)
 }
 
 fn causal_predecessors(
@@ -991,6 +1049,31 @@ fn entries_signature(
   |> string.join(",")
 }
 
-fn count(items: List(a), predicate: fn(a) -> Bool) -> Int {
-  items |> list.filter(predicate) |> list.length
-}
+@external(erlang, "beamtrace_diff_ffi", "compact_base")
+@external(javascript, "../beamtrace_diff_ffi.mjs", "compactBase")
+fn compact_base_fingerprint(root: String, event_signature: String) -> Int
+
+@external(erlang, "beamtrace_diff_ffi", "refine_round")
+@external(javascript, "../beamtrace_diff_ffi.mjs", "refineRound")
+fn refine_fingerprint_round(
+  fingerprints: Dict(String, Int),
+  incoming: Dict(String, List(String)),
+  outgoing: Dict(String, List(String)),
+  ids: List(String),
+) -> Dict(String, Int)
+
+@external(erlang, "beamtrace_diff_ffi", "signature_cache_new")
+@external(javascript, "../beamtrace_diff_ffi.mjs", "signatureCacheNew")
+fn new_signature_cache() -> SignatureCache
+
+@external(erlang, "beamtrace_diff_ffi", "signature_cache_put")
+@external(javascript, "../beamtrace_diff_ffi.mjs", "signatureCachePut")
+fn put_signature(cache: SignatureCache, position: Int, signature: String) -> Nil
+
+@external(erlang, "beamtrace_diff_ffi", "signature_cache_get")
+@external(javascript, "../beamtrace_diff_ffi.mjs", "signatureCacheGet")
+fn get_signature(cache: SignatureCache, position: Int) -> String
+
+@external(erlang, "beamtrace_diff_ffi", "signature_cache_delete")
+@external(javascript, "../beamtrace_diff_ffi.mjs", "signatureCacheDelete")
+fn delete_signature_cache(cache: SignatureCache) -> Nil
