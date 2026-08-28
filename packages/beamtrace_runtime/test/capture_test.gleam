@@ -272,6 +272,18 @@ pub fn relay_process_metadata_resolves_a_stable_logical_actor_test() {
 
 pub fn observed_identity_is_propagated_to_every_event_for_the_physical_pid_test() {
   let raw = [
+    capture.RawEvent(
+      "started",
+      "r1",
+      "app@host",
+      "<0.2.0>",
+      2,
+      "gap",
+      "",
+      "",
+      0,
+      "before_metadata",
+    ),
     capture.RawEventWithMetadata(
       "registered",
       "r1",
@@ -308,12 +320,13 @@ pub fn observed_identity_is_propagated_to_every_event_for_the_physical_pid_test(
   ]
 
   let result = capture.normalize(raw, "complete", types.Mfa("root", "run", 0))
-  let assert [registered, exited] = result.events
+  let assert [started, registered, exited] = result.events
 
   registered.process.logical
   |> should.equal(
     Some(types.LogicalActor("checkout_worker", "checkout_worker")),
   )
+  started.process |> should.equal(registered.process)
   exited.process |> should.equal(registered.process)
 }
 

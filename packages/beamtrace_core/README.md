@@ -78,6 +78,29 @@ gleam run --target javascript --runtime nodejs
 Both commands print
 `codec=round-trip dag_boundaries=1 diagnostic_messages=1`.
 
+## Reusing comparison analysis
+
+`diff.compare(left, right)` remains the convenient compatibility API. When
+one baseline is compared with several runs, prepare each trace once and reuse
+the opaque analysis value:
+
+```gleam
+import beamtrace/diff
+
+let baseline = diff.prepare(baseline_events)
+let first = diff.compare_prepared(baseline, diff.prepare(first_run_events))
+let second = diff.compare_prepared(baseline, diff.prepare(second_run_events))
+```
+
+Preparation computes logical signatures, root origins, the causal graph and
+four-round neighborhood fingerprints. `compare` and `compare_prepared` return
+the same `DiffReport`; preparation changes only how that analysis is reused.
+
+Typed producers can call `codec.validate_manifest`, `codec.validate_event`,
+`codec.validate_graph_segment`, and `codec.validate_clocks` before encoding.
+These validators apply the same schema-v2 field rules as the decoding boundary
+without allocating JSON and parsing it back into the same value.
+
 ## Modules
 
 - `beamtrace/types` — capture specifications, node-relative events, structured outcomes, evidence, interval time, and privacy-safe term views
@@ -85,7 +108,7 @@ Both commands print
 - `beamtrace/dag` and `beamtrace/merge` — causal graph validation and distributed partial-order merging
 - `beamtrace/identity` — physical process and logical actor identity evidence
 - `beamtrace/anomaly` and `beamtrace/diagnostics` — bounded Live analysis contracts
-- `beamtrace/diff` and `beamtrace/stats` — PID-independent alignment and multi-run statistics
+- `beamtrace/diff` and `beamtrace/stats` — PID-independent alignment, reusable prepared traces, and multi-run statistics
 - `beamtrace/codec` and `beamtrace/protocol` — versioned trace and wire contracts
 
 Every causal relationship is represented as exact evidence or as an inference carrying a method, reason, evidence events, observed values, and algorithm settings. External boundaries, integrity issues, ambiguity, and unavailable time remain explicit; the package does not emit confidence probabilities.

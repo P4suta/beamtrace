@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+* **core:** add opaque prepared traces and reusable multi-run comparison APIs
+* **codec:** add direct typed validators and single-parse versioned decoding
+
+### Performance
+
+* reuse causal analysis, process grouping, signatures, and diff aggregation
+* avoid JSON round trips while saving generated archives and ingesting relay batches
+* read schema-v2 windows selectively and stream archive search segment by segment
+* reuse NDJSON framing and canonical graph output, and parallelize full-load event decoding
+* skip duplicate-root and identity-propagation work for ordinary captures
+
 ## [0.2.0](https://github.com/P4suta/beamtrace/compare/v0.1.1...v0.2.0) (2026-08-25)
 
 

@@ -45,9 +45,14 @@ pub fn compare(paths: List(String)) -> Result(Report, CompareError) {
       case runs {
         [] | [_] -> Error(InvalidPaths)
         [baseline, ..candidates] -> {
+          let baseline_prepared = diff.prepare(baseline.events)
           let reports =
             list.map(candidates, fn(candidate) {
-              let report = diff.compare(baseline.events, candidate.events)
+              let report =
+                diff.compare_prepared(
+                  baseline_prepared,
+                  diff.prepare(candidate.events),
+                )
               RunReport(
                 path: candidate.path,
                 items: report.items,

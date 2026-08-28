@@ -35,20 +35,42 @@ pub type GraphSegment {
   )
 }
 
+type VersionedEvent {
+  EventV1(types.TraceEvent)
+  EventV2(types.TraceEvent)
+  UnsupportedEvent(Int)
+}
+
+type VersionedManifest {
+  ManifestV1(Manifest)
+  ManifestV2(Manifest)
+  UnsupportedManifest(Int)
+}
+
+type VersionedGraphSegment {
+  GraphSegmentV2(GraphSegment)
+  UnsupportedGraphSegment(Int)
+}
+
+type VersionedClocks {
+  ClocksV2(types.ClockCalibration)
+  UnsupportedClocks(Int)
+}
+
 pub fn encode_event(event: types.TraceEvent) -> String {
   event_json(event) |> json.to_string
 }
 
 pub fn decode_event(source: String) -> Result(types.TraceEvent, CodecError) {
-  case decode_event_structural(source), decode_version(source) {
-    Error(error), _ | _, Error(error) -> Error(error)
-    Ok(event), Ok(2) ->
+  case decode_versioned_event(source) {
+    Error(error) -> Error(error)
+    Ok(#(event, 2)) ->
       case encode_event(event) == source {
         True -> Ok(event)
         False -> Error(NonCanonicalJson)
       }
-    Ok(event), Ok(1) -> Ok(event)
-    _, Ok(version) -> Error(UnknownSchemaVersion(version))
+    Ok(#(event, 1)) -> Ok(event)
+    Ok(#(_, version)) -> Error(UnknownSchemaVersion(version))
   }
 }
 
@@ -58,19 +80,21 @@ pub fn decode_event(source: String) -> Result(types.TraceEvent, CodecError) {
 pub fn decode_event_structural(
   source: String,
 ) -> Result(types.TraceEvent, CodecError) {
-  case decode_version(source) {
+  case decode_versioned_event(source) {
+    Ok(#(event, _)) -> Ok(event)
     Error(error) -> Error(error)
-    Ok(2) ->
-      case json.parse(source, trace_event_decoder_v2()) {
-        Error(error) -> Error(InvalidJson(string.inspect(error)))
-        Ok(event) -> validate_event(event) |> result_replace(event)
-      }
-    Ok(1) ->
-      case json.parse(source, trace_event_decoder_v1()) {
-        Error(error) -> Error(InvalidJson(string.inspect(error)))
-        Ok(event) -> validate_legacy_event(event) |> result_replace(event)
-      }
-    Ok(version) -> Error(UnknownSchemaVersion(version))
+  }
+}
+
+fn decode_versioned_event(
+  source: String,
+) -> Result(#(types.TraceEvent, Int), CodecError) {
+  case json.parse(source, versioned_event_decoder()) {
+    Error(error) -> Error(InvalidJson(string.inspect(error)))
+    Ok(EventV2(event)) -> validate_event(event) |> result_replace(#(event, 2))
+    Ok(EventV1(event)) ->
+      validate_legacy_event(event) |> result_replace(#(event, 1))
+    Ok(UnsupportedEvent(version)) -> Error(UnknownSchemaVersion(version))
   }
 }
 
@@ -87,27 +111,20 @@ pub fn encode_manifest(manifest: Manifest) -> String {
 }
 
 pub fn decode_manifest(source: String) -> Result(Manifest, CodecError) {
-  case decode_version(source) {
-    Error(error) -> Error(error)
-    Ok(2) ->
-      case json.parse(source, manifest_decoder_v2()) {
-        Error(error) -> Error(InvalidJson(string.inspect(error)))
-        Ok(manifest) ->
-          case validate_manifest(manifest) {
-            Error(error) -> Error(error)
-            Ok(Nil) ->
-              case encode_manifest(manifest) == source {
-                True -> Ok(manifest)
-                False -> Error(NonCanonicalJson)
-              }
+  case json.parse(source, versioned_manifest_decoder()) {
+    Error(error) -> Error(InvalidJson(string.inspect(error)))
+    Ok(ManifestV2(manifest)) ->
+      case validate_manifest(manifest) {
+        Error(error) -> Error(error)
+        Ok(Nil) ->
+          case encode_manifest(manifest) == source {
+            True -> Ok(manifest)
+            False -> Error(NonCanonicalJson)
           }
       }
-    Ok(1) ->
-      case json.parse(source, manifest_decoder_v1()) {
-        Error(error) -> Error(InvalidJson(string.inspect(error)))
-        Ok(manifest) -> validate_manifest(manifest) |> result_replace(manifest)
-      }
-    Ok(version) -> Error(UnknownSchemaVersion(version))
+    Ok(ManifestV1(manifest)) ->
+      validate_manifest(manifest) |> result_replace(manifest)
+    Ok(UnsupportedManifest(version)) -> Error(UnknownSchemaVersion(version))
   }
 }
 
@@ -636,6 +653,40 @@ fn privacy_json(privacy: types.Privacy) -> json.Json {
   }
 }
 
+fn versioned_event_decoder() -> decode.Decoder(VersionedEvent) {
+  use version <- decode.field("schema_version", decode.int)
+  case version {
+    1 -> decode.map(trace_event_decoder_v1(), EventV1)
+    2 -> decode.map(trace_event_decoder_v2(), EventV2)
+    version -> decode.success(UnsupportedEvent(version))
+  }
+}
+
+fn versioned_manifest_decoder() -> decode.Decoder(VersionedManifest) {
+  use version <- decode.field("schema_version", decode.int)
+  case version {
+    1 -> decode.map(manifest_decoder_v1(), ManifestV1)
+    2 -> decode.map(manifest_decoder_v2(), ManifestV2)
+    version -> decode.success(UnsupportedManifest(version))
+  }
+}
+
+fn versioned_graph_segment_decoder() -> decode.Decoder(VersionedGraphSegment) {
+  use version <- decode.field("schema_version", decode.int)
+  case version {
+    2 -> decode.map(graph_segment_decoder(), GraphSegmentV2)
+    version -> decode.success(UnsupportedGraphSegment(version))
+  }
+}
+
+fn versioned_clocks_decoder() -> decode.Decoder(VersionedClocks) {
+  use version <- decode.field("schema_version", decode.int)
+  case version {
+    2 -> decode.map(clocks_decoder(), ClocksV2)
+    version -> decode.success(UnsupportedClocks(version))
+  }
+}
+
 fn manifest_decoder_v2() -> decode.Decoder(Manifest) {
   use schema_version <- decode.field("schema_version", decode.int)
   use tool_version <- decode.field("tool_version", decode.string)
@@ -1141,22 +1192,18 @@ fn legacy_outcome_decoder() -> decode.Decoder(types.CaptureOutcome) {
 pub fn decode_graph_segment(
   source: String,
 ) -> Result(GraphSegment, CodecError) {
-  case decode_version(source) {
-    Ok(2) ->
-      case json.parse(source, graph_segment_decoder()) {
-        Error(error) -> Error(InvalidJson(string.inspect(error)))
-        Ok(segment) ->
-          case validate_graph_segment(segment) {
-            Error(error) -> Error(error)
-            Ok(Nil) ->
-              case encode_graph_segment(segment) == source {
-                True -> Ok(segment)
-                False -> Error(NonCanonicalJson)
-              }
+  case json.parse(source, versioned_graph_segment_decoder()) {
+    Error(error) -> Error(InvalidJson(string.inspect(error)))
+    Ok(GraphSegmentV2(segment)) ->
+      case validate_graph_segment(segment) {
+        Error(error) -> Error(error)
+        Ok(Nil) ->
+          case encode_graph_segment(segment) == source {
+            True -> Ok(segment)
+            False -> Error(NonCanonicalJson)
           }
       }
-    Ok(version) -> Error(UnknownSchemaVersion(version))
-    Error(error) -> Error(error)
+    Ok(UnsupportedGraphSegment(version)) -> Error(UnknownSchemaVersion(version))
   }
 }
 
@@ -1206,22 +1253,18 @@ fn edge_kind_decoder() -> decode.Decoder(types.EdgeKind) {
 pub fn decode_clocks(
   source: String,
 ) -> Result(types.ClockCalibration, CodecError) {
-  case decode_version(source) {
-    Ok(2) ->
-      case json.parse(source, clocks_decoder()) {
-        Error(error) -> Error(InvalidJson(string.inspect(error)))
-        Ok(clocks) ->
-          case validate_clocks(clocks) {
-            Error(error) -> Error(error)
-            Ok(Nil) ->
-              case encode_clocks(clocks) == source {
-                True -> Ok(clocks)
-                False -> Error(NonCanonicalJson)
-              }
+  case json.parse(source, versioned_clocks_decoder()) {
+    Error(error) -> Error(InvalidJson(string.inspect(error)))
+    Ok(ClocksV2(clocks)) ->
+      case validate_clocks(clocks) {
+        Error(error) -> Error(error)
+        Ok(Nil) ->
+          case encode_clocks(clocks) == source {
+            True -> Ok(clocks)
+            False -> Error(NonCanonicalJson)
           }
       }
-    Ok(version) -> Error(UnknownSchemaVersion(version))
-    Error(error) -> Error(error)
+    Ok(UnsupportedClocks(version)) -> Error(UnknownSchemaVersion(version))
   }
 }
 
@@ -1273,19 +1316,8 @@ fn privacy_decoder() -> decode.Decoder(types.Privacy) {
   }
 }
 
-fn decode_version(source: String) -> Result(Int, CodecError) {
-  case json.parse(source, version_decoder()) {
-    Ok(version) -> Ok(version)
-    Error(error) -> Error(InvalidJson(string.inspect(error)))
-  }
-}
-
-fn version_decoder() -> decode.Decoder(Int) {
-  use version <- decode.field("schema_version", decode.int)
-  decode.success(version)
-}
-
-fn validate_manifest(manifest: Manifest) -> Result(Nil, CodecError) {
+/// Validate a typed manifest without encoding and parsing it again.
+pub fn validate_manifest(manifest: Manifest) -> Result(Nil, CodecError) {
   use Nil <- result_try(ensure(
     manifest.schema_version == 1 || manifest.schema_version == schema_version,
     "schema_version",
@@ -1346,7 +1378,8 @@ fn outcome_references_nodes(
   })
 }
 
-fn validate_event(event: types.TraceEvent) -> Result(Nil, CodecError) {
+/// Validate a typed schema-v2 event without a JSON round trip.
+pub fn validate_event(event: types.TraceEvent) -> Result(Nil, CodecError) {
   use Nil <- result_try(validate_event_identity(event))
   use Nil <- result_try(ensure(
     event.local_instant.offset_ns >= 0
@@ -1818,7 +1851,10 @@ fn validate_privacy(privacy: types.Privacy) -> Result(Nil, CodecError) {
   }
 }
 
-fn validate_graph_segment(segment: GraphSegment) -> Result(Nil, CodecError) {
+/// Validate a typed schema-v2 graph segment without a JSON round trip.
+pub fn validate_graph_segment(
+  segment: GraphSegment,
+) -> Result(Nil, CodecError) {
   use Nil <- result_try(ensure(
     list.length(segment.event_ids) <= 1000
       && all_unique(segment.event_ids)
@@ -1878,7 +1914,8 @@ fn validate_boundaries(
   }
 }
 
-fn validate_clocks(
+/// Validate typed clock calibration without a JSON round trip.
+pub fn validate_clocks(
   calibration: types.ClockCalibration,
 ) -> Result(Nil, CodecError) {
   use Nil <- result_try(ensure(

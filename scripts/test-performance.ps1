@@ -12,7 +12,16 @@ if (-not $IsLinux) {
 
 Push-Location (Join-Path $repoRoot 'packages/beamtrace_core')
 try {
-    & gleam check
+    & gleam build --target erlang
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+finally {
+    Pop-Location
+}
+
+Push-Location (Join-Path $repoRoot 'packages/beamtrace_runtime')
+try {
+    & gleam build --target erlang
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 finally {
@@ -20,4 +29,7 @@ finally {
 }
 
 & escript (Join-Path $PSScriptRoot 'performance-gate.escript') $repoRoot
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& escript (Join-Path $PSScriptRoot 'runtime-performance-gate.escript') $repoRoot
 exit $LASTEXITCODE

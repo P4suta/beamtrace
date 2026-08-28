@@ -48,7 +48,7 @@ An `.beamtrace` v2 ZIP contains a structured manifest, canonical event segments,
 
 Core types compile for Erlang and JavaScript. Runtime code targets Erlang. The Web client targets JavaScript. OS, crypto, ZIP, trace, and Canvas operations use narrow FFI modules.
 
-Server-side search scans only relevant compressed segments and returns a bounded window. The browser represents million-event traces by logical totals and window cursors, never by loading every event or creating one DOM node per event. Multi-run statistics use root-relative durations and logical causal signatures, so physical PIDs and node-local clock origins do not affect alignment.
+Server-side search verifies and scans one compressed event segment at a time and returns a bounded window; indexed range reads inflate at most two event segments. The browser represents million-event traces by logical totals and window cursors, never by loading every event or creating one DOM node per event. Multi-run statistics use root-relative durations and logical causal signatures, so physical PIDs and node-local clock origins do not affect alignment.
 
 The S3 adapter uses path-style HTTPS requests, AWS Signature Version 4, conditional create-only PUT, content hash verification, bounded responses, disabled redirects, peer/hostname verification, and optional `AWS_CA_BUNDLE`. Credentials are read only from standard AWS process environment variables and never enter BeamTrace configuration, SQLite, logs, or frames.
 

@@ -9,6 +9,24 @@ v1_golden_is_read_and_migrated_without_mutating_source_test() ->
     try
         ok = create_v1_golden(Source),
         {ok, Before} = file:read_file(Source),
+        ?assertEqual(
+            {error, <<"legacy_fallback">>},
+            beamtrace_storage_ffi:read_window(
+                unicode:characters_to_binary(Source), 0, 1
+            )
+        ),
+        ?assertMatch(
+            {ok, {event_window, [_], 1, 0, 1, {clock_calibration, 0, []}}},
+            'beamtrace_runtime@storage':window(
+                unicode:characters_to_binary(Source), 0, 1
+            )
+        ),
+        ?assertMatch(
+            {ok, {event_window, [_], 1, 0, 1, {clock_calibration, 0, []}}},
+            'beamtrace_runtime@storage':search(
+                unicode:characters_to_binary(Source), <<"legacy-event">>, 0, 1
+            )
+        ),
         {ok, {Manifest, Events, [], <<>>}} = beamtrace_storage_ffi:read_container(
             unicode:characters_to_binary(Source)
         ),

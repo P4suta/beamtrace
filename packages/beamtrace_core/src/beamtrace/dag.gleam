@@ -31,12 +31,32 @@ type ReadyHeap {
 /// Node-local clocks are never compared across nodes. All indexes are dict
 /// based, so construction and cycle validation are O((n + e) log n).
 pub fn build(events: List(types.TraceEvent)) -> Result(CausalGraph, DagError) {
+  case build_analysis(events) {
+    Ok(#(graph, _, _)) -> Ok(graph)
+    Error(error) -> Error(error)
+  }
+}
+
+/// Internal analysis boundary used by Core algorithms that also need the
+/// graph adjacency. Keeping it in the DAG build avoids rebuilding the same
+/// indexes after cycle validation.
+@internal
+pub fn build_analysis(
+  events: List(types.TraceEvent),
+) -> Result(
+  #(CausalGraph, Dict(String, List(String)), Dict(String, List(String))),
+  DagError,
+) {
   case index_events(events, dict.new()) {
     Error(id) -> Error(DuplicateEventId(id))
     Ok(event_index) -> {
-      let process_edges = process_order_edges(events)
+      // Process grouping and local ordering are also needed to resolve spawn
+      // targets. Compute them once so large traces do not repeat the same
+      // dictionary construction and sort for two independent edge classes.
+      let process_groups = grouped_process_events(events)
+      let process_edges = process_order_edges(process_groups)
       let #(message_edges, message_boundaries) = message_edges(events)
-      let spawn_edges = spawn_edges(events)
+      let spawn_edges = spawn_edges(events, process_groups)
       let graph =
         CausalGraph(
           events: events,
@@ -45,8 +65,9 @@ pub fn build(events: List(types.TraceEvent)) -> Result(CausalGraph, DagError) {
             |> list.append(spawn_edges),
           boundaries: message_boundaries,
         )
-      case is_acyclic_indexed(graph, event_index) {
-        True -> Ok(graph)
+      let #(incoming, outgoing, indegree) = causal_indexes(graph, event_index)
+      case acyclic_from_indexes(event_index, outgoing, indegree) {
+        True -> Ok(#(graph, incoming, outgoing))
         False -> Error(CycleDetected)
       }
     }
@@ -79,22 +100,20 @@ fn index_events(
 }
 
 fn process_order_edges(
-  events: List(types.TraceEvent),
+  process_groups: Dict(String, List(types.TraceEvent)),
 ) -> List(types.CausalEdge) {
-  events
-  |> group_by_process
+  process_groups
   |> dict.values
   |> list.flat_map(fn(process_events) {
-    process_events
-    |> list.sort(compare_local)
-    |> adjacent_process_edges([])
+    adjacent_process_edges(process_events, [])
   })
 }
 
-fn group_by_process(
+fn grouped_process_events(
   events: List(types.TraceEvent),
 ) -> Dict(String, List(types.TraceEvent)) {
-  list.fold(events, dict.new(), fn(groups, event) {
+  events
+  |> list.fold(dict.new(), fn(groups, event) {
     let key = process_key(event.process.physical)
     let grouped = case dict.get(groups, key) {
       Ok(existing) -> [event, ..existing]
@@ -102,6 +121,7 @@ fn group_by_process(
     }
     dict.insert(groups, key, grouped)
   })
+  |> dict.map_values(fn(_, grouped) { list.sort(grouped, compare_local) })
 }
 
 fn adjacent_process_edges(
@@ -265,14 +285,16 @@ fn add_boundaries(
   })
 }
 
-fn spawn_edges(events: List(types.TraceEvent)) -> List(types.CausalEdge) {
+fn spawn_edges(
+  events: List(types.TraceEvent),
+  process_groups: Dict(String, List(types.TraceEvent)),
+) -> List(types.CausalEdge) {
   let first_by_process =
-    events
-    |> group_by_process
+    process_groups
     |> dict.to_list
     |> list.filter_map(fn(entry) {
       let #(key, grouped) = entry
-      case list.sort(grouped, compare_local) {
+      case grouped {
         [first, ..] -> Ok(#(key, first))
         [] -> Error(Nil)
       }
@@ -310,25 +332,45 @@ fn is_acyclic_indexed(
   graph: CausalGraph,
   events: Dict(String, types.TraceEvent),
 ) -> Bool {
+  let #(_, adjacency, indegree) = causal_indexes(graph, events)
+  acyclic_from_indexes(events, adjacency, indegree)
+}
+
+fn causal_indexes(
+  graph: CausalGraph,
+  events: Dict(String, types.TraceEvent),
+) -> #(
+  Dict(String, List(String)),
+  Dict(String, List(String)),
+  Dict(String, Int),
+) {
   let indegree =
     list.fold(dict.keys(events), dict.new(), fn(index, id) {
       dict.insert(index, id, 0)
     })
-  let #(adjacency, indegree) =
-    list.fold(graph.edges, #(dict.new(), indegree), fn(indexes, edge) {
-      let #(adjacency, indegree) = indexes
-      case dict.has_key(events, edge.from), dict.has_key(events, edge.to) {
-        True, True -> {
-          let outgoing = dict.get(adjacency, edge.from) |> result.unwrap([])
-          let degree = dict.get(indegree, edge.to) |> result.unwrap(0)
-          #(
-            dict.insert(adjacency, edge.from, [edge.to, ..outgoing]),
-            dict.insert(indegree, edge.to, degree + 1),
-          )
-        }
-        _, _ -> indexes
+  list.fold(graph.edges, #(dict.new(), dict.new(), indegree), fn(indexes, edge) {
+    let #(incoming, outgoing, indegree) = indexes
+    case dict.has_key(events, edge.from), dict.has_key(events, edge.to) {
+      True, True -> {
+        let targets = dict.get(outgoing, edge.from) |> result.unwrap([])
+        let sources = dict.get(incoming, edge.to) |> result.unwrap([])
+        let degree = dict.get(indegree, edge.to) |> result.unwrap(0)
+        #(
+          dict.insert(incoming, edge.to, [edge.from, ..sources]),
+          dict.insert(outgoing, edge.from, [edge.to, ..targets]),
+          dict.insert(indegree, edge.to, degree + 1),
+        )
       }
-    })
+      _, _ -> indexes
+    }
+  })
+}
+
+fn acyclic_from_indexes(
+  events: Dict(String, types.TraceEvent),
+  adjacency: Dict(String, List(String)),
+  indegree: Dict(String, Int),
+) -> Bool {
   let ready =
     indegree
     |> dict.to_list

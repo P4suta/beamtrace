@@ -161,3 +161,39 @@ pub fn repeated_unanchored_signatures_are_explicitly_ambiguous_test() {
   ])
   report.ambiguity_count |> should.equal(1)
 }
+
+pub fn prepared_comparison_matches_compatibility_wrapper_test() {
+  let left_branch = [
+    named_event("left-a", "<0.1.0>", "worker", "a", 1),
+    named_event("left-c", "<0.1.0>", "worker", "c", 3),
+  ]
+  let right_branch = [
+    named_event("right-a", "<0.2.0>", "worker", "a", 10),
+    named_event("right-b", "<0.2.0>", "worker", "b", 20),
+    named_event("right-c", "<0.2.0>", "worker", "c", 30),
+  ]
+  let repeated_left = [
+    named_event("left-1", "<0.3.0>", "worker", "repeat", 1),
+    named_event("left-2", "<0.4.0>", "worker", "repeat", 2),
+  ]
+  let repeated_right = [
+    named_event("right-1", "<0.5.0>", "worker", "repeat", 10),
+    named_event("right-2", "<0.6.0>", "worker", "repeat", 20),
+  ]
+  let duplicate_ids = [
+    named_event("duplicate", "<0.7.0>", "worker", "a", 1),
+    named_event("duplicate", "<0.7.0>", "worker", "b", 2),
+  ]
+  let cases = [
+    #(left_branch, left_branch),
+    #(left_branch, right_branch),
+    #(right_branch, left_branch),
+    #(repeated_left, repeated_right),
+    #(duplicate_ids, right_branch),
+  ]
+
+  list.each(cases, fn(pair) {
+    diff.compare_prepared(diff.prepare(pair.0), diff.prepare(pair.1))
+    |> should.equal(diff.compare(pair.0, pair.1))
+  })
+}

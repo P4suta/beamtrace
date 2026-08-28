@@ -22,6 +22,14 @@ pub type Batch {
   )
 }
 
+type DecodedItems {
+  DecodedItems(
+    events: List(types.TraceEvent),
+    event_count: Int,
+    canonical: String,
+  )
+}
+
 pub fn encode(
   mode: String,
   events: List(types.TraceEvent),
@@ -60,17 +68,98 @@ pub fn encode_raw(
 /// Decode the public metadata boundary. Raw payloads are deliberately denied
 /// here so callers cannot opt into raw handling by accident.
 pub fn decode(source: String) -> Result(Batch, String) {
-  case raw_privacy(source) {
-    True -> Error("raw_capture_not_authorized")
-    False -> {
-      use parts <- result_try(decode_batch_parts(source))
-      let #(mode, privacy, _, _, _, _, encoded_events) = parts
-      case privacy {
-        "metadata" -> finish_metadata(mode, encoded_events)
-        _ -> Error("invalid_payload")
-      }
-    }
+  use parts <- result_try(decode_public_batch_parts(source))
+  let #(mode, privacy, _, _, _, _, encoded_events) = parts
+  case privacy {
+    "metadata" -> finish_metadata(mode, encoded_events)
+    "raw" -> Error("raw_capture_not_authorized")
+    _ -> Error("invalid_payload")
   }
+}
+
+fn finish_raw(
+  mode: String,
+  grant: String,
+  policy: types.RawPolicy,
+  encoded_events: List(String),
+) -> Result(Batch, String) {
+  use decoded <- result_try(decode_validated_events(
+    encoded_events,
+    fn(event) { validate_raw_kind(event.kind, policy) },
+    [],
+    [],
+    0,
+  ))
+  Ok(Batch(
+    mode: mode,
+    event_count: decoded.event_count,
+    canonical: raw_canonical_items(mode, policy, decoded.canonical),
+    privacy: RawBatch(grant, policy),
+    events: decoded.events,
+  ))
+}
+
+fn finish_stored_raw(
+  mode: String,
+  policy: types.RawPolicy,
+  encoded_events: List(String),
+) -> Result(Batch, String) {
+  finish_raw(mode, "", policy, encoded_events)
+}
+
+fn decode_validated_events(
+  sources: List(String),
+  validate: fn(types.TraceEvent) -> Result(Nil, String),
+  events: List(types.TraceEvent),
+  canonical: List(String),
+  count: Int,
+) -> Result(DecodedItems, String) {
+  case sources {
+    [] ->
+      Ok(DecodedItems(
+        events: list.reverse(events),
+        event_count: count,
+        canonical: canonical |> list.reverse |> string.join(","),
+      ))
+    [source, ..rest] ->
+      case codec.decode_event_structural(source) {
+        Error(_) -> Error("invalid_payload")
+        Ok(event) -> {
+          use Nil <- result_try(validate(event))
+          decode_validated_events(
+            rest,
+            validate,
+            [event, ..events],
+            [codec.encode_event(event), ..canonical],
+            count + 1,
+          )
+        }
+      }
+  }
+}
+
+fn validate_metadata_event(event: types.TraceEvent) -> Result(Nil, String) {
+  validate_metadata_kind(event.kind)
+}
+
+fn finish_metadata(
+  mode: String,
+  encoded_events: List(String),
+) -> Result(Batch, String) {
+  use decoded <- result_try(decode_validated_events(
+    encoded_events,
+    validate_metadata_event,
+    [],
+    [],
+    0,
+  ))
+  Ok(Batch(
+    mode: mode,
+    event_count: decoded.event_count,
+    canonical: metadata_canonical_items(mode, decoded.canonical),
+    privacy: MetadataBatch,
+    events: decoded.events,
+  ))
 }
 
 /// Decode the authenticated team-ingest boundary. Grant reservation still
@@ -99,36 +188,11 @@ pub fn decode_for_ingest(source: String) -> Result(Batch, String) {
       {
         False, _, _ -> Error("raw_capture_grant_denied")
         _, False, _ | _, _, False -> Error("invalid_raw_policy")
-        True, True, True -> {
-          use events <- result_try(decode_events(encoded_events, []))
-          use Nil <- result_try(validate_raw_events(events, policy))
-          Ok(Batch(
-            mode: mode,
-            event_count: list.length(events),
-            canonical: raw_canonical(mode, policy, events),
-            privacy: RawBatch(grant, policy),
-            events: events,
-          ))
-        }
+        True, True, True -> finish_raw(mode, grant, policy, encoded_events)
       }
     }
     _ -> Error("invalid_payload")
   }
-}
-
-fn finish_metadata(
-  mode: String,
-  encoded_events: List(String),
-) -> Result(Batch, String) {
-  use events <- result_try(decode_events(encoded_events, []))
-  use Nil <- result_try(validate_metadata_events(events))
-  Ok(Batch(
-    mode: mode,
-    event_count: list.length(events),
-    canonical: metadata_canonical(mode, events),
-    privacy: MetadataBatch,
-    events: events,
-  ))
 }
 
 /// Decode a payload already accepted and classified by the hub. Raw grant
@@ -152,17 +216,7 @@ pub fn decode_stored(source: String, privacy: String) -> Result(Batch, String) {
       let policy = raw_grant.normalize_policy(presented_policy)
       case policy == presented_policy, valid_raw_policy(policy) {
         False, _ | _, False -> Error("invalid_raw_policy")
-        True, True -> {
-          use events <- result_try(decode_events(encoded_events, []))
-          use Nil <- result_try(validate_raw_events(events, policy))
-          Ok(Batch(
-            mode: mode,
-            event_count: list.length(events),
-            canonical: raw_canonical(mode, policy, events),
-            privacy: RawBatch("", policy),
-            events: events,
-          ))
-        }
+        True, True -> finish_stored_raw(mode, policy, encoded_events)
       }
     }
     _, _ -> Error("privacy_mismatch")
@@ -177,20 +231,6 @@ fn valid_mode_and_size(
     False, _ -> Error("invalid_payload")
     _, False -> Error("batch_event_limit")
     True, True -> Ok(Nil)
-  }
-}
-
-fn decode_events(
-  sources: List(String),
-  accumulator: List(types.TraceEvent),
-) -> Result(List(types.TraceEvent), String) {
-  case sources {
-    [] -> Ok(list.reverse(accumulator))
-    [source, ..rest] ->
-      case codec.decode_event_structural(source) {
-        Error(_) -> Error("invalid_payload")
-        Ok(event) -> decode_events(rest, [event, ..accumulator])
-      }
   }
 }
 
@@ -458,10 +498,14 @@ fn valid_body(value: String, maximum_bytes: Int) -> Bool {
 }
 
 fn metadata_canonical(mode: String, events: List(types.TraceEvent)) -> String {
+  metadata_canonical_items(mode, encoded_events(events))
+}
+
+fn metadata_canonical_items(mode: String, items: String) -> String {
   "{\"type\":\"batch\",\"event_schema\":2,\"mode\":\""
   <> mode
   <> "\",\"privacy\":\"metadata\",\"items\":["
-  <> encoded_events(events)
+  <> items
   <> "]}"
 }
 
@@ -482,17 +526,17 @@ fn raw_transport(
   <> "]}"
 }
 
-fn raw_canonical(
+fn raw_canonical_items(
   mode: String,
   policy: types.RawPolicy,
-  events: List(types.TraceEvent),
+  items: String,
 ) -> String {
   "{\"type\":\"batch\",\"event_schema\":2,\"mode\":\""
   <> mode
   <> "\",\"privacy\":\"raw\",\"policy\":"
   <> raw_grant.canonical_policy(policy)
   <> ",\"items\":["
-  <> encoded_events(events)
+  <> items
   <> "]}"
 }
 
@@ -518,5 +562,10 @@ fn decode_batch_parts(
   String,
 )
 
-@external(erlang, "beamtrace_relay_payload_ffi", "raw_privacy")
-fn raw_privacy(source: String) -> Bool
+@external(erlang, "beamtrace_relay_payload_ffi", "decode_public_batch_parts")
+fn decode_public_batch_parts(
+  source: String,
+) -> Result(
+  #(String, String, String, List(String), Int, Int, List(String)),
+  String,
+)
