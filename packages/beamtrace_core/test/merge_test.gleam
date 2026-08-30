@@ -180,3 +180,9 @@ pub fn cross_node_duration_subtracts_full_intervals_test() {
   merge.duration(from, to)
   |> should.equal(types.EstimatedTime(150, 90, 210))
 }
+
+pub fn bounds_error_is_the_unavailable_reason_test() {
+  merge.bounds(types.TimeUnavailable("no_calibration"))
+  |> should.equal(Error("no_calibration"))
+  merge.bounds(types.EstimatedTime(10, 5, 15)) |> should.equal(Ok(#(5, 15)))
+}

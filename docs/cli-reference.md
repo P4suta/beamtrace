@@ -96,6 +96,7 @@ same table.
 | `E_INVALID_CONTAINER` | `invalid_container` | 2 |
 | `E_INVALID_GRAPH` | `invalid_graph` | 2 |
 | `E_INVALID_SEARCH` | `invalid_search` | 2 |
+| `E_INVALID_TRACE_GRAPH` | `invalid_trace_graph` | 2 |
 | `E_INVALID_WINDOW` | `invalid_window` | 2 |
 | `E_IO_ERROR` | `io_error` | 2 |
 | `E_MIGRATION_OUTPUT_CONFLICT` | `migration_output_conflict` | 2 |

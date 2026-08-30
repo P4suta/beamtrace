@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import argv
 import beamtrace/codec
+import beamtrace/dag
 import beamtrace/diff
 import beamtrace/stats
 import beamtrace/types
@@ -1791,13 +1792,17 @@ fn run_open(path: String, mode: cli.UiMode, port: Int) -> Int {
 
 fn run_compare(left: String, right: String) -> Int {
   case storage.load(left), storage.load(right) {
-    Ok(left_archive), Ok(right_archive) -> {
-      let report = diff.compare(left_archive.events, right_archive.events)
-      let statistics =
-        stats.from_traces([left_archive.events, right_archive.events])
-      io.println(command.compare_summary(report, statistics))
-      command.compare_exit(report)
-    }
+    Ok(left_archive), Ok(right_archive) ->
+      case diff.compare_checked(left_archive.events, right_archive.events) {
+        Error(error) ->
+          fail_with(cli_errors.invalid_trace_graph(dag.error_message(error)))
+        Ok(report) -> {
+          let statistics =
+            stats.from_traces([left_archive.events, right_archive.events])
+          io.println(command.compare_summary(report, statistics))
+          command.compare_exit(report)
+        }
+      }
     Error(error), _ -> fail_with(cli_errors.from_storage(error, left))
     _, Error(error) -> fail_with(cli_errors.from_storage(error, right))
   }

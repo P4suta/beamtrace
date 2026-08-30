@@ -27,8 +27,21 @@ pub type CodecError {
   InvalidField(field: String, reason: String)
 }
 
+/// Render a stable, target-independent explanation of a codec failure.
+pub fn error_message(error: CodecError) -> String {
+  case error {
+    InvalidJson(_) -> "invalid JSON"
+    UnknownSchemaVersion(version) ->
+      "unsupported schema version " <> int.to_string(version)
+    NonCanonicalJson -> "JSON is not canonical"
+    InvalidField(field, reason) -> "invalid field '" <> field <> "': " <> reason
+  }
+}
+
 /// Archive metadata, declared nodes, observation outcome, and privacy policy.
 pub type Manifest {
+  /// `schema_version` is the version the manifest was decoded from;
+  /// `encode_manifest` always writes the current `schema_version` constant.
   Manifest(
     schema_version: Int,
     tool_version: String,
@@ -78,6 +91,9 @@ pub fn encode_event(event: types.TraceEvent) -> String {
 
 /// Decode and validate one canonical event in O(source length). Schema v1 is
 /// adapted; malformed, unsupported, or non-canonical v2 input is rejected.
+/// The source must be byte-identical to BeamTrace's own encoding: any
+/// re-serialised JSON (pretty-printed, re-ordered keys, trailing newline)
+/// fails with `NonCanonicalJson`.
 pub fn decode_event(source: String) -> Result(types.TraceEvent, CodecError) {
   case decode_versioned_event(source) {
     Error(error) -> Error(error)
@@ -92,8 +108,9 @@ pub fn decode_event(source: String) -> Result(types.TraceEvent, CodecError) {
 }
 
 /// Structural decoder for protocol boundaries that have already enforced an
-/// exact recursive object shape. Archive segments must use `decode_event`,
-/// which additionally requires BeamTrace's canonical byte representation.
+/// exact recursive object shape. Never use it for archives: `decode_event`
+/// additionally requires BeamTrace's canonical byte representation, which is
+/// the integrity boundary.
 pub fn decode_event_structural(
   source: String,
 ) -> Result(types.TraceEvent, CodecError) {
@@ -165,6 +182,7 @@ pub fn event_json(event: types.TraceEvent) -> json.Json {
 /// Lossy API-v1 projection used only by the one-release compatibility
 /// adapter. Callers must first prove that the calibrated instant is a point
 /// value and that evidence is exact; this function never invents confidence.
+@internal
 pub fn event_v1_adapter_json(
   event: types.TraceEvent,
   timestamp_ns: Int,

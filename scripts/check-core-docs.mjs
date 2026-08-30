@@ -11,7 +11,7 @@ for (const [moduleName, module] of Object.entries(packageInterface.modules)) {
   if (!module.documentation || module.documentation.length === 0) {
     missing.push(`${moduleName} (module)`);
   }
-  for (const collection of ["types", "functions", "constants"]) {
+  for (const collection of ["types", "type-aliases", "functions", "constants"]) {
     for (const [name, item] of Object.entries(module[collection] ?? {})) {
       if (!item.documentation || item.documentation.length === 0) {
         missing.push(`${moduleName}.${name}`);

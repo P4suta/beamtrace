@@ -249,6 +249,16 @@ pub fn child_crashed(status: Int) -> CliError {
   )
 }
 
+pub fn invalid_trace_graph(reason: String) -> CliError {
+  CliError(
+    "invalid_trace_graph",
+    CommandFailed,
+    "The archive causal graph cannot be compared: " <> reason <> ".",
+    "Run 'beamtrace validate' on the archive and capture again if it is corrupt.",
+    None,
+  )
+}
+
 pub fn capture_incomplete() -> CliError {
   CliError(
     "capture_incomplete",
@@ -472,6 +482,7 @@ pub fn all() -> List(CliError) {
     child_start_failed("reason"),
     child_crashed(1),
     target_unavailable(),
+    invalid_trace_graph("duplicate event id 'x'"),
     capture_incomplete(),
     capture_arm_timeout(),
     system_tracer_occupied(),

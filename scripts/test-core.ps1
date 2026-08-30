@@ -12,10 +12,15 @@ Push-Location (Join-Path $repoRoot 'packages\beamtrace_core')
 try {
     & gleam test
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & gleam test --target javascript
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 finally {
     Pop-Location
 }
+
+& node (Join-Path $PSScriptRoot 'check-core-docs.mjs')
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 & (Join-Path $PSScriptRoot 'test-core-interface.ps1')
 exit $LASTEXITCODE

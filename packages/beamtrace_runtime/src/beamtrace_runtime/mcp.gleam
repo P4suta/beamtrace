@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace/codec
+import beamtrace/dag
 import beamtrace/diff
 import beamtrace/types
 import beamtrace_runtime/internal/version as runtime_version
@@ -630,36 +631,44 @@ fn call_compare_summary(id: RpcId, source: String, modern: Bool) -> String {
             storage.load(arguments.right_path)
           {
             Ok(left), Ok(right) -> {
-              let report = diff.compare(left.events, right.events)
-              tool_success(
-                id,
-                json.object([
-                  #("added", json.int(report.added)),
-                  #("removed", json.int(report.removed)),
-                  #("changed", json.int(report.changed)),
-                  #("ambiguity_count", json.int(report.ambiguity_count)),
-                  #(
-                    "first_divergence",
-                    json.nullable(report.first_divergence, fn(divergence) {
-                      json.object([
-                        #(
-                          "left_id",
-                          json.nullable(divergence.left_id, json.string),
-                        ),
-                        #(
-                          "right_id",
-                          json.nullable(divergence.right_id, json.string),
-                        ),
-                        #(
-                          "causal_path",
-                          json.array(divergence.causal_path, json.string),
-                        ),
-                      ])
-                    }),
-                  ),
-                ]),
-                modern,
-              )
+              case diff.compare_checked(left.events, right.events) {
+                Error(error) ->
+                  tool_error(
+                    id,
+                    "Compare failed: " <> dag.error_message(error),
+                    modern,
+                  )
+                Ok(report) ->
+                  tool_success(
+                    id,
+                    json.object([
+                      #("added", json.int(report.added)),
+                      #("removed", json.int(report.removed)),
+                      #("changed", json.int(report.changed)),
+                      #("ambiguity_count", json.int(report.ambiguity_count)),
+                      #(
+                        "first_divergence",
+                        json.nullable(report.first_divergence, fn(divergence) {
+                          json.object([
+                            #(
+                              "left_id",
+                              json.nullable(divergence.left_id, json.string),
+                            ),
+                            #(
+                              "right_id",
+                              json.nullable(divergence.right_id, json.string),
+                            ),
+                            #(
+                              "causal_path",
+                              json.array(divergence.causal_path, json.string),
+                            ),
+                          ])
+                        }),
+                      ),
+                    ]),
+                    modern,
+                  )
+              }
             }
             _, _ -> tool_error(id, "Trace comparison failed", modern)
           }

@@ -4,6 +4,7 @@ import beamtrace/identity
 import beamtrace/types
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import gleeunit
 import gleeunit/should
 
@@ -213,4 +214,25 @@ pub fn checked_comparison_rejects_duplicate_event_ids_test() {
   |> should.equal(Error(dag.DuplicateEventId("duplicate")))
   diff.compare_checked(duplicates, [])
   |> should.equal(Error(dag.DuplicateEventId("duplicate")))
+}
+
+pub fn signature_ignores_pid_and_offset_but_keys_on_actor_and_shape_test() {
+  diff.signature(event("a", "<0.1.0>", 10))
+  |> should.equal(diff.signature(event("b", "<0.9.0>", 500)))
+  diff.signature(event("a", "<0.1.0>", 10))
+  |> should.not_equal(
+    diff.signature(named_event("c", "<0.1.0>", "other", "x", 10)),
+  )
+  let unresolved =
+    types.TraceEvent(
+      ..event("u", "<0.1.0>", 1),
+      process: types.ProcessIdentity(
+        physical: types.ProcessRef("node@host", "<0.1.0>"),
+        logical: None,
+        evidence: [],
+      ),
+    )
+  diff.signature(unresolved)
+  |> string.starts_with("<unresolved-actor>")
+  |> should.be_true()
 }

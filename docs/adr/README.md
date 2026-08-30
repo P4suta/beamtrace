@@ -6,3 +6,4 @@
 - [0003](0003-single-cli-error-catalogue.md) — One CLI error catalogue for human and JSON output
 - [0004](0004-cli-spec-is-authoritative.md) — The declarative command specification is authoritative
 - [0005](0005-json-envelope-additive-v1.md) — The JSON result envelope stays at schema_version 1 and grows additively
+- [0006](0006-core-public-surface-policy.md) — Public surface policy for beamtrace_core

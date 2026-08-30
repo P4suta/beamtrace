@@ -33,14 +33,14 @@ try {
         $expected = 'facade=checked dag_boundaries=1 diagnostic_messages=1 diff_changed=0 mfa=shop:checkout/1'
         $erlangRun = Invoke-GleamWithNetworkRetry -Arguments @('run', '--target', 'erlang')
         $erlangOutput = $erlangRun.Output.Trim()
-        if ($erlangRun.ExitCode -ne 0 -or -not $erlangOutput.EndsWith($expected)) {
+        if ($erlangRun.ExitCode -ne 0 -or -not $erlangOutput.EndsWith($expected) -or -not $erlangOutput.Contains('error=event 1: JSON is not canonical')) {
             throw "Isolated Erlang consumer failed:`n$erlangOutput"
         }
         $javascriptRun = Invoke-GleamWithNetworkRetry -Arguments @(
             'run', '--target', 'javascript', '--runtime', 'nodejs'
         )
         $javascriptOutput = $javascriptRun.Output.Trim()
-        if ($javascriptRun.ExitCode -ne 0 -or -not $javascriptOutput.EndsWith($expected)) {
+        if ($javascriptRun.ExitCode -ne 0 -or -not $javascriptOutput.EndsWith($expected) -or -not $javascriptOutput.Contains('error=event 1: JSON is not canonical')) {
             throw "Isolated JavaScript consumer failed:`n$javascriptOutput"
         }
     }

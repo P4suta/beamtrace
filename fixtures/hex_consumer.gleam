@@ -39,6 +39,8 @@ pub fn main() {
   let assert [finding] =
     diagnostics.hot_senders(beamtrace.events(trace), minimum_messages: 1)
   let assert diagnostics.CountValue(message_count) = finding.value
+  let assert Error(failure) = beamtrace.decode_events([" " <> encoded])
+  io.println("error=" <> beamtrace.error_message(failure))
 
   io.println(
     "facade=checked dag_boundaries="

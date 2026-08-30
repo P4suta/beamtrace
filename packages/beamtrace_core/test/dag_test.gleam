@@ -202,3 +202,10 @@ pub fn duplicate_ids_are_rejected_test() {
 
   dag.build(events) |> should.equal(Error(dag.DuplicateEventId("same")))
 }
+
+pub fn dag_error_messages_are_stable_test() {
+  dag.error_message(dag.DuplicateEventId("a"))
+  |> should.equal("duplicate event id 'a'")
+  dag.error_message(dag.CycleDetected)
+  |> should.equal("the causal graph contains a cycle")
+}

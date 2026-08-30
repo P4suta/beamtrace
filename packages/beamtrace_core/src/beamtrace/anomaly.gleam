@@ -81,7 +81,7 @@ pub fn new_detector(
   alpha alpha: Float,
   open_after open_after: Int,
   close_after close_after: Int,
-) {
+) -> Detector {
   Detector(
     alpha: clamp(alpha, 0.01, 1.0),
     open_after: max_one(open_after),

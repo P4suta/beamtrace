@@ -112,6 +112,7 @@
                 "invalid_container",
                 "invalid_graph",
                 "invalid_search",
+                "invalid_trace_graph",
                 "invalid_window",
                 "io_error",
                 "migration_output_conflict",

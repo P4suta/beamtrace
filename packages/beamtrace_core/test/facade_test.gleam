@@ -3,6 +3,7 @@ import beamtrace/codec
 import beamtrace/dag
 import beamtrace/mfa
 import beamtrace/types
+import gleam/list
 import gleam/option.{None}
 import gleam/string
 import gleeunit
@@ -76,4 +77,36 @@ pub fn mfa_parser_is_typed_and_round_trips_test() {
   |> should.equal(Error(mfa.NulCharacter("function")))
   mfa.parse(string.repeat("m", 256) <> ":run/1")
   |> should.equal(Error(mfa.ComponentTooLong("module", 255)))
+}
+
+pub fn facade_error_message_prefixes_event_number_test() {
+  beamtrace.error_message(beamtrace.EventError(2, codec.NonCanonicalJson))
+  |> should.equal("event 2: JSON is not canonical")
+  beamtrace.error_message(beamtrace.GraphError(dag.CycleDetected))
+  |> should.equal("the causal graph contains a cycle")
+}
+
+pub fn mfa_error_messages_are_stable_test() {
+  [
+    #(mfa.InvalidFormat, "expected Module:function/arity"),
+    #(mfa.EmptyModule, "module must not be empty"),
+    #(mfa.EmptyFunction, "function must not be empty"),
+    #(
+      mfa.ComponentTooLong("module", 255),
+      "module must be at most 255 UTF-8 bytes",
+    ),
+    #(mfa.NulCharacter("function"), "function must not contain a NUL byte"),
+    #(mfa.InvalidArity("x"), "arity 'x' is not an integer"),
+    #(mfa.ArityOutOfRange(256), "arity 256 must be between 0 and 255"),
+  ]
+  |> list.each(fn(pair) {
+    let #(error, expected) = pair
+    mfa.error_message(error) |> should.equal(expected)
+  })
+}
+
+pub fn facade_counts_events_and_runs_default_diagnostics_test() {
+  let assert Ok(trace) = beamtrace.from_events([event("one"), event("two")])
+  beamtrace.event_count(trace) |> should.equal(2)
+  beamtrace.findings(trace) |> should.equal([])
 }
