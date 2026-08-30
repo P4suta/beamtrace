@@ -3,6 +3,7 @@ import beamtrace_web/workspace
 import gleam/dynamic/decode
 import gleam/int
 import gleam/json
+import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 
@@ -183,10 +184,24 @@ pub fn legacy_exact_time(value: Int) -> workspace.TimeEstimate {
   workspace.ExactTime(int.to_string(value))
 }
 
+/// OTP system processes and BeamTrace's own agent are folded by default.
 fn is_internal(actor: String) -> Bool {
   let normalized = string.lowercase(actor)
-  string.contains(normalized, "logger")
-  || string.contains(normalized, "code_server")
-  || string.contains(normalized, "beamtrace")
-  || string.contains(normalized, "standard_io")
+  let name = case string.split(normalized, on: "/") |> list.last {
+    Ok(last) -> last
+    Error(Nil) -> normalized
+  }
+  string.starts_with(name, "beamtrace")
+  || string.starts_with(name, "logger")
+  || string.starts_with(name, "standard_error")
+  || string.starts_with(name, "standard_io")
+  || list.contains(otp_system_actors, name)
 }
+
+const otp_system_actors = [
+  "init", "erl_prim_loader", "application_controller", "kernel_sup",
+  "kernel_safe_sup", "global_name_server", "global_group", "user", "user_drv",
+  "user_drv_writer", "code_server", "rex", "net_kernel", "net_sup", "inet_db",
+  "file_server_2", "erts_code_purger", "erl_signal_server", "socket_registry",
+  "timer_server", "prim_tty",
+]

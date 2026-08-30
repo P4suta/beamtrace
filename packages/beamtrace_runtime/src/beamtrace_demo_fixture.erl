@@ -9,19 +9,36 @@ run_gleam() ->
     erlang:apply(?MODULE, run, []),
     nil.
 
+%% A checkout asks inventory to reserve the items, then payment to charge the
+%% total, and reports the total. Every actor carries a process label so the
+%% causal lanes read as roles rather than pids.
 run() ->
-    Parent = self(),
-    Worker = spawn(fun() -> demo_worker(Parent) end),
-    Worker ! {checkout, 42, [apple, coffee]},
+    put('$process_label', checkout),
+    Checkout = self(),
+    Inventory = spawn(fun() -> actor(inventory, Checkout) end),
+    Payment = spawn(fun() -> actor(payment, Checkout) end),
+    Inventory ! {reserve, 42, [apple, coffee]},
+    Total = receive
+        {reserved, 42, Count} -> Count * 1250
+    after 5000 ->
+        erlang:error(demo_timeout)
+    end,
+    Payment ! {charge, 42, Total},
     receive
-        {checked_out, 42, Total} ->
+        {charged, 42, Total} ->
             io:format("BeamTrace demo checkout total: ~B~n", [Total])
     after 5000 ->
         erlang:error(demo_timeout)
     end.
 
-demo_worker(Parent) ->
+actor(Role, Checkout) ->
+    put('$process_label', Role),
     receive
-        {checkout, OrderId, Items} ->
-            Parent ! {checked_out, OrderId, length(Items) * 1250}
-    end.
+        {reserve, OrderId, Items} ->
+            Checkout ! {reserved, OrderId, length(Items)};
+        {charge, OrderId, Total} ->
+            Checkout ! {charged, OrderId, Total}
+    end,
+    %% Stay observable until the VM stops so the agent can read the label
+    %% after the reply; the recorded operation itself already completed.
+    receive stop -> ok after 5000 -> ok end.

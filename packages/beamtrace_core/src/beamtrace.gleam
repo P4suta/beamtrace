@@ -13,9 +13,11 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace/codec
 import beamtrace/dag
+import beamtrace/diagnostics
 import beamtrace/diff
 import beamtrace/types
 import gleam/int
+import gleam/list
 
 /// A validated trace whose causal graph and comparison preparation were built
 /// together. The representation is opaque so callers cannot accidentally pair
@@ -71,6 +73,8 @@ pub fn graph(trace: Trace) -> dag.CausalGraph {
 }
 
 /// Return cached comparison preparation. This is O(1); no DAG is rebuilt.
+/// Unlike `diff.prepare`, it cannot fail because the trace is already
+/// validated.
 pub fn prepare(trace: Trace) -> diff.PreparedTrace {
   trace.prepared_trace
 }
@@ -85,13 +89,30 @@ pub fn compare(left: Trace, right: Trace) -> diff.DiffReport {
 pub fn error_message(error: TraceError) -> String {
   case error {
     EventError(number, cause) ->
-      "event " <> int.to_string(number) <> ": " <> codec_error_message(cause)
-    GraphError(cause) ->
-      case cause {
-        dag.DuplicateEventId(id) -> "duplicate event id '" <> id <> "'"
-        dag.CycleDetected -> "the causal graph contains a cycle"
-      }
+      "event " <> int.to_string(number) <> ": " <> codec.error_message(cause)
+    GraphError(cause) -> dag.error_message(cause)
   }
+}
+
+/// Return the number of validated events. This is O(n).
+pub fn event_count(trace: Trace) -> Int {
+  list.length(trace.trace_events)
+}
+
+/// Run the offline diagnostics with their documented default thresholds: hot
+/// senders and fan-in from 100 messages, queue waits above 100 ms, and
+/// restart chains with gaps of at most 1 s. Dangling calls need the capture
+/// outcome and a reference time, so call `diagnostics.dangling_calls`
+/// directly. Each finding carries its evidence events; none carries a
+/// confidence number.
+pub fn findings(trace: Trace) -> List(diagnostics.Finding) {
+  let events = trace.trace_events
+  list.flatten([
+    diagnostics.hot_senders(events, minimum_messages: 100),
+    diagnostics.fan_in(events, minimum_senders: 100),
+    diagnostics.queue_waits(events, minimum_ns: 100_000_000),
+    diagnostics.restart_chains(events, maximum_gap_ns: 1_000_000_000),
+  ])
 }
 
 fn validate_events(
@@ -138,16 +159,5 @@ fn build_trace(
     Error(error) -> Error(GraphError(error))
     Ok(#(causal_graph, prepared_trace)) ->
       Ok(Trace(trace_events, causal_graph, prepared_trace))
-  }
-}
-
-fn codec_error_message(error: codec.CodecError) -> String {
-  case error {
-    codec.InvalidJson(_) -> "invalid JSON"
-    codec.UnknownSchemaVersion(version) ->
-      "unsupported schema version " <> int.to_string(version)
-    codec.NonCanonicalJson -> "event JSON is not canonical"
-    codec.InvalidField(field, reason) ->
-      "invalid field '" <> field <> "': " <> reason
   }
 }

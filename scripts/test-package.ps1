@@ -36,7 +36,7 @@ $zip = [IO.Compression.ZipFile]::OpenRead($archive)
 try {
     $launcherEntry = $zip.GetEntry('bin/beamtrace')
     if ($null -eq $launcherEntry) { throw 'Package is missing the POSIX launcher entry.' }
-    if (-not $IsWindows) {
+    if (-not ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop')) {
         $attributes = [BitConverter]::ToUInt32([BitConverter]::GetBytes($launcherEntry.ExternalAttributes), 0)
         $unixMode = ($attributes -shr 16) -band 0xffff
         if (($unixMode -band 0x49) -ne 0x49) {
@@ -98,7 +98,7 @@ try {
     if ($ertsDirectories.Count -ne 1) {
         throw "Package must contain exactly one ERTS runtime, found $($ertsDirectories.Count)."
     }
-    $bundledEscriptName = if ($IsWindows) { 'escript.exe' } else { 'escript' }
+    $bundledEscriptName = if ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop') { 'escript.exe' } else { 'escript' }
     $bundledEscript = Join-Path $ertsDirectories[0].FullName "bin/$bundledEscriptName"
     if (-not (Test-Path -LiteralPath $bundledEscript -PathType Leaf)) {
         throw 'Package is missing its bundled escript executable.'
@@ -200,8 +200,18 @@ try {
     try {
         $emptyPath = Join-Path $resolvedTestRoot 'empty-path'
         New-Item -ItemType Directory -Path $emptyPath -Force | Out-Null
+        if (-not ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop')) {
+            # No Erlang toolchain, but the POSIX utilities every host has and the
+            # bundled erl launcher script needs.
+            foreach ($utility in @('dirname', 'basename', 'uname', 'sed', 'sh', 'env')) {
+                $source = Get-Command $utility -ErrorAction SilentlyContinue
+                if ($null -ne $source) {
+                    New-Item -ItemType SymbolicLink -Path (Join-Path $emptyPath $utility) -Target $source.Source | Out-Null
+                }
+            }
+        }
         $env:PATH = $emptyPath
-        $launcher = if ($IsWindows) {
+        $launcher = if ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop') {
             Join-Path $root.FullName 'bin/beamtrace.ps1'
         }
         else {
@@ -214,6 +224,43 @@ try {
         $doctor = (& $launcher doctor | Out-String)
         if ($LASTEXITCODE -ne 0 -or $doctor -notmatch 'agent BEAM: valid' -or $doctor -notmatch 'web assets: valid') {
             throw 'Self-contained package doctor smoke test failed without a host Erlang runtime.'
+        }
+        $demoRoot = Join-Path $resolvedTestRoot 'demo-cwd'
+        $demoTemp = Join-Path $resolvedTestRoot 'demo-temp'
+        New-Item -ItemType Directory -Path $demoRoot -Force | Out-Null
+        New-Item -ItemType Directory -Path $demoTemp -Force | Out-Null
+        $previousTemp = @{ TMPDIR = $env:TMPDIR; TEMP = $env:TEMP; TMP = $env:TMP }
+        $env:TMPDIR = $demoTemp
+        $env:TEMP = $demoTemp
+        $env:TMP = $demoTemp
+        Push-Location $demoRoot
+        try {
+            $demo = (& $launcher demo --no-ui --json | Out-String)
+            if ($LASTEXITCODE -ne 0) {
+                throw "Self-contained package demo failed without a host Erlang runtime (exit $LASTEXITCODE): $demo"
+            }
+            $demoResult = $demo | ConvertFrom-Json
+            if ($demoResult.command -ne 'demo' -or -not $demoResult.ok -or $demoResult.artifact.retained -or $demoResult.artifact.event_count -lt 1) {
+                throw "Self-contained package demo did not report a temporary sealed archive: $demo"
+            }
+            Write-Host "Self-contained package demo recorded $($demoResult.artifact.event_count) events without a host Erlang runtime."
+            $missingTool = (& $launcher record --trigger 'erlang:system_time/0' --no-ui '--' erl -noshell -eval 'halt().' 2>&1 | Out-String)
+            if ($LASTEXITCODE -ne 2 -or $missingTool -notmatch 'beamtrace\[E_COMMAND_NOT_FOUND\]') {
+                throw "Self-contained package record must explain a missing host Erlang toolchain: $missingTool"
+            }
+        }
+        finally {
+            Pop-Location
+            foreach ($name in $previousTemp.Keys) {
+                if ($null -eq $previousTemp[$name]) { Remove-Item "Env:$name" -ErrorAction SilentlyContinue } else { Set-Item "Env:$name" $previousTemp[$name] }
+            }
+        }
+        if (Test-Path -LiteralPath (Join-Path $demoRoot 'erl_crash.dump')) {
+            throw 'Self-contained package demo left erl_crash.dump in the working directory.'
+        }
+        $leftovers = @(Get-ChildItem -LiteralPath $demoTemp -Force -ErrorAction SilentlyContinue)
+        if ($leftovers.Count -ne 0) {
+            throw "Self-contained package demo left temporary entries behind: $($leftovers.Name -join ', ')"
         }
         $env:PATH = $previousPath
 
@@ -252,7 +299,7 @@ try {
             throw "Self-contained package record dogfood failed with exit code $LASTEXITCODE."
         }
 
-        if (-not $IsWindows) {
+        if (-not ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop')) {
             $signalTemp = Join-Path $resolvedTestRoot 'record-signal-temp'
             New-Item -ItemType Directory -Path $signalTemp -Force | Out-Null
             $signalInfo = [Diagnostics.ProcessStartInfo]::new()
@@ -368,7 +415,7 @@ try {
             if (-not (Test-Path -LiteralPath (Join-Path $teamData 'metadata.sqlite3') -PathType Leaf)) {
                 throw 'Packaged team server did not create its SQLite metadata store.'
             }
-            if (-not $IsWindows) {
+            if (-not ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop')) {
                 & kill -INT $teamProcess.Id
                 if ($LASTEXITCODE -ne 0) {
                     throw 'Could not send SIGINT to the packaged team server.'

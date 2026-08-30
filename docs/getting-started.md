@@ -12,7 +12,7 @@ beamtrace doctor
 ```
 
 The ZIP includes ERTS. Source development instead uses the versions pinned in
-`.mise.toml`.
+`.mise.toml` and runs the CLI with `mise run beamtrace -- <command>`.
 
 ## 2. Run the demo
 
@@ -21,8 +21,8 @@ beamtrace demo
 ```
 
 The default Web workspace uses an OS-selected loopback port and a one-time
-bootstrap URL. `--no-open` prints the URL. `--no-ui --json` is deterministic in
-CI. The unnamed demo archive is deleted when the command ends.
+bootstrap URL. `--no-open` prints the URL. `beamtrace demo --no-ui --json` is
+deterministic in CI. The unnamed demo archive is deleted when the command ends.
 
 ## 3. Record one operation
 

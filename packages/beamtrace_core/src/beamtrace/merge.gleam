@@ -137,8 +137,8 @@ fn interval_duration(
   }
 }
 
-/// Return inclusive lower/upper bounds in O(1), or the stated reason when time
-/// is unavailable.
+/// Return inclusive lower/upper bounds in O(1). The error is the
+/// `TimeUnavailable` reason verbatim.
 pub fn bounds(time: types.TimeEstimate) -> Result(#(Int, Int), String) {
   case estimate_bounds(time) {
     Ok(#(_, lower, upper)) -> Ok(#(lower, upper))

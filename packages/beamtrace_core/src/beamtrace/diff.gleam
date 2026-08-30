@@ -114,6 +114,7 @@ type SnakeSearch {
 /// Compare roots and logical actors by a four-round causal-neighborhood
 /// fingerprint. Unique anchors are patience/LIS aligned; gaps use a bounded
 /// edit search and remain explicit when no unique answer is defensible.
+@deprecated("Use compare_checked or the beamtrace facade; compare silently falls back to an unchecked comparison when a DAG error occurs")
 pub fn compare(
   left: List(types.TraceEvent),
   right: List(types.TraceEvent),
@@ -151,7 +152,8 @@ pub fn compare_checked(
 ///
 /// Duplicate event identifiers and causal cycles are returned as `DagError`.
 /// Successful construction is O((n + e) log n) and the opaque result may be
-/// reused by `compare_prepared` without rebuilding the DAG.
+/// reused by `compare_prepared` without rebuilding the DAG. The facade's
+/// `beamtrace.prepare` is the O(1) accessor of an already validated trace.
 pub fn prepare(
   events: List(types.TraceEvent),
 ) -> Result(PreparedTrace, dag.DagError) {

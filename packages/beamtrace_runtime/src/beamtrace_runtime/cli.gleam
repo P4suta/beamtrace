@@ -67,6 +67,7 @@ pub type Command {
     cookie_file: Option(String),
     max_roots: Int,
     preset: types.Preset,
+    window_s: Int,
   )
   Record(
     node: Option(String),
@@ -77,6 +78,7 @@ pub type Command {
     max_roots: Int,
     preset: types.Preset,
     command: List(String),
+    window_s: Int,
   )
   Open(path: String, mode: UiMode, port: Int)
   Compare(left: String, right: String)
@@ -117,6 +119,7 @@ type CaptureOptions {
     max_roots: Int,
     preset: types.Preset,
     acknowledge_seq_trace_reset: Bool,
+    window_s: Int,
   )
 }
 
@@ -130,8 +133,14 @@ type RecordOptions {
     max_roots: Int,
     preset: types.Preset,
     display: Option(RecordDisplay),
+    window_s: Int,
   )
 }
+
+/// Default and bounds of `--capture-window SECONDS`.
+pub const default_window_s = 30
+
+const max_window_s = 300
 
 type RelayOptions {
   RelayOptions(
@@ -165,11 +174,115 @@ pub fn parse(arguments: List(String)) -> Result(Command, ParseError) {
       ))
     False -> {
       let #(cleaned, json, force) = extract_global_options(arguments)
-      case parse_command(cleaned) {
-        Error(error) -> Error(error)
-        Ok(command) -> wrap_global_options(command, json, force)
+      case help_request(cleaned) {
+        Some(None) -> Ok(Help)
+        Some(Some(name)) -> command_help(name)
+        None ->
+          case check_option_values(cleaned) {
+            Error(error) -> Error(error)
+            Ok(Nil) ->
+              case parse_command(cleaned) {
+                Error(error) -> Error(error)
+                Ok(command) -> wrap_global_options(command, json, force)
+              }
+          }
       }
     }
+  }
+}
+
+/// `--help`/`-h` anywhere before the child separator asks for the help of
+/// the first command word (or the root guide).
+fn help_request(arguments: List(String)) -> Option(Option(String)) {
+  help_request_loop(arguments, None)
+}
+
+fn help_request_loop(
+  arguments: List(String),
+  command: Option(String),
+) -> Option(Option(String)) {
+  case arguments {
+    [] | ["--", ..] -> None
+    ["--help", ..] | ["-h", ..] -> Some(command)
+    [token, ..rest] ->
+      case command, string.starts_with(token, "--") {
+        None, False -> help_request_loop(rest, Some(token))
+        _, _ -> help_request_loop(rest, command)
+      }
+  }
+}
+
+/// Reject a value-taking option whose value is missing or looks like another
+/// option before any command parser runs.
+fn check_option_values(arguments: List(String)) -> Result(Nil, ParseError) {
+  case arguments {
+    [command, ..rest] -> check_option_values_loop(command, rest)
+    [] -> Ok(Nil)
+  }
+}
+
+fn check_option_values_loop(
+  command: String,
+  arguments: List(String),
+) -> Result(Nil, ParseError) {
+  case arguments {
+    [] | ["--", ..] -> Ok(Nil)
+    [token, ..rest] ->
+      case cli_spec.option_takes_value(command, token) {
+        None -> check_option_values_loop(command, rest)
+        Some(placeholder) ->
+          case rest {
+            [value, ..after] ->
+              case value != "" && !string.starts_with(value, "--") {
+                True -> check_option_values_loop(command, after)
+                False -> Error(missing_value(token, placeholder))
+              }
+            [] -> Error(missing_value(token, placeholder))
+          }
+      }
+  }
+}
+
+fn missing_value(option: String, placeholder: String) -> ParseError {
+  usage("option '" <> option <> "' requires a value (" <> placeholder <> ")")
+}
+
+/// Split the tokens before `--` into positional arguments and option tokens
+/// so flags may appear in any order.
+fn split_positionals(
+  command: String,
+  arguments: List(String),
+) -> #(List(String), List(String)) {
+  split_positionals_loop(command, arguments, [], [])
+}
+
+fn split_positionals_loop(
+  command: String,
+  arguments: List(String),
+  positionals: List(String),
+  options: List(String),
+) -> #(List(String), List(String)) {
+  case arguments {
+    [] -> #(list.reverse(positionals), list.reverse(options))
+    [token, ..rest] ->
+      case string.starts_with(token, "--") {
+        False ->
+          split_positionals_loop(command, rest, [token, ..positionals], options)
+        True ->
+          case cli_spec.option_takes_value(command, token), rest {
+            Some(_), [value, ..after] ->
+              split_positionals_loop(command, after, positionals, [
+                value,
+                token,
+                ..options
+              ])
+            _, _ ->
+              split_positionals_loop(command, rest, positionals, [
+                token,
+                ..options
+              ])
+          }
+      }
   }
 }
 
@@ -204,13 +317,27 @@ pub fn json_requested(arguments: List(String)) -> Bool {
   }
 }
 
-/// Best-effort stable command name for a parse-error JSON envelope.
+/// The first command word exactly as typed, for the `invoked` envelope field.
+pub fn invoked_token(arguments: List(String)) -> Option(String) {
+  case arguments {
+    [] | ["--", ..] -> None
+    ["--json", ..rest] | ["--force", ..rest] -> invoked_token(rest)
+    [name, ..] -> Some(name)
+  }
+}
+
+/// Stable command name for a parse-error JSON envelope: a specified command
+/// name, or `unknown`.
 pub fn invoked_command(arguments: List(String)) -> String {
   case arguments {
     [] -> "guide"
     ["--json", ..rest] | ["--force", ..rest] -> invoked_command(rest)
     ["--", ..] -> "record"
-    [name, ..] -> name
+    [name, ..] ->
+      case cli_spec.known(name) {
+        True -> name
+        False -> "unknown"
+      }
   }
 }
 
@@ -218,53 +345,55 @@ fn parse_command(arguments: List(String)) -> Result(Command, ParseError) {
   case arguments {
     [] -> Ok(Guide)
     ["help"] | ["--help"] | ["-h"] -> Ok(Help)
-    ["help", "--help"] -> command_help("help")
+    ["help", "errors"] -> Ok(CommandHelp("errors"))
     ["help", command] -> command_help(command)
     ["version"] | ["--version"] | ["-V"] -> Ok(Version)
     ["completion", shell] -> parse_completion(shell)
-    ["config", "check", "--help"] -> command_help("config")
-    [command, "--help"] -> command_help(command)
-    ["attach", node, ..options] -> parse_attach(node, options)
+    ["attach", ..rest] ->
+      case split_positionals("attach", rest) {
+        #([node], options) -> parse_attach(node, options)
+        _ -> Error(usage("attach requires exactly one <node>"))
+      }
     ["capture", ..options] -> parse_capture_command(options)
     ["record", ..options] -> parse_record(options)
-    ["open", path, ..options] -> parse_open(path, options)
+    ["open", ..rest] ->
+      case split_positionals("open", rest) {
+        #([path], options) -> parse_open(path, options)
+        _ -> Error(usage("open requires exactly one <file.beamtrace>"))
+      }
     ["compare", ..options] -> parse_compare(options)
-    ["export", path, "--format", format, ..options] ->
-      parse_export(path, format, options)
-    ["export", path, "--otlp-anchor-now", "--format", format] ->
-      parse_export(path, format, ["--otlp-anchor-now"])
-    ["validate", path] -> Ok(Validate(path, False))
-    ["validate", path, "--json"] | ["validate", "--json", path] ->
-      Ok(Validate(path, True))
-    ["migrate", path, "--output", output] -> Ok(Migrate(path, output))
-    ["serve", ..options] -> parse_serve(options)
+    ["export", ..rest] ->
+      case split_positionals("export", rest) {
+        #([path], options) -> parse_export(path, options, None, False)
+        _ -> Error(usage("export requires exactly one <file.beamtrace>"))
+      }
+    ["validate", ..rest] ->
+      case split_positionals("validate", rest) {
+        #([path], []) -> Ok(Validate(path, False))
+        #([_], [option, ..]) -> Error(unknown_option("validate", option))
+        _ -> Error(usage("validate requires exactly one <file.beamtrace>"))
+      }
+    ["migrate", ..rest] ->
+      case split_positionals("migrate", rest) {
+        #([path], options) -> parse_migrate(path, options, None)
+        _ -> Error(usage("migrate requires exactly one <v1.beamtrace>"))
+      }
+    ["serve", ..options] -> parse_serve(options, 0, False)
     ["demo", ..options] -> parse_demo(options, DemoWeb, "", 0)
     ["relay", hub_url, "--enroll", token, ..options] ->
       parse_relay(hub_url, token, options)
+    ["relay", ..] ->
+      Error(usage("relay requires <https-hub-url> --enroll TOKEN"))
     ["tui", ..options] -> parse_tui(options, None, None)
     ["init"] -> Ok(Init)
     ["config", "check"] -> Ok(ConfigCheck)
     ["doctor"] -> Ok(Doctor(False))
-    ["doctor", "--json"] -> Ok(Doctor(True))
     ["mcp"] -> Ok(Mcp)
-    [known, ..]
-      if known == "attach"
-      || known == "capture"
-      || known == "record"
-      || known == "open"
-      || known == "compare"
-      || known == "export"
-      || known == "validate"
-      || known == "migrate"
-      || known == "relay"
-      || known == "tui"
-      || known == "serve"
-      || known == "config"
-      || known == "doctor"
-      || known == "demo"
-      || known == "completion"
-    -> Error(usage("invalid arguments for '" <> known <> "'"))
-    [unknown, ..] -> Error(unknown_command(unknown))
+    [known, ..] ->
+      case cli_spec.known(known) {
+        True -> Error(usage("invalid arguments for '" <> known <> "'"))
+        False -> Error(unknown_command(known))
+      }
   }
 }
 
@@ -279,7 +408,7 @@ fn parse_tui(
       parse_tui(rest, Some(value), session_cookie_file)
     ["--session-cookie-file", value, ..rest] ->
       parse_tui(rest, server, Some(value))
-    [option, ..] -> Error(usage("unknown tui option '" <> option <> "'"))
+    [option, ..] -> Error(unknown_option("tui", option))
   }
 }
 
@@ -340,7 +469,7 @@ fn parse_compare_options(
     }
     [path, ..rest] ->
       case string.starts_with(path, "--") {
-        True -> Error(usage("unknown compare option '" <> path <> "'"))
+        True -> Error(unknown_option("compare", path))
         False ->
           parse_compare_options(
             rest,
@@ -462,14 +591,25 @@ fn parse_relay_options(
       use preset <- try_result(parse_capture_preset(value))
       parse_relay_options(rest, RelayOptions(..parsed, preset: preset))
     }
-    [option, ..] -> Error(usage("unknown relay option '" <> option <> "'"))
+    ["--enroll", _, ..rest] -> parse_relay_options(rest, parsed)
+    [option, ..] -> Error(unknown_option("relay", option))
   }
 }
 
 fn parse_record(options: List(String)) -> Result(Command, ParseError) {
   parse_record_options(
     options,
-    RecordOptions(None, None, None, None, None, 1, types.Generic, None),
+    RecordOptions(
+      None,
+      None,
+      None,
+      None,
+      None,
+      1,
+      types.Generic,
+      None,
+      default_window_s,
+    ),
   )
 }
 
@@ -546,7 +686,12 @@ fn parse_record_options(
         RecordOptions(..parsed, display: Some(display)),
       )
     }
-    [option, ..] -> Error(usage("unknown record option '" <> option <> "'"))
+    ["--profile", _, ..rest] -> parse_record_options(rest, parsed)
+    ["--capture-window", value, ..rest] -> {
+      use window_s <- try_result(parse_window(value))
+      parse_record_options(rest, RecordOptions(..parsed, window_s: window_s))
+    }
+    [option, ..] -> Error(unknown_option("record", option))
   }
 }
 
@@ -573,6 +718,7 @@ fn finish_record(
           max_roots: parsed.max_roots,
           preset: parsed.preset,
           command: command,
+          window_s: parsed.window_s,
         )
       case parsed.display {
         None -> Ok(command)
@@ -648,7 +794,7 @@ fn parse_attach_options(
     }
     ["--acknowledge-seq-trace-reset", ..rest] ->
       parse_attach_options(rest, mode, cookie_file, port, True)
-    [option, ..] -> Error(usage("unknown attach option '" <> option <> "'"))
+    [option, ..] -> Error(unknown_option("attach", option))
   }
 }
 
@@ -657,7 +803,17 @@ fn parse_capture(
   options: List(String),
 ) -> Result(Command, ParseError) {
   let initial =
-    CaptureOptions(node, None, None, None, None, 1, types.Generic, False)
+    CaptureOptions(
+      node,
+      None,
+      None,
+      None,
+      None,
+      1,
+      types.Generic,
+      False,
+      default_window_s,
+    )
   use parsed <- try_result(parse_capture_options(options, initial))
   use _ <- try_result(validate_where(parsed.where_aql))
   case parsed.node, parsed.trigger {
@@ -676,6 +832,7 @@ fn parse_capture(
             cookie_file: parsed.cookie_file,
             max_roots: parsed.max_roots,
             preset: parsed.preset,
+            window_s: parsed.window_s,
           ))
       }
     None, _ -> Error(usage("capture requires a node or --node <node>"))
@@ -742,7 +899,12 @@ fn parse_capture_options(
         rest,
         CaptureOptions(..parsed, acknowledge_seq_trace_reset: True),
       )
-    [option, ..] -> Error(usage("unknown capture option '" <> option <> "'"))
+    ["--profile", _, ..rest] -> parse_capture_options(rest, parsed)
+    ["--capture-window", value, ..rest] -> {
+      use window_s <- try_result(parse_window(value))
+      parse_capture_options(rest, CaptureOptions(..parsed, window_s: window_s))
+    }
+    [option, ..] -> Error(unknown_option("capture", option))
   }
 }
 
@@ -807,18 +969,55 @@ fn parse_open_options(
       use port <- try_result(parse_port(value))
       parse_open_options(path, rest, mode, port)
     }
-    [option, ..] -> Error(usage("unknown open option '" <> option <> "'"))
+    [option, ..] -> Error(unknown_option("open", option))
   }
 }
 
-fn parse_serve(options: List(String)) -> Result(Command, ParseError) {
+fn parse_serve(
+  options: List(String),
+  port: Int,
+  no_open: Bool,
+) -> Result(Command, ParseError) {
   case options {
-    [] -> Ok(Serve(0))
-    ["--port", value] -> parse_port(value) |> map_result(Serve)
-    ["--no-open"] -> Ok(ServeNoOpen(0))
-    ["--no-open", "--port", value] | ["--port", value, "--no-open"] ->
-      parse_port(value) |> map_result(ServeNoOpen)
-    [option, ..] -> Error(usage("unknown serve option '" <> option <> "'"))
+    [] ->
+      case no_open {
+        True -> Ok(ServeNoOpen(port))
+        False -> Ok(Serve(port))
+      }
+    ["--port", value, ..rest] -> {
+      use port <- try_result(parse_port(value))
+      parse_serve(rest, port, no_open)
+    }
+    ["--no-open", ..rest] -> parse_serve(rest, port, True)
+    [option, ..] -> Error(unknown_option("serve", option))
+  }
+}
+
+fn parse_migrate(
+  path: String,
+  options: List(String),
+  output: Option(String),
+) -> Result(Command, ParseError) {
+  case options {
+    [] ->
+      case output {
+        Some(output) -> Ok(Migrate(path, output))
+        None -> Error(usage("migrate requires --output <v2.beamtrace>"))
+      }
+    ["--output", value, ..rest] -> parse_migrate(path, rest, Some(value))
+    [option, ..] -> Error(unknown_option("migrate", option))
+  }
+}
+
+fn parse_window(value: String) -> Result(Int, ParseError) {
+  case int.parse(value) {
+    Ok(seconds) if seconds >= 1 && seconds <= max_window_s -> Ok(seconds)
+    _ ->
+      Error(usage(
+        "--capture-window must be between 1 and "
+        <> int.to_string(max_window_s)
+        <> " seconds",
+      ))
   }
 }
 
@@ -870,7 +1069,7 @@ fn parse_demo(
       use port <- try_result(parse_port(value))
       parse_demo(rest, mode, out, port)
     }
-    [option, ..] -> Error(usage("unknown demo option '" <> option <> "'"))
+    [option, ..] -> Error(unknown_option("demo", option))
   }
 }
 
@@ -886,16 +1085,26 @@ fn parse_export_format(source: String) -> Result(ExportFormat, ParseError) {
 
 fn parse_export(
   path: String,
-  format_source: String,
   options: List(String),
+  format: Option(ExportFormat),
+  anchor_now: Bool,
 ) -> Result(Command, ParseError) {
-  use format <- try_result(parse_export_format(format_source))
-  case format, options {
-    _, [] -> Ok(Export(path, format, False))
-    Otlp, ["--otlp-anchor-now"] -> Ok(Export(path, format, True))
-    _, ["--otlp-anchor-now"] ->
-      Error(usage("--otlp-anchor-now is only valid with --format otlp"))
-    _, [option, ..] -> Error(usage("unknown export option '" <> option <> "'"))
+  case options {
+    [] ->
+      case format, anchor_now {
+        None, _ ->
+          Error(usage("export requires --format html|jsonl|mermaid|otlp"))
+        Some(Otlp), _ -> Ok(Export(path, Otlp, anchor_now))
+        Some(_), True ->
+          Error(usage("--otlp-anchor-now is only valid with --format otlp"))
+        Some(format), False -> Ok(Export(path, format, False))
+      }
+    ["--format", value, ..rest] -> {
+      use format <- try_result(parse_export_format(value))
+      parse_export(path, rest, Some(format), anchor_now)
+    }
+    ["--otlp-anchor-now", ..rest] -> parse_export(path, rest, format, True)
+    [option, ..] -> Error(unknown_option("export", option))
   }
 }
 
@@ -952,8 +1161,8 @@ fn wrap_global_options(
 
 fn force_allowed(command: Command) -> Bool {
   case command {
-    Capture(_, _, _, out, _, _, _) -> out != ""
-    Record(_, _, _, out, _, _, _, _) -> out != ""
+    Capture(out: out, ..) -> out != ""
+    Record(out: out, ..) -> out != ""
     RecordUi(inner, _) -> force_allowed(inner)
     _ -> False
   }
@@ -1001,6 +1210,14 @@ fn parse_completion(shell: String) -> Result(Command, ParseError) {
   }
 }
 
+fn unknown_option(command: String, option: String) -> ParseError {
+  let correction = case cli_spec.suggest_option(command, option) {
+    Some(candidate) -> ". Did you mean '" <> candidate <> "'?"
+    None -> ""
+  }
+  usage("unknown " <> command <> " option '" <> option <> "'" <> correction)
+}
+
 fn unknown_command(command: String) -> ParseError {
   let correction = case cli_spec.suggest(command) {
     Some(candidate) ->
@@ -1032,13 +1249,6 @@ fn try_result(
 ) -> Result(b, e) {
   case result {
     Ok(value) -> next(value)
-    Error(error) -> Error(error)
-  }
-}
-
-fn map_result(result: Result(a, e), transform: fn(a) -> b) -> Result(b, e) {
-  case result {
-    Ok(value) -> Ok(transform(value))
     Error(error) -> Error(error)
   }
 }

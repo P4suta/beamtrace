@@ -329,7 +329,7 @@ join_event_chunks(Index, Count, Results, Chunks) ->
 
 with_validated_handle(PathBinary, Fun) ->
     Path = unicode:characters_to_list(PathBinary),
-    case zip:zip_open(Path, [memory]) of
+    case zip_open_existing(Path) of
         {ok, Handle} ->
             try
                 case zip:zip_list_dir(Handle) of
@@ -347,6 +347,7 @@ with_validated_handle(PathBinary, Fun) ->
             after
                 _ = zip:zip_close(Handle)
             end;
+        {error, enoent} -> {error, <<"enoent">>};
         {error, _Reason} -> {error, <<"invalid_container">>}
     end.
 
@@ -368,12 +369,22 @@ list_entries(PathBinary) when is_binary(PathBinary) ->
     end;
 list_entries(_Path) -> {error, <<"invalid_container">>}.
 
+zip_open_existing(Path) ->
+    case file:read_file_info(Path) of
+        {error, enoent} -> {error, enoent};
+        _ -> zip:zip_open(Path, [memory])
+    end.
+
 validated_table(Path) ->
-    case zip:table(Path) of
-        {ok, Entries} ->
-            Files = [Entry || Entry <- Entries, is_record(Entry, zip_file)],
-            validate_files(Files);
-        {error, _Reason} -> {error, <<"invalid_container">>}
+    case file:read_file_info(Path) of
+        {error, enoent} -> {error, <<"enoent">>};
+        _ ->
+            case zip:table(Path) of
+                {ok, Entries} ->
+                    Files = [Entry || Entry <- Entries, is_record(Entry, zip_file)],
+                    validate_files(Files);
+                {error, _Reason} -> {error, <<"invalid_container">>}
+            end
     end.
 
 prepare_selective_v2(Handle, Files) ->

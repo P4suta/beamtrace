@@ -3,6 +3,7 @@ import beamtrace_tui/model
 import beamtrace_tui/view
 import etui/buffer
 import etui/geometry
+import gleam/list
 import gleam/string
 import gleeunit/should
 
@@ -158,4 +159,24 @@ pub fn compare_screen_renders_count_statistics_and_first_divergence_test() {
   ansi |> string.contains("3 traces") |> should.be_true()
   ansi |> string.contains("5 branch signatures") |> should.be_true()
   ansi |> string.contains("root → send → receive") |> should.be_true()
+}
+
+pub fn footer_lists_every_navigation_key_and_the_guide_renders_them_test() {
+  let state =
+    model.attached(
+      [model.Event("e-1", "checkout", "call", "Exact", 0, False)],
+      "app@localhost",
+    )
+  let ansi =
+    view.render(state, geometry.rect_new(0, 0, 140, 40)) |> buffer.to_ansi
+  ["? help", "c capture", "l live", "t traces", "d compare"]
+  |> list.each(fn(binding) {
+    ansi |> string.contains(binding) |> should.be_true()
+  })
+  let guide =
+    view.render(model.handle_key(state, "?"), geometry.rect_new(0, 0, 140, 40))
+    |> buffer.to_ansi
+  guide |> string.contains("KEY GUIDE") |> should.be_true()
+  guide |> string.contains("d    compare") |> should.be_true()
+  guide |> string.contains("Esc  close guide or input") |> should.be_true()
 }

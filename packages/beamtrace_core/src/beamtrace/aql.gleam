@@ -326,6 +326,7 @@ fn gt_order() {
 
 /// Classify referenced fields as target-safe or relay-only in O(query size).
 /// This compatibility helper cannot fail or emit executable user code.
+@deprecated("Use compile_trigger, which returns the executable target predicate and relay residual")
 pub fn compile_agent(query: Query) -> AgentPlan {
   let fields = fields(query, []) |> list.reverse |> unique(dict.new(), [])
   let #(safe, residual) = split_fields(fields, [], [])

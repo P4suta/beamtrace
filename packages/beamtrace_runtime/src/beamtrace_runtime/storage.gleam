@@ -85,20 +85,20 @@ fn save_with_writer(
     codec.Manifest(..manifest, schema_version: codec.schema_version)
   use Nil <- try_result(
     codec.validate_manifest(manifest)
-    |> map_error(fn(error) { CodecError(codec_error_message(error)) }),
+    |> map_error(fn(error) { CodecError(codec_error_code(error)) }),
   )
   use Nil <- try_result(validate_typed_events(events))
   use Nil <- try_result(validate_event_nodes(manifest, events))
   use graph <- try_result(
     dag.build(events)
-    |> map_error(fn(error) { InvalidGraph(dag_error_message(error)) }),
+    |> map_error(fn(error) { InvalidGraph(dag_error_code(error)) }),
   )
   let chunks = event_chunks(events)
   let graph_segments = make_graph_segments(chunks, graph)
   use Nil <- try_result(validate_typed_graph_segments(graph_segments))
   use Nil <- try_result(
     codec.validate_clocks(clocks)
-    |> map_error(fn(error) { CodecError(codec_error_message(error)) }),
+    |> map_error(fn(error) { CodecError(codec_error_code(error)) }),
   )
   use Nil <- try_result(validate_clock_nodes(manifest, clocks))
   let manifest_json = codec.encode_manifest(manifest)
@@ -116,18 +116,18 @@ pub fn load(path: String) -> Result(Archive, StorageError) {
   let #(manifest_json, event_lines, graph_lines, clocks_json) = payload
   use manifest <- try_result(
     codec.decode_manifest(manifest_json)
-    |> map_error(fn(error) { CodecError(codec_error_message(error)) }),
+    |> map_error(fn(error) { CodecError(codec_error_code(error)) }),
   )
   use decoded_events <- try_result(
     decode_events_parallel(event_lines)
-    |> map_error(fn(error) { CodecError(codec_error_message(error)) }),
+    |> map_error(fn(error) { CodecError(codec_error_code(error)) }),
   )
   case manifest.schema_version {
     1 -> {
       let events = normalize_legacy_instants(decoded_events)
       use graph <- try_result(
         dag.build(events)
-        |> map_error(fn(error) { InvalidGraph(dag_error_message(error)) }),
+        |> map_error(fn(error) { InvalidGraph(dag_error_code(error)) }),
       )
       Ok(Archive(manifest, events, graph, types.empty_calibration()))
     }
@@ -135,7 +135,7 @@ pub fn load(path: String) -> Result(Archive, StorageError) {
       use Nil <- try_result(validate_event_nodes(manifest, decoded_events))
       use clocks <- try_result(
         codec.decode_clocks(clocks_json)
-        |> map_error(fn(error) { CodecError(codec_error_message(error)) }),
+        |> map_error(fn(error) { CodecError(codec_error_code(error)) }),
       )
       use graph <- try_result(validate_v2_graph(decoded_events, graph_lines))
       use Nil <- try_result(validate_clock_nodes(manifest, clocks))
@@ -224,12 +224,12 @@ fn selective_window(
   let #(manifest_json, event_lines, clocks_json, total) = payload
   use manifest <- try_result(
     codec.decode_manifest(manifest_json)
-    |> map_error(fn(error) { CodecError(codec_error_message(error)) }),
+    |> map_error(fn(error) { CodecError(codec_error_code(error)) }),
   )
   use events <- try_result(decode_events(event_lines, []))
   use clocks <- try_result(
     codec.decode_clocks(clocks_json)
-    |> map_error(fn(error) { CodecError(codec_error_message(error)) }),
+    |> map_error(fn(error) { CodecError(codec_error_code(error)) }),
   )
   use Nil <- try_result(validate_event_nodes(manifest, events))
   use Nil <- try_result(validate_clock_nodes(manifest, clocks))
@@ -362,7 +362,7 @@ fn validate_v2_graph(
 ) -> Result(dag.CausalGraph, StorageError) {
   use graph <- try_result(
     dag.build(events)
-    |> map_error(fn(error) { InvalidGraph(dag_error_message(error)) }),
+    |> map_error(fn(error) { InvalidGraph(dag_error_code(error)) }),
   )
   let expected =
     make_graph_segments(event_chunks(events), graph)
@@ -467,7 +467,7 @@ fn validate_typed_events(
     [event, ..rest] ->
       case codec.validate_event(event) {
         Ok(Nil) -> validate_typed_events(rest)
-        Error(error) -> Error(CodecError(codec_error_message(error)))
+        Error(error) -> Error(CodecError(codec_error_code(error)))
       }
   }
 }
@@ -480,7 +480,7 @@ fn validate_typed_graph_segments(
     [segment, ..rest] ->
       case codec.validate_graph_segment(segment) {
         Ok(Nil) -> validate_typed_graph_segments(rest)
-        Error(error) -> Error(CodecError(codec_error_message(error)))
+        Error(error) -> Error(CodecError(codec_error_code(error)))
       }
   }
 }
@@ -494,7 +494,7 @@ fn decode_events(
     [line, ..rest] ->
       case codec.decode_event(line) {
         Ok(event) -> decode_events(rest, [event, ..accumulator])
-        Error(error) -> Error(CodecError(codec_error_message(error)))
+        Error(error) -> Error(CodecError(codec_error_code(error)))
       }
   }
 }
@@ -508,12 +508,12 @@ fn decode_graph_segments(
     [line, ..rest] ->
       case codec.decode_graph_segment(line) {
         Ok(segment) -> decode_graph_segments(rest, [segment, ..accumulator])
-        Error(error) -> Error(CodecError(codec_error_message(error)))
+        Error(error) -> Error(CodecError(codec_error_code(error)))
       }
   }
 }
 
-fn codec_error_message(error: codec.CodecError) -> String {
+fn codec_error_code(error: codec.CodecError) -> String {
   case error {
     codec.InvalidJson(_) -> "invalid_json"
     codec.UnknownSchemaVersion(version) ->
@@ -524,7 +524,7 @@ fn codec_error_message(error: codec.CodecError) -> String {
   }
 }
 
-fn dag_error_message(error: dag.DagError) -> String {
+fn dag_error_code(error: dag.DagError) -> String {
   case error {
     dag.DuplicateEventId(id) -> "duplicate_event_id:" <> id
     dag.CycleDetected -> "cycle_detected"

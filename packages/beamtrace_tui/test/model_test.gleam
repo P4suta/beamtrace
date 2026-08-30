@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace_tui/model
+import gleam/list
 import gleam/option.{None, Some}
 import gleeunit/should
 
@@ -161,4 +162,24 @@ pub fn compare_model_keeps_bounded_run_statistics_test() {
   state.screen |> should.equal(model.CompareScreen)
   state.compare_run_count |> should.equal(3)
   state.compare_statistics_count |> should.equal(4)
+}
+
+pub fn question_mark_toggles_the_key_guide_and_escape_closes_it_test() {
+  let state = model.attached(events(), "app@localhost")
+  let opened = model.handle_key(state, "?")
+  opened.help_open |> should.be_true()
+  model.handle_key(opened, "?").help_open |> should.be_false()
+  model.handle_key(opened, "esc").help_open |> should.be_false()
+  model.key_guide()
+  |> list.any(fn(entry) { entry.0 == "d" && entry.1 == "compare" })
+  |> should.be_true()
+}
+
+pub fn escape_closes_the_guide_opened_from_the_attach_field_test() {
+  let opened = model.init(events()) |> model.handle_key("?")
+  opened.help_open |> should.be_true()
+  opened.focus |> should.equal(model.AttachFocus)
+  let closed = model.handle_key(opened, "esc")
+  closed.help_open |> should.be_false()
+  closed.focus |> should.equal(model.AttachFocus)
 }

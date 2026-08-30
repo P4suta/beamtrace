@@ -134,15 +134,20 @@ fn render_timeline(
     model.TraceLibraryScreen -> " TEAM · TRACE LIBRARY "
     model.CompareScreen -> " COMPARE · MULTI-TRACE ALIGNMENT "
   }
+  let title = case state.help_open {
+    True -> " KEY GUIDE "
+    False -> title
+  }
   let frame = panel(title, amber)
   let content_width = block.inner(area, frame).size.width
-  let content = case state.screen {
-    model.AttachScreen -> attach_content(state)
-    model.AnomalyScreen -> anomaly_content(state, content_width)
-    model.LiveScreen -> live_content(state, content_width)
-    model.CaptureScreen -> causal_content(state, content_width)
-    model.TraceLibraryScreen -> team_trace_content(state, content_width)
-    model.CompareScreen -> compare_content(state, content_width)
+  let content = case state.help_open, state.screen {
+    True, _ -> help_content()
+    False, model.AttachScreen -> attach_content(state)
+    False, model.AnomalyScreen -> anomaly_content(state, content_width)
+    False, model.LiveScreen -> live_content(state, content_width)
+    False, model.CaptureScreen -> causal_content(state, content_width)
+    False, model.TraceLibraryScreen -> team_trace_content(state, content_width)
+    False, model.CompareScreen -> compare_content(state, content_width)
   }
 
   target
@@ -152,6 +157,16 @@ fn render_timeline(
     paragraph.paragraph_new(content)
       |> paragraph.with_style(style.new(style.Default, background, style.none())),
   )
+}
+
+fn help_content() -> String {
+  model.key_guide()
+  |> list.map(fn(entry) {
+    let #(key, description) = entry
+    string.pad_end(key, 5, " ") <> description
+  })
+  |> string.join("\n")
+  |> fn(rows) { "Press Esc or ? to return.\n\n" <> rows }
 }
 
 fn render_inspector(
@@ -177,7 +192,7 @@ fn render_inspector(
       <> "\n\n"
       <> state.notice
       <> "\n\nACTIONS\n"
-      <> "a attach\nr arm MFA\nx cancel\n! anomalies\n/ search\ns save\nt traces\nd compare\nw open Web"
+      <> "a attach\nr arm MFA\nx cancel\n! anomalies\n/ search\ns save\nt traces\nd compare\nw open Web\n? key guide"
   }
 
   target
@@ -206,8 +221,11 @@ fn render_footer(
   let shortcuts =
     help.help_new([
       help.binding(["q"], "quit"),
+      help.binding(["?"], "help"),
       help.binding(["a"], "attach"),
       help.binding(["r"], "arm"),
+      help.binding(["c"], "capture"),
+      help.binding(["l"], "live"),
       help.binding(["t"], "traces"),
       help.binding(["d"], "compare"),
       help.binding(["!"], "anomalies"),

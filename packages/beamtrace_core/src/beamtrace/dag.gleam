@@ -29,6 +29,14 @@ pub type DagError {
   CycleDetected
 }
 
+/// Render a stable, target-independent explanation of a graph failure.
+pub fn error_message(error: DagError) -> String {
+  case error {
+    DuplicateEventId(id) -> "duplicate event id '" <> id <> "'"
+    CycleDetected -> "the causal graph contains a cycle"
+  }
+}
+
 /// A pairing heap keeps Kahn's deterministic ready set logarithmic amortized
 /// without requiring target-specific mutable arrays.
 type ReadyHeap {

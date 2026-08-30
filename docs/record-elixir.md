@@ -16,7 +16,8 @@ For an existing distributed release:
 ```sh
 beamtrace capture my_app@host \
   --trigger Elixir.MyApp.Worker:run/1 \
-  --cookie-file /run/secrets/beam.cookie
+  --cookie-file /run/secrets/beam.cookie \
+  --acknowledge-seq-trace-reset
 ```
 
 Never place the cookie value itself on the command line.

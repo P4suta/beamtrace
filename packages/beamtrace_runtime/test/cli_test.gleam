@@ -79,6 +79,7 @@ pub fn capture_command_contract_test() {
       cookie_file: Some(".secrets/cookie"),
       max_roots: 3,
       preset: types.GenServer,
+      window_s: 30,
     )),
   )
 }
@@ -102,6 +103,7 @@ pub fn capture_defaults_to_one_generic_root_test() {
       cookie_file: None,
       max_roots: 1,
       preset: types.Generic,
+      window_s: 30,
     )),
   )
 }
@@ -126,6 +128,7 @@ pub fn capture_accepts_an_option_node_for_project_profile_expansion_test() {
       cookie_file: None,
       max_roots: 1,
       preset: types.Generic,
+      window_s: 30,
     )),
   )
 }
@@ -288,7 +291,10 @@ pub fn team_tui_accepts_only_a_session_cookie_file_not_a_cookie_value_test() {
 
   cli.parse(["tui", "--session-cookie", "secret"])
   |> should.equal(
-    Error(cli.ParseError("unknown tui option '--session-cookie'", 2)),
+    Error(cli.ParseError(
+      "unknown tui option '--session-cookie'. Did you mean '--session-cookie-file'?",
+      2,
+    )),
   )
 }
 
@@ -371,7 +377,10 @@ pub fn relay_raw_capture_accepts_only_a_grant_file_not_a_plaintext_token_test() 
       "--raw-grant",
       "plaintext-secret",
     ])
-  error.message |> should.equal("unknown relay option '--raw-grant'")
+  error.message
+  |> should.equal(
+    "unknown relay option '--raw-grant'. Did you mean '--raw-grant-file'?",
+  )
 }
 
 pub fn record_parses_capture_options_before_the_child_separator_test() {
@@ -396,18 +405,17 @@ pub fn record_parses_capture_options_before_the_child_separator_test() {
     "test",
   ])
   |> should.equal(
-    Ok(
-      cli.Record(
-        node: Some("app@host"),
-        trigger: cli.Mfa("shop", "checkout", 1),
-        where_aql: Some("arg.0.tag == order"),
-        out: "run.beamtrace",
-        cookie_file: Some(".secrets/cookie"),
-        max_roots: 2,
-        preset: types.GleamActor,
-        command: ["gleam", "test"],
-      ),
-    ),
+    Ok(cli.Record(
+      node: Some("app@host"),
+      trigger: cli.Mfa("shop", "checkout", 1),
+      where_aql: Some("arg.0.tag == order"),
+      out: "run.beamtrace",
+      cookie_file: Some(".secrets/cookie"),
+      max_roots: 2,
+      preset: types.GleamActor,
+      command: ["gleam", "test"],
+      window_s: 30,
+    )),
   )
 }
 
@@ -428,18 +436,17 @@ pub fn record_generates_a_target_but_still_requires_trigger_output_and_child_tes
     "run",
   ])
   |> should.equal(
-    Ok(
-      cli.Record(
-        None,
-        cli.Mfa("m", "f", 0),
-        None,
-        "x.beamtrace",
-        None,
-        1,
-        types.Generic,
-        ["gleam", "run"],
-      ),
-    ),
+    Ok(cli.Record(
+      None,
+      cli.Mfa("m", "f", 0),
+      None,
+      "x.beamtrace",
+      None,
+      1,
+      types.Generic,
+      ["gleam", "run"],
+      30,
+    )),
   )
 
   let assert Error(child_error) =
@@ -571,7 +578,7 @@ pub fn completion_is_generated_for_all_supported_shells_test() {
   let assert Some(zsh) = cli_spec.completion("zsh")
   zsh
   |> string.contains(
-    "compare) _arguments '--web' '--tui' '--json' '--port' '--no-open';;",
+    "compare) _arguments '*:archive:_files -g \"*.beamtrace\"' '--web[Open the multi-run comparison workspace.]'",
   )
   |> should.be_true()
 }
@@ -593,6 +600,7 @@ pub fn capture_and_record_generate_output_names_when_out_is_omitted_test() {
       None,
       1,
       types.Generic,
+      30,
     )),
   )
 
@@ -701,5 +709,175 @@ pub fn compare_rejects_port_and_tui_in_either_order_test() {
   |> list.each(fn(arguments) {
     let assert Error(error) = cli.parse(arguments)
     error.message |> should.equal("--port cannot be used with --tui")
+  })
+}
+
+pub fn help_flag_is_accepted_anywhere_before_the_child_separator_test() {
+  cli.parse(["record", "--trigger", "m:f/0", "--help"])
+  |> should.equal(Ok(cli.CommandHelp("record")))
+  cli.parse(["record", "--help", "--", "app", "--help"])
+  |> should.equal(Ok(cli.CommandHelp("record")))
+  cli.parse(["open", "x.beamtrace", "--help"])
+  |> should.equal(Ok(cli.CommandHelp("open")))
+  cli.parse(["capture", "app@host", "-h"])
+  |> should.equal(Ok(cli.CommandHelp("capture")))
+  cli.parse(["config", "check", "--help"])
+  |> should.equal(Ok(cli.CommandHelp("config")))
+  let assert Ok(cli.Record(command: child, ..)) =
+    cli.parse(["record", "--trigger", "m:f/0", "--", "app", "--help"])
+  child |> should.equal(["app", "--help"])
+}
+
+pub fn missing_option_value_is_reported_as_such_test() {
+  let assert Error(trigger) = cli.parse(["record", "--trigger"])
+  trigger.message |> should.equal("option '--trigger' requires a value (MFA)")
+  let assert Error(port) = cli.parse(["open", "x.beamtrace", "--port"])
+  port.message |> should.equal("option '--port' requires a value (PORT)")
+  let assert Error(out) =
+    cli.parse(["record", "--out", "--trigger", "m:f/0", "--", "x"])
+  out.message |> should.equal("option '--out' requires a value (PATH)")
+}
+
+pub fn unknown_option_suggests_the_nearest_flag_test() {
+  let assert Error(error) =
+    cli.parse(["record", "--triger", "m:f/0", "--", "x"])
+  error.message
+  |> string.contains("unknown record option '--triger'")
+  |> should.be_true()
+  error.message
+  |> string.contains("Did you mean '--trigger'?")
+  |> should.be_true()
+}
+
+pub fn unique_command_prefix_is_suggested_test() {
+  let assert Error(error) = cli.parse(["cap"])
+  error.message
+  |> string.contains("Did you mean 'capture'?")
+  |> should.be_true()
+  let assert Error(ambiguous) = cli.parse(["co"])
+  ambiguous.message |> string.contains("Did you mean") |> should.be_false()
+}
+
+pub fn every_spec_command_is_recognised_by_the_parser_test() {
+  list.each(cli_spec.names(), fn(name) {
+    case cli.parse([name, "extra-positional", "--nonsense"]) {
+      Error(error) ->
+        error.message |> string.contains("unknown command") |> should.be_false()
+      Ok(_) -> Nil
+    }
+  })
+}
+
+fn sample_option_value(placeholder: String) -> String {
+  case placeholder {
+    "PORT" -> "0"
+    "N" -> "1"
+    "MFA" -> "m:f/0"
+    "NODE" -> "app@host"
+    "PRESET" -> "generic"
+    "FORMAT" -> "html"
+    "URL" -> "http://127.0.0.1:4040"
+    "SECONDS" -> "30"
+    _ -> "x"
+  }
+}
+
+fn reconciliation_bases() -> List(#(String, List(String))) {
+  [
+    #("attach", ["attach", "app@host", "--acknowledge-seq-trace-reset"]),
+    #("capture", [
+      "capture",
+      "app@host",
+      "--trigger",
+      "m:f/0",
+      "--acknowledge-seq-trace-reset",
+    ]),
+    #("record", ["record", "--trigger", "m:f/0"]),
+    #("open", ["open", "x.beamtrace"]),
+    #("compare", ["compare", "a.beamtrace", "b.beamtrace"]),
+    #("export", ["export", "x.beamtrace", "--format", "otlp"]),
+    #("validate", ["validate", "x.beamtrace"]),
+    #("migrate", ["migrate", "old.beamtrace", "--output", "new.beamtrace"]),
+    #("serve", ["serve"]),
+    #("demo", ["demo", "--no-ui"]),
+    #("relay", [
+      "relay",
+      "https://hub.example",
+      "--enroll",
+      "TOKEN",
+      "--node",
+      "app@host",
+      "--trigger",
+      "m:f/0",
+      "--acknowledge-seq-trace-reset",
+    ]),
+    #("tui", ["tui"]),
+    #("init", ["init"]),
+    #("config", ["config", "check"]),
+    #("doctor", ["doctor"]),
+    #("version", ["version"]),
+  ]
+}
+
+/// The drift gate: every flag the spec lists is accepted by the parser and
+/// every flag the spec omits is rejected.
+pub fn parser_and_spec_agree_on_every_option_test() {
+  let all_flags =
+    cli_spec.commands()
+    |> list.flat_map(fn(spec) { spec.options })
+    |> list.map(fn(option) { option.flag })
+    |> list.unique
+  list.each(reconciliation_bases(), fn(base) {
+    let #(name, argv) = base
+    let accepted = cli_spec.option_names(name)
+    list.each(all_flags, fn(flag) {
+      let option = cli_spec.option_name(flag)
+      let tokens = case cli_spec.option_placeholder(flag) {
+        None -> [option]
+        Some(placeholder) -> [option, sample_option_value(placeholder)]
+      }
+      let full = case name {
+        "record" -> list.flatten([argv, tokens, ["--", "x"]])
+        _ -> list.append(argv, tokens)
+      }
+      let result = cli.parse(full)
+      let rejected_as_unknown = case result {
+        Error(error) ->
+          string.contains(error.message, "unknown " <> name <> " option")
+          || string.contains(error.message, "requires a value")
+        Ok(_) -> False
+      }
+      case list.contains(accepted, option) {
+        True ->
+          case rejected_as_unknown {
+            True -> panic as { name <> " rejects spec option " <> option }
+            False -> Nil
+          }
+        False ->
+          case result {
+            Ok(_) -> panic as { name <> " accepts unlisted option " <> option }
+            Error(_) -> Nil
+          }
+      }
+    })
+  })
+}
+
+pub fn every_help_example_parses_test() {
+  cli_spec.commands()
+  |> list.flat_map(fn(spec) { spec.examples })
+  |> list.filter(fn(example) {
+    !string.contains(example, ">") && !string.contains(example, "--profile")
+  })
+  |> list.each(fn(example) {
+    let argv = case string.split(example, on: " ") {
+      ["beamtrace", ..rest] -> rest
+      other -> other
+    }
+    case cli.parse(argv) {
+      Ok(_) -> Nil
+      Error(cli.ParseError(_, 4)) -> Nil
+      Error(error) -> panic as { example <> ": " <> error.message }
+    }
   })
 }

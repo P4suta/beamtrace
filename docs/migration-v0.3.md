@@ -30,3 +30,9 @@ New Team relay sessions use protocol v3 and declare event schema v2. Relay proto
 ## CLI safety change
 
 Attach-mode exact capture uses the VM-global seq_trace system tracer and resets seq_trace during cleanup. Scripts must pass `--acknowledge-seq-trace-reset` after presenting that impact to the operator. `record` starts a separate VM and acknowledges this isolation automatically. An occupied system tracer is still refused and never overwritten.
+
+## Library and CLI contracts
+
+- `beamtrace_core`: `diff.prepare` returns `Result(PreparedTrace, DagError)`; `diff.compare` and `aql.compile_agent` are deprecated in favour of `diff.compare_checked`/the `beamtrace` façade and `aql.compile_trigger`; `codec.event_v1_adapter_json` is internal.
+- CLI `--json` keeps `schema_version: 1` and adds `absolute_path`, `doctor.checks`, and `error.detail`; see `schemas/beamtrace-cli-v1/envelope.schema.json`.
+- Human errors print `beamtrace[E_<CODE>]` with the same code and hint as `--json`; the exit-derived labels `E_COMMAND_FAILED`, `E_CAPTURE_INTEGRITY`, and `E_SAFETY_REFUSAL` remain only for uncatalogued failures.

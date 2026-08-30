@@ -1,5 +1,7 @@
 import beamtrace/codec
 import beamtrace/types
+import gleam/json
+import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import gleeunit
@@ -176,4 +178,62 @@ pub fn versioned_event_decode_preserves_legacy_and_canonical_rules_test() {
       evidence: types.Exact,
     )),
   )
+}
+
+pub fn codec_error_messages_are_stable_across_targets_test() {
+  codec.error_message(codec.InvalidJson("x")) |> should.equal("invalid JSON")
+  codec.error_message(codec.UnknownSchemaVersion(7))
+  |> should.equal("unsupported schema version 7")
+  codec.error_message(codec.NonCanonicalJson)
+  |> should.equal("JSON is not canonical")
+  codec.error_message(codec.InvalidField("id", "invalid event id"))
+  |> should.equal("invalid field 'id': invalid event id")
+}
+
+fn sample_clocks() -> types.ClockCalibration {
+  types.ClockCalibration(1, [
+    types.NodeClock(
+      "app@host",
+      1000,
+      Some(types.ClockSample(1000, 5000, 40, 80)),
+      Some(types.ClockSample(2000, 6000, 40, 80)),
+    ),
+  ])
+}
+
+pub fn structured_json_builders_match_canonical_string_encoders_test() {
+  let event = sample_event()
+  json.to_string(codec.event_json(event))
+  |> should.equal(codec.encode_event(event))
+  let clocks = sample_clocks()
+  json.to_string(codec.clocks_json(clocks))
+  |> should.equal(codec.encode_clocks(clocks))
+}
+
+pub fn clocks_round_trip_and_reject_non_canonical_bytes_test() {
+  let clocks = sample_clocks()
+  let encoded = codec.encode_clocks(clocks)
+  codec.decode_clocks(encoded) |> should.equal(Ok(clocks))
+  codec.decode_clocks(" " <> encoded) |> should.be_error()
+}
+
+pub fn schema_version_constant_is_emitted_by_every_encoder_test() {
+  codec.schema_version |> should.equal(2)
+  let manifest =
+    codec.Manifest(
+      schema_version: 1,
+      tool_version: "0.3.0",
+      capture_id: "capture-1",
+      nodes: ["app@host"],
+      outcome: types.CaptureOutcome(types.QuietPeriod(250), [], []),
+      privacy: types.Metadata,
+    )
+  [
+    codec.encode_event(sample_event()),
+    codec.encode_manifest(manifest),
+    codec.encode_clocks(sample_clocks()),
+  ]
+  |> list.each(fn(encoded) {
+    encoded |> string.contains("\"schema_version\":2") |> should.be_true()
+  })
 }

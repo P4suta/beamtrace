@@ -232,7 +232,89 @@ pub fn compare_workspace_renders_paths_alignment_and_percentiles_test() {
   |> string.contains("Accessible trace alignment table")
   |> should.be_true()
   html |> string.contains("slow.beamtrace") |> should.be_true()
-  html |> string.contains("90 ns exact") |> should.be_true()
-  html |> string.contains("p95 100 ns exact") |> should.be_true()
+  html |> string.contains("+90 ns · exact") |> should.be_true()
+  html |> string.contains("p95 +100 ns · exact") |> should.be_true()
   html |> string.contains("2/3 runs") |> should.be_true()
+}
+
+pub fn keyboard_targets_are_wired_for_every_advertised_shortcut_test() {
+  let html = rendered_workspace()
+  html |> string.contains("aria-keyshortcuts=\"4\"") |> should.be_true()
+  html |> string.contains("id=\"event-search\"") |> should.be_true()
+  let palette =
+    workspace.init([])
+    |> workspace.update(workspace.UserOpenedPalette)
+    |> view.workspace
+    |> element.to_string
+  palette |> string.contains("autofocus") |> should.be_true()
+  palette |> string.contains("Command palette") |> should.be_true()
+}
+
+pub fn sealed_landing_renders_overview_with_save_and_new_capture_test() {
+  let html =
+    workspace.init_remote()
+    |> workspace.update(
+      workspace.CaptureStatusLoaded(workspace.Ready(
+        34,
+        "sealed after 250ms quiet period · delivery verified",
+      )),
+    )
+    |> view.workspace
+    |> element.to_string
+  html |> string.contains("Sealed archive") |> should.be_true()
+  html |> string.contains("34 events") |> should.be_true()
+  html |> string.contains("Save capture") |> should.be_true()
+  html |> string.contains("New capture") |> should.be_true()
+  html |> string.contains("Arm capture") |> should.be_false()
+  html |> string.contains("Sealed causal observation") |> should.be_true()
+  html |> string.contains("No trigger armed") |> should.be_false()
+}
+
+pub fn event_table_shows_an_actionable_empty_state_test() {
+  let html = workspace.init([]) |> view.workspace |> element.to_string
+  html |> string.contains("No events in this window") |> should.be_true()
+  let searched =
+    workspace.init([])
+    |> workspace.update(workspace.UserChangedQuery("needle"))
+    |> view.workspace
+    |> element.to_string
+  searched |> string.contains("No events match") |> should.be_true()
+}
+
+pub fn event_rows_render_human_time_and_keep_raw_values_in_the_inspector_test() {
+  let model =
+    workspace.init([
+      workspace.EventRow(
+        id: "event-1",
+        actor: "checkout",
+        kind: "send",
+        timestamp_ns: 15_893_571,
+        duration_ns: 1000,
+        time: workspace.EstimatedTime(
+          "1788090105011610338",
+          "1788090105011580258",
+          "1788090105011640420",
+        ),
+        evidence: workspace.Exact,
+        anomalous: False,
+        internal: False,
+      ),
+    ])
+  let html = model |> view.workspace |> element.to_string
+  html
+  |> string.contains(
+    "+15.894 ms · 2026-08-30 11:41:45.011610 UTC ±30.081 µs · estimated",
+  )
+  |> should.be_true()
+  html |> string.contains("ns node-local") |> should.be_false()
+  let inspector =
+    model
+    |> workspace.update(workspace.UserSelectedEvent("event-1"))
+    |> view.workspace
+    |> element.to_string
+  inspector
+  |> string.contains(
+    "1788090105011610338 ns estimated [1788090105011580258, 1788090105011640420]",
+  )
+  |> should.be_true()
 }

@@ -86,7 +86,7 @@ if ($null -eq $packageConfig -or $packageConfig.component -ne 'beamtrace') {
     throw 'The root BeamTrace release package is missing.'
 }
 $extraFiles = @($packageConfig.'extra-files')
-if ($extraFiles.Count -ne 8 -or @($extraFiles | Where-Object { $_.path -eq 'version.txt' }).Count -ne 0) {
+if ($extraFiles.Count -ne 9 -or @($extraFiles | Where-Object { $_.path -eq 'version.txt' }).Count -ne 0) {
     throw 'The simple strategy must manage version.txt exactly once through version-file.'
 }
 function Assert-ExtraFile {
@@ -104,6 +104,11 @@ function Assert-ExtraFile {
     }
 }
 Assert-ExtraFile -Type generic -Path 'packages/beamtrace_runtime/src/beamtrace_runtime/internal/version.gleam'
+Assert-ExtraFile -Type generic -Path 'README.md'
+$readmeSource = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'README.md')
+if (-not $readmeSource.Contains("VERSION=$version # x-release-please-version")) {
+    throw 'README.md must carry the install example version with the x-release-please-version marker.'
+}
 foreach ($path in @(
     'packages/beamtrace_core/gleam.toml',
     'packages/beamtrace_runtime/gleam.toml',

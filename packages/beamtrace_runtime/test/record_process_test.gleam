@@ -7,6 +7,12 @@ import gleeunit/should
 @external(erlang, "beamtrace_record_process_test_ffi", "packaged_environment_isolated")
 fn packaged_environment_isolated() -> Result(String, String)
 
+@external(erlang, "beamtrace_record_process_test_ffi", "demo_fixture_is_staged_in_the_private_gate")
+fn demo_fixture_is_staged_in_the_private_gate() -> Result(Nil, String)
+
+@external(erlang, "beamtrace_record_process_test_ffi", "staged_launch_never_writes_a_crash_dump_to_cwd")
+fn staged_launch_never_writes_a_crash_dump_to_cwd() -> Result(Nil, String)
+
 @external(erlang, "beamtrace_record_process_test_ffi", "gleam_javascript_target_rejected")
 fn gleam_javascript_target_rejected() -> Result(Nil, String)
 
@@ -53,6 +59,14 @@ pub fn child_beam_is_held_until_the_one_time_gate_is_released_test() {
   let assert Ok(#(status, output)) = record_process.await(handle, 30_000)
   status |> should.equal(0)
   output |> string.contains("child-ran") |> should.be_true()
+}
+
+pub fn demo_fixture_is_staged_in_the_private_gate_test() {
+  demo_fixture_is_staged_in_the_private_gate() |> should.equal(Ok(Nil))
+}
+
+pub fn staged_launch_never_writes_a_crash_dump_to_cwd_test() {
+  staged_launch_never_writes_a_crash_dump_to_cwd() |> should.equal(Ok(Nil))
 }
 
 pub fn record_uses_private_os_temp_directory_and_cleans_every_marker_test() {

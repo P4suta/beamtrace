@@ -27,7 +27,7 @@ file, verify the checksum, and verify the GitHub artifact attestation before
 running it:
 
 ```sh
-VERSION=0.3.0
+VERSION=0.2.0 # x-release-please-version
 TARGET=linux-x64
 sha256sum --check beamtrace-${VERSION}-${TARGET}.zip.sha256
 gh attestation verify beamtrace-${VERSION}-${TARGET}.zip --repo P4suta/beamtrace

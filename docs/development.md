@@ -13,6 +13,16 @@
 
 `scripts/ensure-rebar3.ps1` downloads a checksum-pinned rebar3 executable when needed.
 
+## Running from source
+
+```sh
+mise run beamtrace -- demo
+mise run test        # unit + available integration + docs
+mise run test:all    # the CI gate
+```
+
+`mise run beamtrace` builds the agent BEAM and sets `BEAMTRACE_AGENT_BEAM` and `BEAMTRACE_WEB_ROOT`; without them `record`, `capture`, and `demo` stop with `E_AGENT_BEAM_UNAVAILABLE`.
+
 ## Test commands
 
 ```powershell

@@ -27,9 +27,9 @@ pub fn commands() -> List(CommandSpec) {
     CommandSpec(
       "help",
       "Show the command guide or detailed help for one command.",
-      "beamtrace help [<command>]",
+      "beamtrace help [<command>|errors]",
       [],
-      ["beamtrace help capture"],
+      ["beamtrace help capture", "beamtrace help errors"],
       [],
     ),
     CommandSpec(
@@ -65,6 +65,10 @@ pub fn commands() -> List(CommandSpec) {
         OptionSpec("--profile NAME", "Project capture profile."),
         OptionSpec("--max-roots N", "Capture between 1 and 1000 roots."),
         OptionSpec("--preset PRESET", "Capture preset; default generic."),
+        OptionSpec(
+          "--capture-window SECONDS",
+          "Seconds to wait for the operation; default 30, at most 300.",
+        ),
         OptionSpec("--json", "Emit one versioned JSON result object."),
         ..capture_safety_options()
       ],
@@ -90,6 +94,7 @@ pub fn commands() -> List(CommandSpec) {
           "Archive path; omitted means a safe generated name.",
         ),
         OptionSpec("--force", "Replace an explicitly named existing archive."),
+        OptionSpec("--profile NAME", "Project capture profile."),
         OptionSpec("--web", "Use the Web progress workspace."),
         OptionSpec("--tui", "Use terminal progress UI."),
         OptionSpec("--no-ui", "Disable interactive UI."),
@@ -97,6 +102,10 @@ pub fn commands() -> List(CommandSpec) {
         OptionSpec("--cookie-file PATH", "Read a distribution cookie file."),
         OptionSpec("--max-roots N", "Capture between 1 and 1000 roots."),
         OptionSpec("--preset PRESET", "Capture preset; default generic."),
+        OptionSpec(
+          "--capture-window SECONDS",
+          "Seconds to wait for the operation; default 30, at most 300.",
+        ),
         OptionSpec("--json", "Emit one versioned JSON result object."),
       ],
     ),
@@ -211,6 +220,9 @@ pub fn commands() -> List(CommandSpec) {
         OptionSpec("--enroll TOKEN", "One-time enrollment token."),
         OptionSpec("--node NODE", "Optional producer target."),
         OptionSpec("--trigger MFA", "Producer root MFA."),
+        OptionSpec("--where AQL", "Optional root predicate."),
+        OptionSpec("--max-roots N", "Capture between 1 and 1000 roots."),
+        OptionSpec("--preset PRESET", "Capture preset; default generic."),
         OptionSpec("--raw-grant-file PATH", "Separately authorized raw grant."),
         ..capture_safety_options()
       ],
@@ -311,24 +323,128 @@ pub fn names() -> List(String) {
   list.map(commands(), fn(spec) { spec.name })
 }
 
-/// Return the nearest command within two single-character edits.
+/// Return the command a prefix uniquely names, else the nearest command
+/// within two single-character edits.
 pub fn suggest(input: String) -> Option(String) {
-  let left = string.to_graphemes(input)
-  case
-    list.find(names(), fn(name) {
-      within_edits(left, string.to_graphemes(name), 1)
-    })
-  {
-    Ok(name) -> Some(name)
-    Error(_) ->
+  suggest_among(names(), input)
+}
+
+fn suggest_among(candidates: List(String), input: String) -> Option(String) {
+  let prefixed = case string.length(input) >= 2 {
+    True -> list.filter(candidates, string.starts_with(_, input))
+    False -> []
+  }
+  case prefixed {
+    [only] -> Some(only)
+    [_, _, ..] -> None
+    [] -> {
+      let left = string.to_graphemes(input)
       case
-        list.find(names(), fn(name) {
-          within_edits(left, string.to_graphemes(name), 2)
+        list.find(candidates, fn(name) {
+          within_edits(left, string.to_graphemes(name), 1)
         })
       {
         Ok(name) -> Some(name)
+        Error(_) ->
+          case
+            list.find(candidates, fn(name) {
+              within_edits(left, string.to_graphemes(name), 2)
+            })
+          {
+            Ok(name) -> Some(name)
+            Error(_) -> None
+          }
+      }
+    }
+  }
+}
+
+/// Return the nearest option of one command.
+pub fn suggest_option(command: String, option: String) -> Option(String) {
+  suggest_among(option_names(command), option)
+}
+
+/// The option specification one command declares for a flag.
+pub fn option_spec(command: String, option: String) -> Option(OptionSpec) {
+  case list.find(commands(), fn(spec) { spec.name == command }) {
+    Error(_) -> None
+    Ok(spec) ->
+      case
+        list.find(spec.options, fn(candidate) {
+          option_name(candidate.flag) == option
+        })
+      {
+        Ok(found) -> Some(found)
         Error(_) -> None
       }
+  }
+}
+
+pub fn option_names(command: String) -> List(String) {
+  case list.find(commands(), fn(spec) { spec.name == command }) {
+    Error(_) -> []
+    Ok(spec) -> list.map(spec.options, fn(option) { option_name(option.flag) })
+  }
+}
+
+/// The value placeholder of a flag such as `--out PATH`, if it takes one.
+pub fn option_placeholder(flag: String) -> Option(String) {
+  case string.split(flag, on: " ") {
+    [_, placeholder, ..] -> Some(placeholder)
+    _ -> None
+  }
+}
+
+pub fn option_takes_value(command: String, option: String) -> Option(String) {
+  case option_spec(command, option) {
+    Some(spec) -> option_placeholder(spec.flag)
+    None -> None
+  }
+}
+
+pub fn preset_names() -> List(String) {
+  [
+    "generic", "gleam-actor", "wisp-mist", "gen-server", "phoenix",
+    "erlang-supervisor",
+  ]
+}
+
+pub fn export_formats() -> List(String) {
+  ["html", "jsonl", "mermaid", "otlp"]
+}
+
+pub fn shells() -> List(String) {
+  ["bash", "zsh", "fish", "powershell"]
+}
+
+/// Enumerated values of a flag, used by completion.
+pub fn option_choices(option: String) -> List(String) {
+  case option {
+    "--format" -> export_formats()
+    "--preset" -> preset_names()
+    _ -> []
+  }
+}
+
+/// Enumerated first positional arguments of a command, used by completion.
+pub fn positional_choices(command: String) -> List(String) {
+  case command {
+    "completion" -> shells()
+    "config" -> ["check"]
+    "help" -> list.append(names(), ["errors"])
+    _ -> []
+  }
+}
+
+/// Whether a flag or positional expects a `.beamtrace` path.
+pub fn takes_archive_path(command: String, option: Option(String)) -> Bool {
+  case option {
+    Some(flag) -> option_takes_value(command, flag) == Some("PATH")
+    None ->
+      list.contains(
+        ["open", "compare", "export", "validate", "migrate"],
+        command,
+      )
   }
 }
 
@@ -433,36 +549,136 @@ fn command_words() -> String {
   names() |> string.join(" ")
 }
 
+fn words(values: List(String)) -> String {
+  string.join(values, " ")
+}
+
+fn archive_commands() -> List(String) {
+  ["open", "compare", "export", "validate", "migrate"]
+}
+
+fn choice_options() -> List(String) {
+  ["--format", "--preset"]
+}
+
+fn path_option_names() -> List(String) {
+  commands()
+  |> list.flat_map(fn(spec) { spec.options })
+  |> list.filter(fn(option) { option_placeholder(option.flag) == Some("PATH") })
+  |> list.map(fn(option) { option_name(option.flag) })
+  |> list.unique
+}
+
 fn bash_completion() -> String {
+  let value_cases =
+    choice_options()
+    |> list.map(fn(option) {
+      "    "
+      <> option
+      <> ") COMPREPLY=( $(compgen -W '"
+      <> words(option_choices(option))
+      <> "' -- \"${current}\") ); return;;"
+    })
+    |> string.join("\n")
+  let path_case =
+    "    "
+    <> string.join(path_option_names(), "|")
+    <> ") compopt -o filenames 2>/dev/null; COMPREPLY=( $(compgen -f -- \"${current}\") ); return;;"
+  let positional_cases =
+    ["completion", "config", "help"]
+    |> list.map(fn(command) {
+      "      "
+      <> command
+      <> ") COMPREPLY=( $(compgen -W '"
+      <> words(positional_choices(command))
+      <> "' -- \"${current}\") ); return;;"
+    })
+    |> string.join("\n")
   "# generated by beamtrace completion bash\n"
   <> "_beamtrace() {\n"
   <> "  local current=${COMP_WORDS[COMP_CWORD]}\n"
+  <> "  local previous=${COMP_WORDS[COMP_CWORD-1]}\n"
   <> "  if [ ${COMP_CWORD} -eq 1 ]; then\n"
   <> "    COMPREPLY=( $(compgen -W '"
   <> command_words()
   <> "' -- \"${current}\") )\n"
   <> "    return\n  fi\n"
-  <> "  case ${COMP_WORDS[1]} in\n"
+  <> "  local command=${COMP_WORDS[1]}\n"
+  <> "  case \"${previous}\" in\n"
+  <> value_cases
+  <> "\n"
+  <> path_case
+  <> "\n  esac\n"
+  <> "  if [ ${COMP_CWORD} -eq 2 ]; then\n    case \"${command}\" in\n"
+  <> positional_cases
+  <> "\n    esac\n  fi\n"
+  <> "  case \"${current}\" in\n    -*)\n      case \"${command}\" in\n"
   <> completion_cases(
-    "    ",
+    "        ",
     "COMPREPLY=( $(compgen -W '",
     "' -- \"${current}\") );;",
   )
-  <> "  esac\n}\ncomplete -F _beamtrace beamtrace\n"
+  <> "      esac\n      ;;\n    *)\n      case \"${command}\" in\n        "
+  <> string.join(archive_commands(), "|")
+  <> ") compopt -o filenames 2>/dev/null; COMPREPLY=( $(compgen -f -X '!*.beamtrace' -- \"${current}\") $(compgen -d -- \"${current}\") );;\n"
+  <> "        *) COMPREPLY=();;\n      esac\n      ;;\n  esac\n}\n"
+  <> "complete -F _beamtrace beamtrace\n"
+}
+
+fn zsh_quote(value: String) -> String {
+  string.replace(value, "'", "'\\''")
+}
+
+fn zsh_option_spec(option: OptionSpec) -> String {
+  let name = option_name(option.flag)
+  let description = zsh_quote(option.description)
+  let argument = case option_placeholder(option.flag) {
+    None -> ""
+    Some("PATH") -> ":path:_files"
+    Some(placeholder) ->
+      case option_choices(name) {
+        [] -> ":" <> string.lowercase(placeholder) <> ":"
+        choices ->
+          ":" <> string.lowercase(placeholder) <> ":(" <> words(choices) <> ")"
+      }
+  }
+  "'" <> name <> "[" <> description <> "]" <> argument <> "'"
+}
+
+fn zsh_positional_spec(command: String) -> String {
+  case command {
+    "compare" -> " '*:archive:_files -g \"*.beamtrace\"'"
+    "completion" -> " '1:shell:(" <> words(shells()) <> ")'"
+    "config" -> " '1:subcommand:(check)'"
+    "help" -> " '1:command:(" <> command_words() <> ")'"
+    "attach" -> " '1:node:'"
+    "relay" -> " '1:hub-url:'"
+    name ->
+      case list.contains(archive_commands(), name) {
+        True -> " '1:archive:_files -g \"*.beamtrace\"'"
+        False -> ""
+      }
+  }
 }
 
 fn zsh_completion() -> String {
   let command_descriptions =
     commands()
-    |> list.map(fn(spec) { "'" <> spec.name <> ":" <> spec.summary <> "'" })
+    |> list.map(fn(spec) {
+      "'" <> spec.name <> ":" <> zsh_quote(spec.summary) <> "'"
+    })
     |> string.join(" ")
   "#compdef beamtrace\n# generated by beamtrace completion zsh\n"
   <> "local -a commands\ncommands=("
   <> command_descriptions
   <> ")\n_arguments '1:command:->command' '*::arg:->args'\n"
-  <> "case $state in\n  command) _describe command commands ;;\n  args)\n    case $words[2] in\n"
+  <> "case $state in\n  command) _describe command commands ;;\n  args)\n    case $words[1] in\n"
   <> zsh_completion_cases()
   <> "    esac\n  ;;\nesac\n"
+}
+
+fn fish_quote(value: String) -> String {
+  string.replace(value, "'", "\\'")
 }
 
 fn fish_completion() -> String {
@@ -472,7 +688,7 @@ fn fish_completion() -> String {
       "complete -c beamtrace -n '__fish_use_subcommand' -a '"
       <> spec.name
       <> "' -d '"
-      <> spec.summary
+      <> fish_quote(spec.summary)
       <> "'"
     })
     |> string.join("\n")
@@ -481,32 +697,108 @@ fn fish_completion() -> String {
     |> list.flat_map(fn(spec) {
       spec.options
       |> list.map(fn(option) {
-        let flag = option_name(option.flag)
+        let name = option_name(option.flag)
+        let argument = case option_placeholder(option.flag) {
+          None -> ""
+          Some("PATH") -> " -r -F"
+          Some(_) ->
+            case option_choices(name) {
+              [] -> " -r"
+              choices -> " -r -a '" <> words(choices) <> "'"
+            }
+        }
         "complete -c beamtrace -n '__fish_seen_subcommand_from "
         <> spec.name
         <> "' -l "
-        <> string.drop_start(flag, 2)
+        <> string.drop_start(name, 2)
+        <> argument
         <> " -d '"
-        <> option.description
+        <> fish_quote(option.description)
         <> "'"
       })
     })
+    |> string.join("\n")
+  let positional_rows =
+    [
+      "complete -c beamtrace -n '__fish_seen_subcommand_from "
+        <> words(archive_commands())
+        <> "' -F",
+      "complete -c beamtrace -n '__fish_seen_subcommand_from completion' -a '"
+        <> words(shells())
+        <> "'",
+      "complete -c beamtrace -n '__fish_seen_subcommand_from config' -a 'check'",
+      "complete -c beamtrace -n '__fish_seen_subcommand_from help' -a '"
+        <> command_words()
+        <> "'",
+    ]
     |> string.join("\n")
   "# generated by beamtrace completion fish\ncomplete -c beamtrace -f\n"
   <> command_rows
   <> "\n"
   <> option_rows
   <> "\n"
+  <> positional_rows
+  <> "\n"
+}
+
+fn powershell_list(values: List(String)) -> String {
+  "@('" <> string.join(values, "','") <> "')"
 }
 
 fn powershell_completion() -> String {
-  let names = names() |> string.join("','")
+  let value_cases =
+    choice_options()
+    |> list.map(fn(option) {
+      "      '"
+      <> option
+      <> "' { $candidates = "
+      <> powershell_list(option_choices(option))
+      <> " }"
+    })
+    |> string.join("\n")
+  let positional_cases =
+    ["completion", "config", "help"]
+    |> list.map(fn(command) {
+      "        '"
+      <> command
+      <> "' { $candidates = "
+      <> powershell_list(positional_choices(command))
+      <> " }"
+    })
+    |> string.join("\n")
+  let option_cases =
+    commands()
+    |> list.map(fn(spec) {
+      "        '"
+      <> spec.name
+      <> "' { $candidates = "
+      <> powershell_list(
+        list.map(spec.options, fn(option) { option_name(option.flag) }),
+      )
+      <> " }"
+    })
+    |> string.join("\n")
   "# generated by beamtrace completion powershell\n"
   <> "Register-ArgumentCompleter -Native -CommandName beamtrace -ScriptBlock {\n"
   <> "  param($wordToComplete, $commandAst, $cursorPosition)\n"
-  <> "  @('"
-  <> names
-  <> "') | Where-Object { $_ -like \"$wordToComplete*\" } | ForEach-Object {\n"
+  <> "  $words = @($commandAst.CommandElements | ForEach-Object { $_.Extent.Text })\n"
+  <> "  if ($wordToComplete -eq '') { $words += '' }\n"
+  <> "  $index = $words.Count - 1\n"
+  <> "  $candidates = @()\n"
+  <> "  if ($index -le 1) {\n    $candidates = "
+  <> powershell_list(names())
+  <> "\n  } else {\n"
+  <> "    $command = $words[1]\n    $previous = $words[$index - 1]\n"
+  <> "    switch ($previous) {\n"
+  <> value_cases
+  <> "\n    }\n"
+  <> "    if ($candidates.Count -eq 0 -and $index -eq 2) {\n      switch ($command) {\n"
+  <> positional_cases
+  <> "\n      }\n    }\n"
+  <> "    if ($candidates.Count -eq 0 -and $wordToComplete -like '-*') {\n      switch ($command) {\n"
+  <> option_cases
+  <> "\n      }\n    }\n  }\n"
+  <> "  $candidates | Where-Object { $_ -like \"$wordToComplete*\" } | ForEach-Object {\n"
   <> "    [System.Management.Automation.CompletionResult]::new($_, $_, 'ParameterValue', $_)\n"
   <> "  }\n}\n"
 }
@@ -514,11 +806,16 @@ fn powershell_completion() -> String {
 fn completion_cases(indent: String, prefix: String, suffix: String) -> String {
   commands()
   |> list.map(fn(spec) {
-    let options =
-      spec.options
-      |> list.map(fn(option) { option_name(option.flag) })
-      |> string.join(" ")
-    indent <> spec.name <> ") " <> prefix <> "'" <> options <> "'" <> suffix
+    case spec.options {
+      [] -> indent <> spec.name <> ") COMPREPLY=();;"
+      options ->
+        indent
+        <> spec.name
+        <> ") "
+        <> prefix
+        <> words(list.map(options, fn(option) { option_name(option.flag) }))
+        <> suffix
+    }
   })
   |> string.join("\n")
   |> fn(value) { value <> "\n" }
@@ -529,15 +826,23 @@ fn zsh_completion_cases() -> String {
   |> list.map(fn(spec) {
     let options =
       spec.options
-      |> list.map(fn(option) { "'" <> option_name(option.flag) <> "'" })
+      |> list.map(zsh_option_spec)
       |> string.join(" ")
-    "      " <> spec.name <> ") _arguments " <> options <> ";;"
+    "      "
+    <> spec.name
+    <> ") _arguments"
+    <> zsh_positional_spec(spec.name)
+    <> case options {
+      "" -> ""
+      _ -> " " <> options
+    }
+    <> ";;"
   })
   |> string.join("\n")
   |> fn(value) { value <> "\n" }
 }
 
-fn option_name(flag: String) -> String {
+pub fn option_name(flag: String) -> String {
   case string.split(flag, on: " ") {
     [name, ..] -> name
     [] -> flag

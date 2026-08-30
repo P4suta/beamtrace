@@ -10,6 +10,10 @@
     read_record_cookie/0,
     auto_record_node/0,
     demo_command/0,
+    agent_beam_status/0,
+    absolute_path/1,
+    bundled_runtime/0,
+    web_assets_status/0,
     write_text/2,
     random_secret/0,
     capture_id/0,
@@ -24,6 +28,7 @@
     run_command/1,
     start_gated_command/3,
     start_gated_command/4,
+    start_gated_command/5,
     release_gated_command/1,
     release_gated_command_finish/1,
     await_gated_command/2,
@@ -78,19 +83,53 @@ auto_record_node() ->
         {error, Reason} -> {error, reason_binary({hostname, Reason})}
     end.
 
+%% The demo runs on the runtime that executes BeamTrace itself, so the bundled
+%% archive needs no host Erlang. The fixture beam is staged into the private
+%% record gate directory by start_gated_command/5.
 demo_command() ->
-    case {os:find_executable("erl"), code:which(beamtrace_demo_fixture)} of
+    case {runtime_erl_executable(), code:get_object_code(beamtrace_demo_fixture)} of
         {false, _} -> {error, <<"erl executable was not found">>};
-        {_, non_existing} -> {error, <<"bundled demo fixture is unavailable">>};
-        {Executable, BeamPath} ->
-            Ebin = filename:dirname(BeamPath),
+        {_, error} -> {error, <<"bundled demo fixture is unavailable">>};
+        {Executable, _Object} ->
+            %% Boot only kernel and stdlib: the bundled runtime carries no
+            %% sasl, and some hosts alias start.boot to start_sasl.boot.
             {ok, [
                 unicode:characters_to_binary(Executable),
-                <<"-pa">>,
-                unicode:characters_to_binary(Ebin),
+                <<"-boot">>, <<"start_clean">>,
                 <<"-noshell">>,
                 <<"-s">>, <<"beamtrace_demo_fixture">>, <<"run">>
             ]}
+    end.
+
+agent_beam_status() ->
+    case beamtrace_relay:agent_binary() of
+        {ok, _Beam, Filename, _Digest} ->
+            {ok, unicode:characters_to_binary(Filename)};
+        {error, agent_beam_unavailable} ->
+            {error, <<"agent_beam_unavailable">>};
+        {error, Reason} ->
+            {error, <<"agent_beam_invalid: ", (reason_binary(Reason))/binary>>}
+    end.
+
+bundled_runtime() -> os:getenv("BEAMTRACE_BUNDLED_RUNTIME") =:= "1".
+
+absolute_path(Path) when is_binary(Path) ->
+    unicode:characters_to_binary(filename:absname(unicode:characters_to_list(Path))).
+
+web_assets_status() ->
+    case valid_web_assets() of
+        true -> {ok, web_root()};
+        false -> {error, <<"web_assets_unavailable">>}
+    end.
+
+runtime_erl_executable() ->
+    case init:get_argument(bindir) of
+        {ok, [[Bindir] | _]} ->
+            case os:find_executable("erl", Bindir) of
+                false -> os:find_executable("erl");
+                Executable -> filename:absname(Executable)
+            end;
+        _ -> os:find_executable("erl")
     end.
 
 prompt_cookie() ->
@@ -209,16 +248,20 @@ doctor(Json, ProfileStatus, ConfiguredCookieFiles)
     CookieFiles = configured_cookie_files(ConfiguredCookieFiles),
     CookiePermissions = cookie_permission_status(CookieFiles),
     CookieFileCount = length(CookieFiles),
+    RuntimeRoot = unicode:characters_to_binary(code:root_dir()),
+    Bundled = bundled_runtime(),
     case Json of
         true -> doctor_json(
             Otp, WordSize, TraceSession, TraceSystem, SeqTrace, Zip, Crypto,
             AgentBeam, valid_web_assets(), Distribution, CookiePermissions,
-            CookieFileCount, ProfileStatus, Erl, Gleam, Mix, Rebar3
+            CookieFileCount, ProfileStatus, Erl, Gleam, Mix, Rebar3,
+            Bundled, RuntimeRoot
         );
         false -> doctor_human(
             Otp, WordSize, TraceSession, TraceSystem, SeqTrace, Zip, Crypto,
             AgentBeam, valid_web_assets(), Distribution, CookiePermissions,
-            CookieFileCount, ProfileStatus, Erl, Gleam, Mix, Rebar3
+            CookieFileCount, ProfileStatus, Erl, Gleam, Mix, Rebar3,
+            Bundled, RuntimeRoot
         )
     end;
 doctor(_Json, _ProfileStatus, _ConfiguredCookieFiles) ->
@@ -228,11 +271,13 @@ doctor_human(
     Otp, WordSize, TraceSession, TraceSystem, SeqTrace, Zip, Crypto,
     AgentBeam, WebAssets, Distribution, CookiePermissions, CookieFileCount,
     ProfileStatus,
-    Erl, Gleam, Mix, Rebar3
+    Erl, Gleam, Mix, Rebar3, Bundled, RuntimeRoot
 ) ->
     unicode:characters_to_binary(io_lib:format(
         "BeamTrace doctor~n"
         "  OTP release: ~s~n"
+        "  runtime root: ~ts~n"
+        "  bundled runtime: ~p~n"
         "  word size: ~B bytes~n"
         "  isolated trace session: ~p~n"
         "  trace:system/3: ~p (OTP 27 uses system_monitor fallback)~n"
@@ -246,7 +291,8 @@ doctor_human(
         "  cookie files checked: ~B~n"
         "  project profile: ~s~n"
         "  executables: erl=~p gleam=~p mix=~p rebar3=~p~n",
-        [Otp, WordSize, TraceSession, TraceSystem, SeqTrace, Zip, Crypto,
+        [Otp, RuntimeRoot, Bundled, WordSize, TraceSession, TraceSystem,
+         SeqTrace, Zip, Crypto,
          status_word(AgentBeam), status_word(WebAssets), Distribution,
          CookiePermissions, CookieFileCount, ProfileStatus,
          Erl, Gleam, Mix, Rebar3]
@@ -256,10 +302,11 @@ doctor_json(
     Otp, WordSize, TraceSession, TraceSystem, SeqTrace, Zip, Crypto,
     AgentBeam, WebAssets, Distribution, CookiePermissions, CookieFileCount,
     ProfileStatus,
-    Erl, Gleam, Mix, Rebar3
+    Erl, Gleam, Mix, Rebar3, Bundled, RuntimeRoot
 ) ->
     unicode:characters_to_binary(io_lib:format(
-        "{\"otp_release\":\"~s\",\"word_size\":~B,"
+        "{\"otp_release\":\"~s\",\"runtime_root\":~ts,\"bundled_runtime\":~s,"
+        "\"word_size\":~B,"
         "\"isolated_trace_session\":~s,\"trace_system\":~s,"
         "\"seq_trace\":~s,\"zip\":~s,\"crypto\":~s,"
         "\"agent_beam\":~s,\"web_assets\":~s,"
@@ -267,7 +314,8 @@ doctor_json(
         "\"cookie_files_checked\":~B,"
         "\"profile\":\"~s\",\"executables\":{"
         "\"erl\":~s,\"gleam\":~s,\"mix\":~s,\"rebar3\":~s}}~n",
-        [Otp, WordSize, json_bool(TraceSession), json_bool(TraceSystem),
+        [Otp, json_text(RuntimeRoot), json_bool(Bundled), WordSize,
+         json_bool(TraceSession), json_bool(TraceSystem),
          json_bool(SeqTrace), json_bool(Zip), json_bool(Crypto),
          json_bool(AgentBeam), json_bool(WebAssets), json_bool(Distribution),
          CookiePermissions, CookieFileCount, ProfileStatus,
@@ -275,7 +323,18 @@ doctor_json(
          json_bool(Mix), json_bool(Rebar3)]
     )).
 
-executable_available(Name) -> os:find_executable(Name) =/= false.
+executable_available(Name) -> toolchain_executable(Name) =/= false.
+
+toolchain_executable(Name) ->
+    case {os:getenv("BEAMTRACE_BUNDLED_RUNTIME"), filename:pathtype(Name)} of
+        {"1", relative} ->
+            case {os:getenv("BEAMTRACE_PARENT_PATH_SET"), os:getenv("BEAMTRACE_PARENT_PATH")} of
+                {"1", ParentPath} when is_list(ParentPath) ->
+                    os:find_executable(Name, ParentPath);
+                _ -> false
+            end;
+        _ -> os:find_executable(Name)
+    end.
 
 configured_cookie_files(Configured) ->
     case os:getenv("BEAMTRACE_COOKIE_FILE") of
@@ -309,6 +368,15 @@ cookie_path_status(Path) ->
 
 json_bool(true) -> "true";
 json_bool(false) -> "false".
+
+json_text(Value) ->
+    Escaped = lists:flatmap(fun
+        ($") -> "\\\"";
+        ($\\) -> "\\\\";
+        (Char) when Char < 32 -> io_lib:format("\\u~4.16.0b", [Char]);
+        (Char) -> [Char]
+    end, unicode:characters_to_list(Value)),
+    [$", Escaped, $"].
 
 status_word(true) -> "valid";
 status_word(false) -> "unavailable".
@@ -351,13 +419,18 @@ run_command([]) ->
 start_gated_command(Command, Node, Cookie) ->
     start_gated_command(Command, Node, Cookie, <<>>).
 
-start_gated_command([Program | Arguments], Node, Cookie, TriggerModule)
-        when is_binary(Node), is_binary(Cookie), is_binary(TriggerModule) ->
+start_gated_command(Command, Node, Cookie, TriggerModule) ->
+    start_gated_command(Command, Node, Cookie, TriggerModule, []).
+
+start_gated_command([Program | Arguments], Node, Cookie, TriggerModule, Staged)
+        when is_binary(Node), is_binary(Cookie), is_binary(TriggerModule),
+             is_list(Staged) ->
     case {command_launch(Program), record_flags(Node, Cookie),
-          record_guard_binary()} of
+          record_guard_binary(), staged_module_binaries(Staged)} of
         {{ok, {Executable, PrefixArguments}},
          {ok, {Flags, NodeName, NameDomain}},
-         {ok, GuardBinary}} ->
+         {ok, GuardBinary},
+         {ok, StagedBinaries}} ->
             case prepare_wrapper_target(
                 Program,
                 Arguments,
@@ -374,27 +447,47 @@ start_gated_command([Program | Arguments], Node, Cookie, TriggerModule)
                     NodeName,
                     NameDomain,
                     GuardBinary,
+                    StagedBinaries,
                     TriggerModule
                 );
                 {error, Reason} -> {error, Reason}
             end;
-        {{error, Reason}, _, _} -> {error, Reason};
-        {_, {error, Reason}, _} -> {error, Reason};
-        {_, _, {error, Reason}} -> {error, Reason}
+        {{error, Reason}, _, _, _} -> {error, Reason};
+        {_, {error, Reason}, _, _} -> {error, Reason};
+        {_, _, {error, Reason}, _} -> {error, Reason};
+        {_, _, _, {error, Reason}} -> {error, Reason}
     end;
-start_gated_command([], _Node, _Cookie, _TriggerModule) ->
+start_gated_command([], _Node, _Cookie, _TriggerModule, _Staged) ->
     {error, <<"record command is empty">>};
-start_gated_command(_Command, _Node, _Cookie, _TriggerModule) ->
+start_gated_command(_Command, _Node, _Cookie, _TriggerModule, _Staged) ->
     {error, <<"invalid gated command">>}.
+
+%% Only BeamTrace-owned modules may be staged next to the guard beam.
+staged_module_binaries(Names) ->
+    staged_module_binaries(Names, []).
+
+staged_module_binaries([], Acc) -> {ok, lists:reverse(Acc)};
+staged_module_binaries([Name | Rest], Acc) when is_binary(Name) ->
+    case binary:match(Name, <<"beamtrace_">>) of
+        {0, _} ->
+            case code:get_object_code(binary_to_atom(Name, utf8)) of
+                {Module, Binary, _Path} when is_binary(Binary) ->
+                    staged_module_binaries(Rest, [{Module, Binary} | Acc]);
+                error -> {error, <<"staged module is unavailable: ", Name/binary>>}
+            end;
+        _ -> {error, <<"staged module is not owned by BeamTrace: ", Name/binary>>}
+    end;
+staged_module_binaries(_Names, _Acc) ->
+    {error, <<"invalid staged module list">>}.
 
 start_prepared_gated_command(
         Program, PrefixArguments, Arguments, Executable, Flags, NodeName,
-        NameDomain, GuardBinary, TriggerModule
+        NameDomain, GuardBinary, StagedBinaries, TriggerModule
     ) ->
     case create_gate_directory() of
         {error, Reason} -> {error, Reason};
         {ok, {Directory, Gate, FinishGate}} ->
-            case write_guard_beam(Directory, GuardBinary) of
+            case write_child_beams(Directory, GuardBinary, StagedBinaries) of
                 {error, Reason} ->
                     cleanup_gate_directory(Directory, Gate, FinishGate),
                     {error, reason_binary({guard_extract_failed, Reason})};
@@ -434,11 +527,17 @@ start_prepared_gated_command(
                                     {"BEAMTRACE_RECORD_NODE_NAME", NodeName},
                                     {"BEAMTRACE_RECORD_NAME_DOMAIN", NameDomain},
                                     {"BEAMTRACE_RECORD_GUARD_BEAM", GuardPath},
+                                    {"BEAMTRACE_RECORD_STAGED_DIR",
+                                     staged_directory_marker(
+                                         Directory, StagedBinaries
+                                     )},
                                     {"BEAMTRACE_RECORD_DIRECT_VM",
                                      direct_vm_marker(Executable)},
                                     {"BEAMTRACE_RECORD_WRAPPER",
                                      atom_to_list(wrapper_tool(Program))}
-                                ])}
+                                ]) ++ child_runtime_environment(
+                                    Directory, StagedBinaries
+                                )}
                             ]
                         ),
                         OsPid = port_os_pid(Port),
@@ -759,11 +858,14 @@ await_gated_command(
              is_binary(FinishGate),
              is_pid(Guardian),
              is_integer(TimeoutMs), TimeoutMs > 0, TimeoutMs =< 86400000 ->
-    Result = collect_port_until(
-        Port,
-        <<>>,
-        erlang:monotonic_time(millisecond) + TimeoutMs,
-        OsPid
+    Result = append_crash_dump_slogan(
+        collect_port_until(
+            Port,
+            <<>>,
+            erlang:monotonic_time(millisecond) + TimeoutMs,
+            OsPid
+        ),
+        binary_to_list(Directory)
     ),
     stop_cleanup_guardian(Guardian),
     cleanup_gate_directory(
@@ -801,9 +903,12 @@ gated_command_running(
     end;
 gated_command_running(_Handle) -> false.
 
+%% The application command must come from the user's toolchain. Inside the
+%% release archive erlexec prepends the bundled ERTS to PATH, so resolve
+%% against the PATH the launcher saw instead.
 command_executable(Program) when is_binary(Program) ->
-    case os:find_executable(binary_to_list(Program)) of
-        false -> {error, reason_binary({executable_not_found, Program})};
+    case toolchain_executable(binary_to_list(Program)) of
+        false -> {error, <<"executable_not_found: ", Program/binary>>};
         %% Keep the resolved absolute command path, including its final shim or
         %% symlink name. mise/asdf dispatch on argv[0]; dereferencing the shim
         %% to the tool manager binary changes command semantics.
@@ -882,14 +987,58 @@ rebar3_escript(Script) ->
     end.
 
 direct_vm_marker(Executable) ->
-    case os:find_executable("erl") of
-        false -> "0";
-        ErlExecutable ->
-            case same_executable(Executable, filename:absname(ErlExecutable)) of
-                true -> "1";
-                false -> "0"
-            end
+    Candidates = [
+        Candidate
+        || Candidate <- [os:find_executable("erl"), runtime_erl_executable()],
+           Candidate =/= false
+    ],
+    case lists:any(fun(Candidate) ->
+        same_executable(Executable, filename:absname(Candidate))
+    end, Candidates) of
+        true -> "1";
+        false -> "0"
     end.
+
+%% Staged modules are added to the child's code path by the guard from this
+%% environment entry; an environment value survives paths with spaces where
+%% an ERL_AFLAGS `-pa` entry would be split.
+staged_directory_marker(_Directory, []) -> false;
+staged_directory_marker(Directory, _Staged) -> Directory.
+
+%% Crash dumps belong to the private gate directory, never to the user's
+%% working directory; their slogan is reported through the output tail.
+%% Staged launches also run on BeamTrace's own runtime root.
+child_runtime_environment(Directory, StagedBinaries) ->
+    CrashDump = case os:getenv("ERL_CRASH_DUMP") of
+        false -> [{"ERL_CRASH_DUMP", crash_dump_path(Directory)}];
+        _Explicit -> []
+    end,
+    RootDir = case StagedBinaries of
+        [] -> [];
+        _ -> [{"ERL_ROOTDIR", code:root_dir()}]
+    end,
+    CrashDump ++ RootDir.
+
+crash_dump_path(Directory) -> filename:join(Directory, "erl_crash.dump").
+
+crash_dump_slogan(Directory) ->
+    case file:read_file(crash_dump_path(Directory)) of
+        {ok, Dump} ->
+            case re:run(Dump, <<"^Slogan: (.*)$">>, [multiline, {capture, [1], binary}]) of
+                {match, [Slogan]} -> {ok, Slogan};
+                nomatch -> error
+            end;
+        {error, _} -> error
+    end.
+
+append_crash_dump_slogan({ok, {Status, Output}}, Directory) when Status =/= 0 ->
+    case crash_dump_slogan(Directory) of
+        {ok, Slogan} -> {ok, {Status, append_output_tail(
+            Output, <<"\ncrash dump slogan: ", Slogan/binary, "\n">>
+        )}};
+        error -> {ok, {Status, Output}}
+    end;
+append_crash_dump_slogan(Result, _Directory) -> Result.
 
 same_executable(Left, Right) when Left =:= Right -> true;
 same_executable(Left, Right) ->
@@ -1038,10 +1187,18 @@ first_temp_root([Root | Rest]) ->
     end;
 first_temp_root([]) -> {error, <<"temporary_directory_unavailable">>}.
 
-write_guard_beam(Directory, Binary) ->
+write_child_beams(Directory, GuardBinary, StagedBinaries) ->
     Path = filename:join(Directory, "guard.beam"),
+    case create_private_file(Path, GuardBinary) of
+        ok -> write_staged_beams(Directory, StagedBinaries, Path);
+        {error, Reason} -> {error, Reason}
+    end.
+
+write_staged_beams(_Directory, [], GuardPath) -> {ok, GuardPath};
+write_staged_beams(Directory, [{Module, Binary} | Rest], GuardPath) ->
+    Path = filename:join(Directory, atom_to_list(Module) ++ ".beam"),
     case create_private_file(Path, Binary) of
-        ok -> {ok, Path};
+        ok -> write_staged_beams(Directory, Rest, GuardPath);
         {error, Reason} -> {error, Reason}
     end.
 
@@ -1266,6 +1423,10 @@ cleanup_gate_directory(Directory, Gate, FinishGate) ->
     _ = file:delete(Gate),
     _ = file:delete(FinishGate),
     _ = file:delete(filename:join(Directory, "guard.beam")),
+    _ = file:delete(crash_dump_path(Directory)),
+    _ = [file:delete(Beam) || Beam <- filelib:wildcard(
+        filename:join(Directory, "beamtrace_*.beam")
+    )],
     _ = file:del_dir(Directory),
     ok.
 

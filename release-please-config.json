@@ -26,6 +26,7 @@
           "type": "generic",
           "path": "packages/beamtrace_runtime/src/beamtrace_runtime/internal/version.gleam"
         },
+        { "type": "generic", "path": "README.md" },
         { "type": "toml", "path": "packages/beamtrace_core/gleam.toml", "jsonpath": "$.version" },
         { "type": "toml", "path": "packages/beamtrace_runtime/gleam.toml", "jsonpath": "$.version" },
         { "type": "toml", "path": "packages/beamtrace_tui/gleam.toml", "jsonpath": "$.version" },

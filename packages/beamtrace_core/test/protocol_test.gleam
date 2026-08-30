@@ -39,3 +39,25 @@ pub fn unknown_shape_remains_ordinary_instead_of_inventing_semantics_test() {
   protocol.classify(types.Tuple([types.Tag("domain_event"), types.Hidden]))
   |> should.equal(protocol.Ordinary)
 }
+
+pub fn labels_are_stable_display_strings_test() {
+  protocol.label(types.Constructor("$gen_call", [])) |> should.equal("call")
+  protocol.label(types.Constructor("$gen_cast", [])) |> should.equal("cast")
+  protocol.label(types.Constructor("$gen_reply", [])) |> should.equal("reply")
+  protocol.label(
+    types.Tuple([
+      types.Atom("DOWN"),
+      types.Hidden,
+      types.Atom("process"),
+      types.Hidden,
+      types.Atom("normal"),
+    ]),
+  )
+  |> should.equal("DOWN")
+  protocol.label(types.Tuple([types.Atom("EXIT"), types.Hidden, types.Hidden]))
+  |> should.equal("EXIT")
+  protocol.label(types.Atom("timeout")) |> should.equal("timeout")
+  protocol.label(types.Constructor("spawn_request", []))
+  |> should.equal("spawn")
+  protocol.label(types.Tag("domain_event")) |> should.equal("message")
+}

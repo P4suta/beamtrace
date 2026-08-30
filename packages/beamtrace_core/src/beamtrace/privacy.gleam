@@ -12,6 +12,9 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 
+/// Salted digest used only for equality checks within one capture. The
+/// runtime supplies it so the core stays independent of any hash
+/// implementation.
 pub type Fingerprint =
   fn(String) -> String
 
@@ -23,7 +26,7 @@ pub fn shape(
   term: types.RawTerm,
   privacy: types.Privacy,
   fingerprint: Fingerprint,
-) {
+) -> types.TermView {
   shape_at(term, privacy, fingerprint, 0)
 }
 

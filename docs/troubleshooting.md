@@ -1,32 +1,53 @@
 <!-- SPDX-License-Identifier: Apache-2.0 OR MIT -->
 # Troubleshooting
 
+Every failure prints `beamtrace[E_CODE]: message` and a `Next:` line; the same
+code and hint appear in `--json` output. `beamtrace help errors` lists them.
+
 ## The browser did not open
 
 The server remains running. Open the printed one-time bootstrap URL, or rerun
 with `--no-open`. Confirm the bind line appears before using the URL.
 
-## `system_tracer_occupied`
+## `E_AGENT_BEAM_UNAVAILABLE`
+
+The injected agent BEAM was not found, so nothing can be armed. From a release
+archive, re-extract it and verify `checksums.sha256`. From source, run the CLI
+through `mise run beamtrace -- <command>` (or `scripts/beamtrace.ps1`), which
+builds the agent and sets `BEAMTRACE_AGENT_BEAM`.
+
+## `E_COMMAND_NOT_FOUND`
+
+`record` runs your application on the Erlang toolchain from `PATH`; the bundled
+runtime only runs BeamTrace and `beamtrace demo`. Install Erlang/OTP 27–29 (and
+Gleam, Mix, or Rebar3 as needed) or add them to `PATH`.
+
+## `E_SYSTEM_TRACER_OCCUPIED`
 
 Another tracer owns the VM-global facility. Stop that tracer and retry, or use
-Live for bounded inferred sampling. BeamTrace never replaces the owner.
+`beamtrace attach <node> --web` for bounded inferred sampling in the Live tab.
+BeamTrace never replaces the owner.
 
-## The target cannot connect
+## `E_TARGET_UNREACHABLE` or `E_TARGET_UNAVAILABLE`
 
 Run `beamtrace doctor`, check longname/shortname agreement, DNS/hosts entries,
 EPMD reachability, distribution TLS settings, and that the private cookie file
-contains the same value. Cookie values are not accepted as CLI arguments.
+contains the same value. Cookie values are not accepted as CLI arguments. For
+`record`, the child output tail is printed under the error.
 
-## The selected MFA never fires
+## `E_CAPTURE_ARM_TIMEOUT` or `E_TRIGGER_TIMEOUT`
 
-Confirm the canonical `Module:function/arity` with MFA search, arm immediately
-before one operation, and increase only the relevant bounded window. AQL,
-preset, and root count are under Advanced in the Web capture screen.
+Confirm the canonical `Module:function/arity` (the Web capture screen suggests
+MFAs as you type), arm immediately before one operation, and raise
+`--capture-window SECONDS` (default 30, at most 300) when the operation takes
+longer. AQL, preset, and root count are under Advanced in the Web capture
+screen.
 
-## The archive already exists
+## `E_ARCHIVE_NOT_FOUND` or `E_OUTPUT_EXISTS`
 
 Generated output names are exclusive and add a numeric suffix. For an explicit
 path, choose another path or pass `--force` only when replacement is intended.
+Archive paths are reported as `absolute_path` in `--json` output.
 
 ## Integrity issues or boundaries appear
 

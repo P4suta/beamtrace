@@ -87,19 +87,29 @@ preparation behind one opaque `Trace` value:
 
 ```gleam
 import beamtrace
+import gleam/io
 
-let assert Ok(baseline) = beamtrace.from_events(baseline_events)
-let assert Ok(first_run) = beamtrace.from_events(first_run_events)
-let report = beamtrace.compare(baseline, first_run)
+case beamtrace.decode_events(baseline_lines), beamtrace.decode_events(run_lines) {
+  Ok(baseline), Ok(run) -> {
+    let report = beamtrace.compare(baseline, run)
+    let findings = beamtrace.findings(run)
+    io.println(int.to_string(report.changed) <> " changed actors, " <> int.to_string(list.length(findings)) <> " findings")
+  }
+  Error(failure), _ | _, Error(failure) -> io.println(beamtrace.error_message(failure))
+}
 ```
 
 `beamtrace.decode_events` reports a one-based event number with its codec error,
-while duplicate identifiers and cycles are typed graph errors. The façade works
-unchanged on Erlang and JavaScript.
+while duplicate identifiers and cycles are typed graph errors. Every error type
+has a renderer: `beamtrace.error_message`, `codec.error_message`,
+`dag.error_message`, and `mfa.error_message`. The façade works unchanged on
+Erlang and JavaScript.
 
-`diff.compare(left, right)` remains the convenient compatibility API. Strict
-callers can use `diff.compare_checked`. `diff.prepare` now returns
-`Result(PreparedTrace, DagError)`; compare a reusable baseline like this:
+`codec.decode_event` requires BeamTrace's own canonical bytes; any re-serialised
+JSON fails with `NonCanonicalJson`. `diff.compare` is deprecated because it
+silently falls back to an unchecked comparison; use `diff.compare_checked` or
+the façade. `diff.prepare` returns `Result(PreparedTrace, DagError)`; compare a
+reusable baseline like this:
 
 ```gleam
 import beamtrace/diff
@@ -122,9 +132,11 @@ without allocating JSON and parsing it back into the same value.
 - `beamtrace/aql` — parsing, evaluation, and safe agent-side planning for BeamTrace Query Language
 - `beamtrace/dag` and `beamtrace/merge` — causal graph validation and distributed partial-order merging
 - `beamtrace/identity` — physical process and logical actor identity evidence
-- `beamtrace/anomaly` and `beamtrace/diagnostics` — bounded Live analysis contracts
+- `beamtrace/anomaly` and `beamtrace/diagnostics` — bounded live-sampling alerts and offline diagnostics
 - `beamtrace/diff` and `beamtrace/stats` — PID-independent alignment, reusable prepared traces, and multi-run statistics
-- `beamtrace/codec` and `beamtrace/protocol` — versioned trace and wire contracts
+- `beamtrace/codec` — canonical schema-v2 encoding, decoding, typed validation, and structured JSON builders for embedding events in your own documents
+- `beamtrace/privacy` — metadata-safe term shaping and deterministic rendering
+- `beamtrace/protocol` — semantic labels (`$gen_call`, `$gen_cast`, `DOWN`, `EXIT`, …) for redacted term views
 
 Every causal relationship is represented as exact evidence or as an inference carrying a method, reason, evidence events, observed values, and algorithm settings. External boundaries, integrity issues, ambiguity, and unavailable time remain explicit; the package does not emit confidence probabilities.
 

@@ -16,6 +16,11 @@
 -define(EPMD_START_TIMEOUT_MS, 5000).
 
 prepare() ->
+    case os:getenv("BEAMTRACE_RECORD_STAGED_DIR") of
+        false -> ok;
+        [] -> ok;
+        Staged -> true = code:add_patha(Staged)
+    end,
     case single_vm_wrapper() of
         true -> ok;
         false -> activate()

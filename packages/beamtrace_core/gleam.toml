@@ -5,7 +5,10 @@ licences = ["Apache-2.0", "MIT"]
 description = "Target-independent causal trace contracts and analysis for BeamTrace"
 links = [
   { title = "Generated documentation", href = "https://hexdocs.pm/beamtrace_core/" },
+  { title = "Repository", href = "https://github.com/P4suta/beamtrace" },
+  { title = "Changelog", href = "https://github.com/P4suta/beamtrace/blob/main/CHANGELOG.md" },
 ]
+internal_modules = ["beamtrace/internal/*"]
 
 [repository]
 type = "github"
