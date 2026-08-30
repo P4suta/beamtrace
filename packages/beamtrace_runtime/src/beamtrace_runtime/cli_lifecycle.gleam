@@ -8,6 +8,7 @@ import beamtrace_runtime/api
 import beamtrace_runtime/capture
 import beamtrace_runtime/capture_session
 import beamtrace_runtime/cli
+import beamtrace_runtime/cli_errors
 import beamtrace_runtime/cli_spec
 import beamtrace_runtime/command
 import beamtrace_runtime/compare_workspace
@@ -52,23 +53,18 @@ pub fn main() {
   let code = case parsed {
     Ok(command) -> run(command)
     Error(cli.ParseError(message, exit_code)) -> {
+      let error = case exit_code {
+        4 -> cli_errors.safety_refusal(message)
+        _ -> cli_errors.invalid_arguments(message)
+      }
       case cli.json_requested(arguments) {
-        True ->
-          emit_json_error(
-            cli.invoked_command(arguments),
-            exit_code,
-            "invalid_arguments",
-            message,
-            "Run 'beamtrace help <command>' for accepted options and examples.",
-          )
+        True -> emit_json_failure(cli.invoked_command(arguments), error)
         False -> {
-          io.println_error("beamtrace[E_INVALID_ARGUMENTS]: " <> message)
-          io.println_error(
-            "Next: Run 'beamtrace help <command>' for accepted options and examples.",
-          )
+          let _ = fail_with(error)
+          Nil
         }
       }
-      exit_code
+      cli_errors.exit_code(error)
     }
   }
   halt(code)
@@ -293,6 +289,7 @@ fn run_record_ui_command(
           max_roots,
           preset,
           child,
+          [],
           force,
         )
       let archive_saved = record_wrote_archive(recorded)
@@ -364,6 +361,7 @@ fn run_json_with_force(command_: cli.Command, force: Bool) -> Int {
         max_roots,
         preset,
         child,
+        [],
         force,
         False,
       )
@@ -455,6 +453,7 @@ fn run_capture_json(
     False -> out
   }
   use Nil <- json_output_or_exit("capture", output, force)
+  use Nil <- json_error_or_exit("capture", preflight_agent())
   case read_cookie(cookie_file) {
     Error(_) -> {
       emit_json_error(
@@ -483,15 +482,9 @@ fn run_capture_json(
         )
       case capture.execute(spec, cookie) {
         Error(error) -> {
-          let exit_code = capture.failure_exit_code(error)
-          emit_json_error(
-            "capture",
-            exit_code,
-            "capture_failed",
-            capture.failure_guidance(error),
-            "Run 'beamtrace doctor' and verify the node name, cookie, and selected MFA.",
-          )
-          exit_code
+          let failure = cli_errors.from_capture_reason(error)
+          emit_json_failure("capture", failure)
+          cli_errors.exit_code(failure)
         }
         Ok(result) -> {
           let manifest =
@@ -521,12 +514,9 @@ fn run_capture_json(
           }
           case saved {
             Error(error) -> {
-              emit_json_error(
+              emit_json_failure(
                 "capture",
-                2,
-                storage_error_kind(error),
-                storage_error_message(error),
-                "Choose another output path or pass --force to replace an explicit path.",
+                cli_errors.from_storage(error, output),
               )
               2
             }
@@ -559,13 +549,7 @@ fn run_export_json(
 ) -> Int {
   case storage.load(path) {
     Error(error) -> {
-      emit_json_error(
-        "export",
-        2,
-        storage_error_kind(error),
-        storage_error_message(error),
-        "Validate the source archive before exporting it.",
-      )
+      emit_json_failure("export", cli_errors.from_storage(error, path))
       2
     }
     Ok(archive) -> {
@@ -639,13 +623,7 @@ fn run_migrate_json(path: String, output: String) -> Int {
       0
     }
     Error(error) -> {
-      emit_json_error(
-        "migrate",
-        2,
-        storage_error_kind(error),
-        storage_error_message(error),
-        "Use a distinct output path and validate the source archive first.",
-      )
+      emit_json_failure("migrate", cli_errors.from_storage(error, path))
       2
     }
   }
@@ -659,14 +637,10 @@ type MachineRecord {
   )
 }
 
-type MachineRecordError {
-  MachineRecordError(
-    code: String,
-    message: String,
-    hint: String,
-    exit_code: Int,
-  )
-}
+type MachineRecordError =
+  cli_errors.CliError
+
+const demo_staged_modules = ["beamtrace_demo_fixture"]
 
 fn run_demo_json(out: String) -> Int {
   case record_process.demo_command() {
@@ -696,6 +670,7 @@ fn run_demo_json(out: String) -> Int {
         1,
         types.Generic,
         child,
+        demo_staged_modules,
         False,
         temporary,
       )
@@ -713,6 +688,7 @@ fn run_record_json(
   max_roots: Int,
   preset: types.Preset,
   child: List(String),
+  staged_modules: List(String),
   force: Bool,
   delete_after: Bool,
 ) -> Int {
@@ -730,18 +706,13 @@ fn run_record_json(
       max_roots,
       preset,
       child,
+      staged_modules,
       force,
     )
   let exit_code = case result {
     Error(error) -> {
-      emit_json_error(
-        command_name,
-        error.exit_code,
-        error.code,
-        error.message,
-        error.hint,
-      )
-      error.exit_code
+      emit_json_failure(command_name, error)
+      cli_errors.exit_code(error)
     }
     Ok(recorded) -> {
       let outcome_code = capture.exit_code(recorded.outcome)
@@ -781,24 +752,22 @@ fn execute_record_machine(
   max_roots: Int,
   preset: types.Preset,
   child: List(String),
+  staged_modules: List(String),
   force: Bool,
 ) -> Result(MachineRecord, MachineRecordError) {
   use Nil <- machine_result(
     output_available(output, force),
-    MachineRecordError(
-      "output_exists",
-      "The requested output path already exists.",
-      "Choose another path or pass --force with an explicit --out path.",
-      2,
-    ),
+    cli_errors.output_exists(output),
   )
+  use Nil <- machine_result_error(preflight_agent())
   use cookie <- machine_result(
     read_record_cookie(cookie_file),
-    MachineRecordError(
+    cli_errors.CliError(
       "cookie_unavailable",
+      cli_errors.CommandFailed,
       "The record distribution cookie could not be prepared.",
       "Pass a private --cookie-file or allow BeamTrace to create an ephemeral cookie.",
-      2,
+      None,
     ),
   )
   use node <- machine_result(
@@ -806,43 +775,39 @@ fn execute_record_machine(
       Some(node) -> Ok(node)
       None -> record_process.auto_node()
     },
-    MachineRecordError(
+    cli_errors.CliError(
       "target_node_unavailable",
+      cli_errors.CommandFailed,
       "A target node name could not be selected.",
       "Pass --node explicitly or check the local hostname configuration.",
-      2,
+      None,
     ),
   )
   let nodes = string.split(node, on: ",") |> list.map(string.trim)
   case nodes {
     [] ->
-      Error(MachineRecordError(
+      Error(cli_errors.CliError(
         "target_node_unavailable",
+        cli_errors.CommandFailed,
         "Record requires at least one target node.",
         "Pass a non-empty --node value.",
-        2,
+        None,
       ))
     [root, ..] -> {
       let cli.Mfa(trigger_module, _, _) = trigger
-      case record_process.start(child, root, cookie, trigger_module) {
-        Error(_) ->
-          Error(MachineRecordError(
-            "child_start_failed",
-            "The application command could not be started.",
-            "Run the command directly, then retry record after it starts cleanly.",
-            2,
-          ))
+      case
+        record_process.start_staged(
+          child,
+          root,
+          cookie,
+          trigger_module,
+          staged_modules,
+        )
+      {
+        Error(reason) -> Error(child_start_error(reason))
         Ok(handle) ->
           case capture.wait_until_available(root, cookie, 10_000) {
-            Error(_) -> {
-              record_process.stop(handle)
-              Error(MachineRecordError(
-                "target_unavailable",
-                "The application did not expose the expected BEAM node in time.",
-                "Check the child command, distribution flags, node name, and cookie.",
-                2,
-              ))
-            }
+            Error(reason) -> Error(record_start_error(handle, reason))
             Ok(Nil) -> {
               let store = capture_session.new(nodes, cookie)
               let result =
@@ -893,35 +858,33 @@ fn execute_record_machine_session(
   case capture_session.arm(store, spec), nodes {
     Error(_), _ | _, [] -> {
       record_process.stop(handle)
-      Error(MachineRecordError(
+      Error(cli_errors.CliError(
         "capture_arm_failed",
+        cli_errors.CommandFailed,
         "The capture could not be armed.",
         "Verify that no capture is active and that the MFA exists on the target.",
-        2,
+        None,
       ))
     }
     Ok(Nil), [root, ..] ->
       case capture.wait_until_armed(root, cookie, 5000) {
         Error(error) -> {
+          let failure = arm_failure(store, error)
           let _ = capture_session.cancel(store)
           record_process.stop(handle)
-          Error(MachineRecordError(
-            "capture_arm_failed",
-            capture.failure_guidance(error),
-            "Run 'beamtrace doctor' and verify seq_trace ownership on the target VM.",
-            capture.failure_exit_code(error),
-          ))
+          Error(failure)
         }
         Ok(Nil) ->
           case record_process.release(handle) {
             Error(_) -> {
               let _ = capture_session.cancel(store)
               record_process.stop(handle)
-              Error(MachineRecordError(
+              Error(cli_errors.CliError(
                 "child_release_failed",
+                cli_errors.CommandFailed,
                 "The application command could not be released after arming.",
                 "Retry after confirming the child command can start normally.",
-                2,
+                None,
               ))
             }
             Ok(Nil) ->
@@ -943,42 +906,39 @@ fn execute_record_machine_child(
       let _ = capture_session.cancel(store)
       let _ = record_process.release_finish(handle)
       record_process.stop(handle)
-      Error(MachineRecordError(
+      Error(cli_errors.CliError(
         "capture_incomplete",
+        cli_errors.CommandFailed,
         "The armed operation did not produce a complete capture.",
         "Confirm the selected MFA is invoked once before the capture window ends.",
-        2,
+        None,
       ))
     }
     Ok(result) ->
       case record_process.release_finish(handle) {
         Error(_) -> {
           record_process.stop(handle)
-          Error(MachineRecordError(
+          Error(cli_errors.CliError(
             "child_shutdown_failed",
+            cli_errors.CommandFailed,
             "The application command could not leave the capture shutdown gate.",
             "Run the command directly and check its shutdown behavior.",
-            2,
+            None,
           ))
         }
         Ok(Nil) ->
           case record_process.await(handle, 86_400_000) {
             Error(_) ->
-              Error(MachineRecordError(
+              Error(cli_errors.CliError(
                 "child_wait_failed",
+                cli_errors.CommandFailed,
                 "The application command did not finish cleanly.",
                 "Inspect the application command separately, then retry record.",
-                2,
+                None,
               ))
             Ok(#(child_status, _)) ->
               case save_result(output, nodes, result, types.Metadata, force) {
-                Error(message) ->
-                  Error(MachineRecordError(
-                    "archive_write_failed",
-                    message,
-                    "Choose another path or pass --force to replace an explicit path.",
-                    2,
-                  ))
+                Error(error) -> Error(error)
                 Ok(Nil) ->
                   Ok(MachineRecord(
                     list.length(result.events),
@@ -1274,6 +1234,30 @@ fn emit_json_success(command: String, artifact: json.Json) -> Nil {
   emit_json_result(command, True, 0, Some(artifact), None)
 }
 
+fn emit_json_failure(command: String, error: cli_errors.CliError) -> Nil {
+  emit_json_result(
+    command,
+    False,
+    cli_errors.exit_code(error),
+    None,
+    Some(
+      json.object(
+        list.append(
+          [
+            #("code", json.string(error.code)),
+            #("message", json.string(error.message)),
+            #("hint", json.string(error.hint)),
+          ],
+          case error.detail {
+            None -> []
+            Some(detail) -> [#("detail", json.string(detail))]
+          },
+        ),
+      ),
+    ),
+  )
+}
+
 fn emit_json_error(
   command: String,
   exit_code: Int,
@@ -1353,6 +1337,7 @@ fn run_demo(mode: cli.DemoMode, out: String, port: Int) -> Int {
       1,
       types.Generic,
       command,
+      demo_staged_modules,
       False,
     )
   let result = case recorded, mode {
@@ -1404,6 +1389,7 @@ fn run_relay_capture(
   identity: relay_channel.Identity,
   target: cli.RelayTarget,
 ) -> Int {
+  use Nil <- error_or_exit(preflight_agent())
   use cookie <- result_or_exit(read_cookie(target.cookie_file))
   use grant <- raw_grant_or_exit(load_raw_grant(receipt, target.raw_grant_file))
   let cli.Mfa(module_, function_, arity) = target.trigger
@@ -1568,6 +1554,7 @@ fn run_capture(
     False -> out
   }
   use Nil <- output_or_exit(output, force)
+  use Nil <- error_or_exit(preflight_agent())
   use cookie <- result_or_exit(read_cookie(cookie_file))
   let cli.Mfa(module_, function_, arity) = trigger
   let core_trigger = types.Mfa(module_, function_, arity)
@@ -1613,8 +1600,7 @@ fn run_capture(
       )
       capture.exit_code(result.outcome)
     }
-    Error(error) ->
-      fail("could not save capture: " <> storage_error_message(error), 2)
+    Error(error) -> fail_with(cli_errors.from_storage(error, output))
   }
 }
 
@@ -1624,6 +1610,7 @@ fn run_attach(
   cookie_file: Option(String),
   port: Int,
 ) -> Int {
+  use Nil <- error_or_exit(preflight_agent())
   use cookie <- result_or_exit(read_cookie(cookie_file))
   case capture.probe(node, cookie) {
     Error(error) -> fail("attach failed: " <> error, 2)
@@ -1666,8 +1653,7 @@ fn run_open(path: String, mode: cli.UiMode, port: Int) -> Int {
   case mode {
     cli.Web | cli.WebNoOpen ->
       case storage.window(path, start: 0, limit: 1) {
-        Error(error) ->
-          fail("could not open trace: " <> storage_error_message(error), 2)
+        Error(error) -> fail_with(cli_errors.from_storage(error, path))
         Ok(window) -> {
           io.println(path <> ": " <> int.to_string(window.total) <> " events")
           run_server_with_browser(
@@ -1680,8 +1666,7 @@ fn run_open(path: String, mode: cli.UiMode, port: Int) -> Int {
       }
     cli.TuiMode ->
       case storage.load(path) {
-        Error(error) ->
-          fail("could not open trace: " <> storage_error_message(error), 2)
+        Error(error) -> fail_with(cli_errors.from_storage(error, path))
         Ok(archive) -> {
           beamtrace_tui.run_archive(archive.events, archive.manifest.nodes)
           0
@@ -1699,15 +1684,14 @@ fn run_compare(left: String, right: String) -> Int {
       io.println(command.compare_summary(report, statistics))
       command.compare_exit(report)
     }
-    Error(error), _ | _, Error(error) ->
-      fail("could not compare trace: " <> storage_error_message(error), 2)
+    Error(error), _ -> fail_with(cli_errors.from_storage(error, left))
+    _, Error(error) -> fail_with(cli_errors.from_storage(error, right))
   }
 }
 
 fn run_export(path: String, format: cli.ExportFormat, anchor_now: Bool) -> Int {
   case storage.load(path) {
-    Error(error) ->
-      fail("could not load export source: " <> storage_error_message(error), 2)
+    Error(error) -> fail_with(cli_errors.from_storage(error, path))
     Ok(archive) -> {
       let output = command.export_path(path, format)
       let content = case format {
@@ -1761,22 +1745,15 @@ fn run_validate(path: String, as_json: Bool) -> Int {
       0
     }
     Error(error) -> {
+      let failure = cli_errors.from_storage(error, path)
       case as_json {
-        True ->
-          emit_json_error(
-            "validate",
-            2,
-            storage_error_kind(error),
-            storage_error_message(error),
-            "Check the archive path and run capture again if integrity cannot be restored.",
-          )
-        False ->
-          report_human_error(
-            "invalid archive: " <> storage_error_message(error),
-            2,
-          )
+        True -> emit_json_failure("validate", failure)
+        False -> {
+          let _ = fail_with(failure)
+          Nil
+        }
       }
-      2
+      cli_errors.exit_code(failure)
     }
   }
 }
@@ -1787,24 +1764,7 @@ fn run_migrate(path: String, output: String) -> Int {
       io.println("Migrated " <> path <> " to schema v2 at " <> output)
       0
     }
-    Error(error) ->
-      fail("migration failed: " <> storage_error_message(error), 2)
-  }
-}
-
-fn storage_error_kind(error: storage.StorageError) -> String {
-  case error {
-    storage.InvalidContainer -> "invalid_container"
-    storage.UnsafeEntry(_) -> "unsafe_entry"
-    storage.DuplicateEntry(_) -> "duplicate_entry"
-    storage.ZipBomb -> "zip_bomb"
-    storage.ChecksumMismatch -> "checksum_mismatch"
-    storage.InvalidWindow -> "invalid_window"
-    storage.InvalidSearch -> "invalid_search"
-    storage.InvalidGraph(_) -> "invalid_graph"
-    storage.MigrationRequiresDistinctOutput -> "migration_output_conflict"
-    storage.CodecError(_) -> "schema_error"
-    storage.IoError(_) -> "io_error"
+    Error(error) -> fail_with(cli_errors.from_storage(error, output))
   }
 }
 
@@ -1817,6 +1777,7 @@ fn run_record(
   max_roots: Int,
   preset: types.Preset,
   child: List(String),
+  staged_modules: List(String),
   force: Bool,
 ) -> Int {
   let output = case out == "" {
@@ -1824,6 +1785,7 @@ fn run_record(
     False -> out
   }
   use Nil <- output_or_exit(output, force)
+  use Nil <- error_or_exit(preflight_agent())
   io.println("Connecting to the record target…")
   use cookie <- result_or_exit(read_record_cookie(cookie_file))
   use node <- result_or_exit(case requested_node {
@@ -1835,13 +1797,19 @@ fn run_record(
     [] -> fail("record requires at least one target node", 2)
     [root, ..] -> {
       let cli.Mfa(trigger_module, _, _) = trigger
-      case record_process.start(child, root, cookie, trigger_module) {
-        Error(error) -> fail("record child failed to start: " <> error, 2)
+      case
+        record_process.start_staged(
+          child,
+          root,
+          cookie,
+          trigger_module,
+          staged_modules,
+        )
+      {
+        Error(error) -> fail_with(child_start_error(error))
         Ok(handle) ->
           case capture.wait_until_available(root, cookie, 10_000) {
-            Error(error) -> {
-              record_start_failure(handle, error)
-            }
+            Error(error) -> record_start_failure(handle, error)
             Ok(Nil) -> {
               io.println("Connected. Arming the selected MFA…")
               let store = capture_session.new(nodes, cookie)
@@ -1881,44 +1849,102 @@ fn record_start_failure_without_signal(
   handle: record_process.Handle,
   reason: String,
 ) -> Int {
-  case record_process.is_running(handle) {
-    False ->
-      case record_process.await(handle, 1000) {
-        Ok(#(status, output)) ->
-          fail(
-            "record target did not start; child exited with status "
-              <> int.to_string(status)
-              <> output_tail_message(output)
-              <> ": "
-              <> reason,
-            2,
-          )
-        Error(error) ->
-          fail("record target did not start: " <> reason <> "; " <> error, 2)
-      }
-    True ->
-      // Awaiting for a minimal interval closes a hung child and retains its
-      // bounded combined stdout/stderr tail in the timeout diagnostic.
-      case record_process.await(handle, 1) {
-        Ok(#(status, output)) ->
-          fail(
-            "record target did not start; child exited with status "
-              <> int.to_string(status)
-              <> output_tail_message(output)
-              <> ": "
-              <> reason,
-            2,
-          )
-        Error(error) ->
-          fail("record target did not start: " <> reason <> "; " <> error, 2)
-      }
+  fail_with(record_start_error(handle, reason))
+}
+
+/// Classify a child that never exposed its node: a VM that already exited
+/// crashed during boot (its bounded output tail is the detail); a hung VM is
+/// closed and reported as unreachable.
+fn record_start_error(
+  handle: record_process.Handle,
+  reason: String,
+) -> cli_errors.CliError {
+  let wait = case record_process.is_running(handle) {
+    False -> 1000
+    True -> 1
+  }
+  case record_process.await(handle, wait) {
+    Ok(#(status, output)) if status != 0 ->
+      cli_errors.child_crashed(status) |> cli_errors.with_detail(output)
+    Ok(#(_, output)) ->
+      cli_errors.from_capture_reason(reason) |> cli_errors.with_detail(output)
+    Error(error) ->
+      cli_errors.from_capture_reason(reason) |> cli_errors.with_detail(error)
   }
 }
 
-fn output_tail_message(output: String) -> String {
-  case output == "" {
-    True -> ""
-    False -> "; output tail:\n" <> output
+fn child_start_error(reason: String) -> cli_errors.CliError {
+  case string.starts_with(reason, "executable_not_found: ") {
+    True -> cli_errors.from_capture_reason(reason)
+    False -> cli_errors.child_start_failed(reason)
+  }
+}
+
+/// Prefer the reason the capture session recorded over the target-side
+/// polling result, which can only say that arming never became visible.
+fn arm_failure(
+  store: capture_session.Store,
+  error: String,
+) -> cli_errors.CliError {
+  case capture_session.status(store) {
+    capture_session.Failed(reason) -> cli_errors.from_capture_reason(reason)
+    _ -> cli_errors.from_capture_reason(error)
+  }
+}
+
+fn preflight_agent() -> Result(Nil, cli_errors.CliError) {
+  case capture.agent_available() {
+    Ok(_) -> Ok(Nil)
+    Error(reason) ->
+      Error(
+        cli_errors.agent_beam_unavailable(capture.bundled_runtime())
+        |> cli_errors.with_detail(case reason {
+          "agent_beam_unavailable" -> ""
+          other -> other
+        }),
+      )
+  }
+}
+
+fn preflight_web_assets() -> Result(Nil, cli_errors.CliError) {
+  case capture.web_assets_available() {
+    Ok(_) -> Ok(Nil)
+    Error(_) ->
+      Error(cli_errors.web_assets_unavailable(capture.bundled_runtime()))
+  }
+}
+
+fn json_error_or_exit(
+  command: String,
+  result: Result(a, cli_errors.CliError),
+  next: fn(a) -> Int,
+) -> Int {
+  case result {
+    Ok(value) -> next(value)
+    Error(error) -> {
+      emit_json_failure(command, error)
+      cli_errors.exit_code(error)
+    }
+  }
+}
+
+fn error_or_exit(
+  result: Result(a, cli_errors.CliError),
+  next: fn(a) -> Int,
+) -> Int {
+  case result {
+    Ok(value) -> next(value)
+    Error(error) -> fail_with(error)
+  }
+}
+
+fn machine_result_error(
+  result: Result(a, cli_errors.CliError),
+  next: fn(a) -> Result(b, cli_errors.CliError),
+) -> Result(b, cli_errors.CliError) {
+  case result {
+    Ok(value) -> next(value)
+    Error(error) -> Error(error)
   }
 }
 
@@ -1958,17 +1984,10 @@ fn run_record_session(
     Ok(Nil), [root, ..] ->
       case capture.wait_until_armed(root, cookie, 5000) {
         Error(error) -> {
-          let status = capture_session.status(store)
+          let failure = arm_failure(store, error)
           let _ = capture_session.cancel(store)
           record_process.stop(handle)
-          fail(
-            "record could not reach the armed state: "
-              <> capture.failure_guidance(error)
-              <> " (capture "
-              <> session_status_name(status)
-              <> ")",
-            capture.failure_exit_code(error),
-          )
+          fail_with(failure)
         }
         Ok(Nil) -> {
           io.println("Capture armed. Starting the application command…")
@@ -2058,26 +2077,19 @@ fn record_capture_failure(
   let child_diagnostic = case finish, child {
     Error(reason), _ -> {
       record_process.stop(handle)
-      "; child shutdown gate failed: " <> reason
+      "child shutdown gate failed: " <> reason
     }
     Ok(Nil), Ok(#(status, output)) ->
-      "; child exited with status "
-      <> int.to_string(status)
-      <> output_tail_message(output)
-    Ok(Nil), Error(reason) -> "; " <> reason
+      "child exited with status " <> int.to_string(status) <> "\n" <> output
+    Ok(Nil), Error(reason) -> reason
   }
-  let #(message, exit_code) = case error {
-    capture_session.CaptureFailed(reason) -> #(
-      capture.failure_guidance(reason),
-      capture.failure_exit_code(reason),
-    )
-    capture_session.CaptureTimeout -> #("capture timed out", 2)
-    capture_session.CaptureNotReady -> #("capture was not ready", 2)
-    capture_session.SessionClosed -> #("capture session closed", 2)
-    capture_session.CaptureAlreadyRunning -> #("capture already running", 2)
-    capture_session.InvalidSessionRequest(reason) -> #(reason, 2)
+  let failure = case error {
+    capture_session.CaptureFailed(reason) ->
+      cli_errors.from_capture_reason(reason)
+    capture_session.CaptureTimeout -> cli_errors.capture_incomplete()
+    other -> cli_errors.command_failed(session_error_message(other))
   }
-  fail("record capture failed: " <> message <> child_diagnostic, exit_code)
+  fail_with(cli_errors.with_detail(failure, child_diagnostic))
 }
 
 fn finish_record_child(
@@ -2098,15 +2110,10 @@ fn finish_record_child(
         Ok(#(child_status, output)) -> {
           io.print(output)
           case save_result(out, nodes, result, types.Metadata, force) {
-            Error(error) -> fail("could not save record: " <> error, 2)
+            Error(error) -> fail_with(error)
             Ok(Nil) ->
               case storage.validate(out) {
-                Error(error) ->
-                  fail(
-                    "record archive verification failed: "
-                      <> storage_error_message(error),
-                    2,
-                  )
+                Error(error) -> fail_with(cli_errors.from_storage(error, out))
                 Ok(_) -> {
                   io.println(
                     "Archive sealed; checksums and causal graph verified.",
@@ -2149,7 +2156,7 @@ fn save_result(
   result: capture.CaptureResult,
   privacy: types.Privacy,
   force: Bool,
-) -> Result(Nil, String) {
+) -> Result(Nil, cli_errors.CliError) {
   let manifest =
     codec.Manifest(
       schema_version: codec.schema_version,
@@ -2172,28 +2179,7 @@ fn save_result(
   }
   case saved {
     Ok(Nil) -> Ok(Nil)
-    Error(error) -> Error(storage_error_message(error))
-  }
-}
-
-fn storage_error_message(error: storage.StorageError) -> String {
-  case error {
-    storage.InvalidContainer -> "the file is not a valid BeamTrace archive"
-    storage.UnsafeEntry(path) ->
-      "the archive contains an unsafe entry '" <> path <> "'"
-    storage.DuplicateEntry(path) ->
-      "the archive contains a duplicate entry '" <> path <> "'"
-    storage.ZipBomb -> "the archive exceeds safe size or compression limits"
-    storage.ChecksumMismatch -> "an archive checksum does not match"
-    storage.InvalidWindow -> "the requested event window is invalid"
-    storage.InvalidSearch -> "the requested search is invalid"
-    storage.InvalidGraph(_) -> "the archive causal graph is invalid"
-    storage.MigrationRequiresDistinctOutput ->
-      "migration output must be different from the source"
-    storage.CodecError(_) -> "the archive contains invalid schema data"
-    storage.IoError("destination_exists") ->
-      "the output already exists; choose another path or pass --force"
-    storage.IoError(_) -> "the archive could not be read or written"
+    Error(error) -> Error(cli_errors.from_storage(error, out))
   }
 }
 
@@ -2203,6 +2189,7 @@ fn run_server_with_browser(
   port: Int,
   open_browser: Bool,
 ) -> Int {
+  use Nil <- error_or_exit(preflight_web_assets())
   case
     server.start_with_browser(
       bind: "127.0.0.1",
@@ -2246,40 +2233,17 @@ fn capture_result_or_exit(
 ) -> Int {
   case result {
     Ok(value) -> next(value)
-    Error(error) ->
-      fail(capture.failure_guidance(error), capture.failure_exit_code(error))
+    Error(error) -> fail_with(cli_errors.from_capture_reason(error))
   }
 }
 
 fn fail(message: String, code: Int) -> Int {
-  report_human_error(message, code)
-  code
+  fail_with(cli_errors.legacy(message, code))
 }
 
-fn report_human_error(message: String, code: Int) -> Nil {
-  io.println_error("beamtrace[" <> human_error_code(code) <> "]: " <> message)
-  io.println_error("Next: " <> human_error_hint(code))
-}
-
-fn human_error_code(exit_code: Int) -> String {
-  case exit_code {
-    3 -> "E_CAPTURE_INTEGRITY"
-    4 -> "E_SAFETY_REFUSAL"
-    2 -> "E_COMMAND_FAILED"
-    _ -> "E_OPERATION_OUTCOME"
-  }
-}
-
-fn human_error_hint(exit_code: Int) -> String {
-  case exit_code {
-    3 ->
-      "Inspect delivery issues, repair the named node or transport, and capture again."
-    4 ->
-      "Review the safety boundary and explicitly authorize only this invocation."
-    2 ->
-      "Run 'beamtrace doctor' and then 'beamtrace help <command>' before retrying."
-    _ -> "Inspect the reported outcome before deciding whether to retry."
-  }
+fn fail_with(error: cli_errors.CliError) -> Int {
+  list.each(cli_errors.render_human(error), io.println_error)
+  cli_errors.exit_code(error)
 }
 
 fn relay_client_error_message(error: relay_client.RelayClientError) -> String {
@@ -2344,16 +2308,6 @@ fn session_error_message(error: capture_session.SessionError) -> String {
     capture_session.SessionClosed -> "the capture session is closed"
     capture_session.InvalidSessionRequest(_) -> "the capture request is invalid"
     capture_session.CaptureFailed(reason) -> capture.failure_guidance(reason)
-  }
-}
-
-fn session_status_name(status: capture_session.Status) -> String {
-  case status {
-    capture_session.Idle -> "idle"
-    capture_session.Armed -> "armed"
-    capture_session.Cancelling -> "cancelling"
-    capture_session.Ready(_, _) -> "ready"
-    capture_session.Failed(_) -> "failed"
   }
 }
 

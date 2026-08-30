@@ -26,6 +26,7 @@ Security fixes need an adversarial regression test. Capture changes need a clean
 - Keep the injected agent dependency-free Erlang.
 - Keep external I/O, OS integration, and Canvas work behind narrow FFI modules.
 - Preserve both dark/light and reduced-motion/high-contrast paths.
+- Record non-trivial design decisions in `docs/adr/` (MADR, see `docs/adr/README.md`).
 
 Run `gleam format` on edited Gleam files. Erlang is compiled with warnings as errors in the agent suite.
 

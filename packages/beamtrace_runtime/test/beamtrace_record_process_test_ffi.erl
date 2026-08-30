@@ -3,6 +3,8 @@
 -include_lib("kernel/include/file.hrl").
 
 -export([
+    demo_fixture_is_staged_in_the_private_gate/0,
+    staged_launch_never_writes_a_crash_dump_to_cwd/0,
     gleam_javascript_target_rejected/0,
     mix_wrapper_runs/0,
     packaged_environment_isolated/0,
@@ -33,6 +35,100 @@ gleam_javascript_target_rejected() ->
                 Other -> {error, unicode:characters_to_binary(
                     io_lib:format("unexpected Gleam target result: ~0p", [Other])
                 )}
+            end
+    end.
+
+demo_fixture_is_staged_in_the_private_gate() ->
+    {ok, Command} = beamtrace_cli_ffi:demo_command(),
+    {ok, Node} = beamtrace_cli_ffi:auto_record_node(),
+    case beamtrace_cli_ffi:start_gated_command(
+        Command,
+        Node,
+        <<"beamtrace_demo_stage_cookie">>,
+        <<"beamtrace_demo_fixture">>,
+        [<<"beamtrace_demo_fixture">>]
+    ) of
+        {ok, Handle = {gated_command, _Port, Directory, _Gate, _FinishGate,
+                       _Guardian, _OsPid}} ->
+            Beam = filename:join(
+                binary_to_list(Directory), "beamtrace_demo_fixture.beam"
+            ),
+            Staged = filelib:is_regular(Beam),
+            Private = private_file(Beam),
+            {ok, nil} = beamtrace_cli_ffi:release_gated_command(Handle),
+            {ok, nil} = beamtrace_cli_ffi:release_gated_command_finish(Handle),
+            Result = beamtrace_cli_ffi:await_gated_command(
+                Handle, ?RECORD_COMMAND_TIMEOUT_MS
+            ),
+            Clean = not filelib:is_dir(binary_to_list(Directory)),
+            case {Staged, Private, Result, Clean} of
+                {true, true, {ok, {0, Output}}, true} ->
+                    case binary:match(
+                        Output, <<"BeamTrace demo checkout total: 2500">>
+                    ) of
+                        nomatch -> {error, <<"demo output was missing">>};
+                        _ -> {ok, nil}
+                    end;
+                Other -> {error, unicode:characters_to_binary(io_lib:format(
+                    "demo staging contract failed: ~0p", [Other]
+                ))}
+            end;
+        Error -> Error
+    end.
+
+staged_launch_never_writes_a_crash_dump_to_cwd() ->
+    Root = wrapper_project_directory(crash),
+    ok = file:make_dir(Root),
+    {ok, OriginalDirectory} = file:get_cwd(),
+    {ok, [Erl | _]} = beamtrace_cli_ffi:demo_command(),
+    {ok, Node} = beamtrace_cli_ffi:auto_record_node(),
+    try
+        ok = file:set_cwd(Root),
+        case beamtrace_cli_ffi:start_gated_command(
+            [Erl, <<"-noshell">>, <<"-s">>, <<"beamtrace_missing_module">>,
+             <<"run">>],
+            Node,
+            <<"beamtrace_crash_test_cookie">>,
+            <<"beamtrace_missing_module">>,
+            []
+        ) of
+            {ok, Handle = {gated_command, _Port, Directory, _Gate,
+                           _FinishGate, _Guardian, _OsPid}} ->
+                {ok, nil} = beamtrace_cli_ffi:release_gated_command(Handle),
+                {ok, nil} =
+                    beamtrace_cli_ffi:release_gated_command_finish(Handle),
+                Result = beamtrace_cli_ffi:await_gated_command(
+                    Handle, ?RECORD_COMMAND_TIMEOUT_MS
+                ),
+                ok = file:set_cwd(OriginalDirectory),
+                Dump = filelib:is_regular(filename:join(Root, "erl_crash.dump")),
+                Clean = not filelib:is_dir(binary_to_list(Directory)),
+                case {Result, Dump, Clean} of
+                    {{ok, {Status, Output}}, false, true} when Status =/= 0 ->
+                        case binary:match(Output, <<"crash dump slogan:">>) of
+                            nomatch -> {error, unicode:characters_to_binary(
+                                io_lib:format("slogan missing: ~ts", [Output])
+                            )};
+                            _ -> {ok, nil}
+                        end;
+                    Other -> {error, unicode:characters_to_binary(
+                        io_lib:format("crash dump contract failed: ~0p", [Other])
+                    )}
+                end;
+            Error -> Error
+        end
+    after
+        _ = file:set_cwd(OriginalDirectory),
+        _ = file:del_dir_r(Root)
+    end.
+
+private_file(Path) ->
+    case os:type() of
+        {win32, _} -> true;
+        _ ->
+            case file:read_file_info(Path) of
+                {ok, #file_info{mode = Mode}} -> Mode band 8#777 =:= 8#600;
+                _ -> false
             end
     end.
 

@@ -369,11 +369,15 @@ list_entries(PathBinary) when is_binary(PathBinary) ->
 list_entries(_Path) -> {error, <<"invalid_container">>}.
 
 validated_table(Path) ->
-    case zip:table(Path) of
-        {ok, Entries} ->
-            Files = [Entry || Entry <- Entries, is_record(Entry, zip_file)],
-            validate_files(Files);
-        {error, _Reason} -> {error, <<"invalid_container">>}
+    case file:read_file_info(Path) of
+        {error, enoent} -> {error, <<"enoent">>};
+        _ ->
+            case zip:table(Path) of
+                {ok, Entries} ->
+                    Files = [Entry || Entry <- Entries, is_record(Entry, zip_file)],
+                    validate_files(Files);
+                {error, _Reason} -> {error, <<"invalid_container">>}
+            end
     end.
 
 prepare_selective_v2(Handle, Files) ->

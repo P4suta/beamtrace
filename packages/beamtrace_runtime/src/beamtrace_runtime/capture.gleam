@@ -968,7 +968,7 @@ pub fn failure_guidance(reason: String) -> String {
   case reason {
     "system_tracer_occupied" ->
       "Exact capture was refused because another system tracer owns the node. "
-      <> "BeamTrace did not replace it; use Live for bounded inferred sampling."
+      <> "BeamTrace did not replace it; use 'beamtrace attach <node> --web' for bounded Live sampling."
     _ -> reason
   }
 }
@@ -1286,6 +1286,18 @@ fn collect_distributed_spec(
 
 @external(erlang, "beamtrace_capture_ffi", "probe_remote")
 fn probe_remote(node: String, cookie: String) -> Result(String, String)
+
+/// Path of the validated injected agent BEAM, or the reason it is unusable.
+@external(erlang, "beamtrace_cli_ffi", "agent_beam_status")
+pub fn agent_available() -> Result(String, String)
+
+/// Root of the Web assets, or `web_assets_unavailable`.
+@external(erlang, "beamtrace_cli_ffi", "web_assets_status")
+pub fn web_assets_available() -> Result(String, String)
+
+/// Whether this process runs from a self-contained release archive.
+@external(erlang, "beamtrace_cli_ffi", "bundled_runtime")
+pub fn bundled_runtime() -> Bool
 
 @external(erlang, "beamtrace_capture_ffi", "search_remote")
 fn search_remote(

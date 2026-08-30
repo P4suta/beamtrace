@@ -11,7 +11,19 @@ pub fn start(
   cookie: String,
   trigger_module: String,
 ) -> Result(Handle, String) {
-  start_gated_command(command, node, cookie, trigger_module)
+  start_gated_command(command, node, cookie, trigger_module, [])
+}
+
+/// Start a child whose BeamTrace-owned modules are staged into the private
+/// gate directory, so the bundled demo needs no host code path.
+pub fn start_staged(
+  command: List(String),
+  node: String,
+  cookie: String,
+  trigger_module: String,
+  staged_modules: List(String),
+) -> Result(Handle, String) {
+  start_gated_command(command, node, cookie, trigger_module, staged_modules)
 }
 
 pub fn release(handle: Handle) -> Result(Nil, String) {
@@ -66,6 +78,7 @@ fn start_gated_command(
   node: String,
   cookie: String,
   trigger_module: String,
+  staged_modules: List(String),
 ) -> Result(Handle, String)
 
 @external(erlang, "beamtrace_cli_ffi", "release_gated_command")

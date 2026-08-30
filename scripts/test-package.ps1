@@ -215,6 +215,43 @@ try {
         if ($LASTEXITCODE -ne 0 -or $doctor -notmatch 'agent BEAM: valid' -or $doctor -notmatch 'web assets: valid') {
             throw 'Self-contained package doctor smoke test failed without a host Erlang runtime.'
         }
+        $demoRoot = Join-Path $resolvedTestRoot 'demo-cwd'
+        $demoTemp = Join-Path $resolvedTestRoot 'demo-temp'
+        New-Item -ItemType Directory -Path $demoRoot -Force | Out-Null
+        New-Item -ItemType Directory -Path $demoTemp -Force | Out-Null
+        $previousTemp = @{ TMPDIR = $env:TMPDIR; TEMP = $env:TEMP; TMP = $env:TMP }
+        $env:TMPDIR = $demoTemp
+        $env:TEMP = $demoTemp
+        $env:TMP = $demoTemp
+        Push-Location $demoRoot
+        try {
+            $demo = (& $launcher demo --no-ui --json | Out-String)
+            if ($LASTEXITCODE -ne 0) {
+                throw "Self-contained package demo failed without a host Erlang runtime (exit $LASTEXITCODE): $demo"
+            }
+            $demoResult = $demo | ConvertFrom-Json
+            if ($demoResult.command -ne 'demo' -or -not $demoResult.ok -or $demoResult.artifact.retained -or $demoResult.artifact.event_count -lt 1) {
+                throw "Self-contained package demo did not report a temporary sealed archive: $demo"
+            }
+            Write-Host "Self-contained package demo recorded $($demoResult.artifact.event_count) events without a host Erlang runtime."
+            $missingTool = (& $launcher record --trigger 'erlang:system_time/0' --no-ui -- erl -noshell -eval 'halt().' 2>&1 | Out-String)
+            if ($LASTEXITCODE -ne 2 -or $missingTool -notmatch 'beamtrace\[E_COMMAND_NOT_FOUND\]') {
+                throw "Self-contained package record must explain a missing host Erlang toolchain: $missingTool"
+            }
+        }
+        finally {
+            Pop-Location
+            foreach ($name in $previousTemp.Keys) {
+                if ($null -eq $previousTemp[$name]) { Remove-Item "Env:$name" -ErrorAction SilentlyContinue } else { Set-Item "Env:$name" $previousTemp[$name] }
+            }
+        }
+        if (Test-Path -LiteralPath (Join-Path $demoRoot 'erl_crash.dump')) {
+            throw 'Self-contained package demo left erl_crash.dump in the working directory.'
+        }
+        $leftovers = @(Get-ChildItem -LiteralPath $demoTemp -Force -ErrorAction SilentlyContinue)
+        if ($leftovers.Count -ne 0) {
+            throw "Self-contained package demo left temporary entries behind: $($leftovers.Name -join ', ')"
+        }
         $env:PATH = $previousPath
 
         $configRoot = Join-Path $resolvedTestRoot 'project-config'
