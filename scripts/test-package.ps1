@@ -36,7 +36,7 @@ $zip = [IO.Compression.ZipFile]::OpenRead($archive)
 try {
     $launcherEntry = $zip.GetEntry('bin/beamtrace')
     if ($null -eq $launcherEntry) { throw 'Package is missing the POSIX launcher entry.' }
-    if (-not $IsWindows) {
+    if (-not ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop')) {
         $attributes = [BitConverter]::ToUInt32([BitConverter]::GetBytes($launcherEntry.ExternalAttributes), 0)
         $unixMode = ($attributes -shr 16) -band 0xffff
         if (($unixMode -band 0x49) -ne 0x49) {
@@ -98,7 +98,7 @@ try {
     if ($ertsDirectories.Count -ne 1) {
         throw "Package must contain exactly one ERTS runtime, found $($ertsDirectories.Count)."
     }
-    $bundledEscriptName = if ($IsWindows) { 'escript.exe' } else { 'escript' }
+    $bundledEscriptName = if ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop') { 'escript.exe' } else { 'escript' }
     $bundledEscript = Join-Path $ertsDirectories[0].FullName "bin/$bundledEscriptName"
     if (-not (Test-Path -LiteralPath $bundledEscript -PathType Leaf)) {
         throw 'Package is missing its bundled escript executable.'
@@ -200,7 +200,7 @@ try {
     try {
         $emptyPath = Join-Path $resolvedTestRoot 'empty-path'
         New-Item -ItemType Directory -Path $emptyPath -Force | Out-Null
-        if (-not $IsWindows) {
+        if (-not ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop')) {
             # No Erlang toolchain, but the POSIX utilities every host has and the
             # bundled erl launcher script needs.
             foreach ($utility in @('dirname', 'basename', 'uname', 'sed', 'sh', 'env')) {
@@ -211,7 +211,7 @@ try {
             }
         }
         $env:PATH = $emptyPath
-        $launcher = if ($IsWindows) {
+        $launcher = if ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop') {
             Join-Path $root.FullName 'bin/beamtrace.ps1'
         }
         else {
@@ -299,7 +299,7 @@ try {
             throw "Self-contained package record dogfood failed with exit code $LASTEXITCODE."
         }
 
-        if (-not $IsWindows) {
+        if (-not ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop')) {
             $signalTemp = Join-Path $resolvedTestRoot 'record-signal-temp'
             New-Item -ItemType Directory -Path $signalTemp -Force | Out-Null
             $signalInfo = [Diagnostics.ProcessStartInfo]::new()
@@ -371,7 +371,7 @@ try {
         $portProbe.Stop()
         $teamOrigin = "https://127.0.0.1:$teamPort"
         $startInfo = [Diagnostics.ProcessStartInfo]::new()
-        if ($IsWindows) {
+        if ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop') {
             $startInfo.FileName = (Get-Command pwsh).Source
             $startInfo.ArgumentList.Add('-NoProfile')
             $startInfo.ArgumentList.Add('-File')
@@ -415,7 +415,7 @@ try {
             if (-not (Test-Path -LiteralPath (Join-Path $teamData 'metadata.sqlite3') -PathType Leaf)) {
                 throw 'Packaged team server did not create its SQLite metadata store.'
             }
-            if (-not $IsWindows) {
+            if (-not ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop')) {
                 & kill -INT $teamProcess.Id
                 if ($LASTEXITCODE -ne 0) {
                     throw 'Could not send SIGINT to the packaged team server.'
