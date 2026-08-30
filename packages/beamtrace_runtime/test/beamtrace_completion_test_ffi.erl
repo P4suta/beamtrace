@@ -7,29 +7,51 @@
 %% candidates for one command line. Returns `skipped` when the shell is not
 %% installed unless BEAMTRACE_REQUIRE_SHELLS names it.
 probe(Shell, Script, Line) when is_binary(Shell), is_binary(Script), is_binary(Line) ->
-    ShellName = binary_to_list(Shell),
-    case os:find_executable(executable(ShellName)) of
-        false -> skipped(ShellName);
-        Executable ->
+    ShellName = normalize(binary_to_list(Shell)),
+    case {os:find_executable(executable(ShellName)), probe_supported(ShellName)} of
+        {false, _} -> skipped(ShellName);
+        {_, false} -> skipped(ShellName);
+        {Executable, true} ->
             Path = script_path(ShellName),
-            ok = file:write_file(Path, Script),
-            try
-                run(Executable, ShellName, Path, binary_to_list(Line))
-            after
-                _ = file:delete(Path)
+            case file:write_file(Path, Script) of
+                {error, Reason} ->
+                    _ = file:delete(Path),
+                    {error, unicode:characters_to_binary(io_lib:format(
+                        "could not write ~s: ~p", [Path, Reason]))};
+                ok ->
+                    try
+                        run(Executable, ShellName, Path, binary_to_list(Line))
+                    after
+                        _ = file:delete(Path)
+                    end
             end
     end.
+
+normalize("pwsh") -> "powershell";
+normalize(Shell) -> Shell.
+
+%% TabExpansion2 does not consult native completers on the Windows runners,
+%% so the PowerShell probe is only run there when it is explicitly required.
+probe_supported("powershell") ->
+    case os:type() of
+        {win32, _} -> required("powershell");
+        _ -> true
+    end;
+probe_supported(_Shell) -> true.
+
+required(ShellName) ->
+    Required = case os:getenv("BEAMTRACE_REQUIRE_SHELLS") of
+        false -> [];
+        Value -> string:lexemes(Value, ", ")
+    end,
+    lists:member(ShellName, Required).
 
 executable("powershell") -> "pwsh";
 executable(Shell) -> Shell.
 
 skipped(ShellName) ->
-    Required = case os:getenv("BEAMTRACE_REQUIRE_SHELLS") of
-        false -> [];
-        Value -> string:lexemes(Value, ", ")
-    end,
-    case lists:member(ShellName, Required) of
-        true -> {error, unicode:characters_to_binary(ShellName ++ " is required but not installed")};
+    case required(ShellName) of
+        true -> {error, unicode:characters_to_binary(ShellName ++ " is required but not available")};
         false -> {ok, <<"skipped">>}
     end.
 
@@ -52,36 +74,34 @@ extension("fish") -> ".fish";
 extension("zsh") -> ".zsh";
 extension(_) -> ".bash".
 
+%% The command line and script path travel as positional arguments or
+%% environment values; each shell parses them itself.
 run(Executable, "bash", Path, Line) ->
-    Words = string:split(Line, " ", all),
-    Cword = length(Words) - 1,
-    Script = "source \"$1\"; COMP_WORDS=(" ++ string:join([quote(W) || W <- Words], " ")
-        ++ "); COMP_CWORD=" ++ integer_to_list(Cword)
-        ++ "; _beamtrace; printf '%s\\n' \"${COMPREPLY[@]}\"",
-    command(Executable, ["--noprofile", "--norc", "-c", Script, "_", Path]);
+    Script = "source \"$1\"; read -r -a COMP_WORDS <<<\"$2\"; "
+        "case \"$2\" in *' ') COMP_WORDS+=('');; esac; "
+        "COMP_CWORD=$(( ${#COMP_WORDS[@]} - 1 )); _beamtrace; "
+        "printf '%s\\n' \"${COMPREPLY[@]}\"",
+    command(Executable, ["--noprofile", "--norc", "-c", Script, "_", Path, Line]);
 run(Executable, "zsh", Path, _Line) ->
     command(Executable, ["-n", Path]);
 run(Executable, "fish", Path, Line) ->
     command(Executable, ["--no-config", "-c",
-        "source " ++ Path ++ "; complete -C '" ++ Line ++ "'"]);
+        "source \"$argv[1]\"; complete -C \"$argv[2]\"", Path, Line]);
 run(Executable, "powershell", Path, Line) ->
     Column = integer_to_list(length(Line)),
-    Result = command(Executable, ["-NoProfile", "-NonInteractive",
+    command(Executable, ["-NoProfile", "-NonInteractive",
         "-ExecutionPolicy", "Bypass", "-Command",
-        ". '" ++ Path ++ "'; (TabExpansion2 -inputScript '" ++ Line
-        ++ "' -cursorColumn " ++ Column ++ ").CompletionMatches | ForEach-Object { $_.CompletionText }"]),
-    case {Result, os:type()} of
-        %% Windows runners may not let TabExpansion2 consult native
-        %% completers; only a required shell turns silence into a failure.
-        {{ok, <<>>}, {win32, _}} -> skipped("powershell");
-        _ -> Result
-    end.
-
-quote(Word) -> "'" ++ Word ++ "'".
+        ". $env:BEAMTRACE_PROBE_SCRIPT; (TabExpansion2 -inputScript $env:BEAMTRACE_PROBE_LINE"
+        " -cursorColumn " ++ Column ++ ").CompletionMatches | ForEach-Object { $_.CompletionText }"],
+        [{"BEAMTRACE_PROBE_SCRIPT", Path}, {"BEAMTRACE_PROBE_LINE", Line}]).
 
 command(Executable, Arguments) ->
+    command(Executable, Arguments, []).
+
+command(Executable, Arguments, Environment) ->
     Port = open_port({spawn_executable, Executable},
-        [binary, exit_status, stderr_to_stdout, use_stdio, {args, Arguments}]),
+        [binary, exit_status, stderr_to_stdout, use_stdio,
+         {args, Arguments}, {env, Environment}]),
     collect(Port, <<>>).
 
 collect(Port, Acc) ->
