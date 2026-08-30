@@ -27,3 +27,31 @@ run = "for package in packages/beamtrace_core packages/beamtrace_runtime package
 [tasks."web:build"]
 description = "Build the checked-in Web distribution"
 run = "bash scripts/build-web.sh"
+
+[tasks.beamtrace]
+description = "Run the CLI from source with the built agent BEAM and Web assets (mise run beamtrace -- demo)"
+run = "pwsh -NoProfile -File scripts/beamtrace.ps1"
+
+[tasks."build:agent"]
+description = "Compile the dependency-free injected agent BEAM"
+run = "pwsh -NoProfile -File scripts/build-agent.ps1"
+
+[tasks."test:all"]
+description = "Run the CI gate (scripts/test-all.ps1 without the browser suite)"
+run = "pwsh -NoProfile -File scripts/test-all.ps1 -SkipBrowserE2E"
+
+[tasks."test:cli"]
+description = "Run the CLI smoke gate"
+run = "pwsh -NoProfile -File scripts/test-cli-smoke.ps1"
+
+[tasks."test:package"]
+description = "Build the native archive and smoke-test it without a host Erlang"
+run = "pwsh -NoProfile -File scripts/test-package.ps1"
+
+[tasks."test:record"]
+description = "Run the record dogfood gate"
+run = "pwsh -NoProfile -File scripts/test-record-dogfood.ps1"
+
+[tasks."test:clean"]
+description = "Fail on leftover crash dumps and package test directories"
+run = "pwsh -NoProfile -File scripts/test-cleanliness.ps1"

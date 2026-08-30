@@ -219,6 +219,12 @@ try {
     ) {
         throw 'Gleam-wrapper record dogfood archive is empty, not schema v2, not delivery-verified, or not metadata-only.'
     }
+    $gleamEncoded = $gleamEventLines -join "`n"
+    foreach ($role in @('checkout', 'inventory', 'payment')) {
+        if (-not $gleamEncoded.Contains('"label":"' + $role + '"')) {
+            throw "Demo fixture events do not carry the '$role' actor label."
+        }
+    }
 
     Write-Host "Record dogfood passed: direct erl and gleam run/shim captures are schema v2, delivery-verified, metadata-only, and cleanup-verified."
 }
