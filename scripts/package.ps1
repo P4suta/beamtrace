@@ -258,7 +258,7 @@ else {
     if ($LASTEXITCODE -ne 0) { throw 'Could not mark the POSIX launcher executable.' }
     Push-Location $resolvedStage
     try {
-        & zip -q -r $archive .
+        & zip -q -9 -r $archive .
         if ($LASTEXITCODE -ne 0) { throw 'Could not create the portable ZIP archive.' }
     }
     finally {

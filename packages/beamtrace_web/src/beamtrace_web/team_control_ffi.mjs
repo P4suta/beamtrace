@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+import { apiError } from "./api_error_ffi.mjs";
+
 function request(path, options = {}) {
   const { headers = {}, ...requestOptions } = options;
   return fetch(path, {
@@ -9,13 +11,7 @@ function request(path, options = {}) {
   }).then(async (response) => {
     const body = await response.text();
     if (!response.ok) {
-      if (response.status === 401) {
-        throw new Error("Sign in to the Team workspace to view traces");
-      }
-      if (response.status === 403) {
-        throw new Error("This action is not permitted for your Team role");
-      }
-      throw new Error(`team trace request failed (${response.status})`);
+      throw new Error(apiError(body, response.status, "team trace request failed"));
     }
     return body;
   });

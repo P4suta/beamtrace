@@ -1,8 +1,16 @@
+//// Deterministic, bounded online anomaly baselines for Live observations.
+////
+//// Detectors update only from supplied samples and report stated thresholds;
+//// alerts are evidence-bearing diagnostics, not probabilities. Each observe
+//// operation is O(configured metrics), has no I/O failure, and behaves the
+//// same on Erlang and JavaScript.
+
 import beamtrace/types
 import gleam/float
 import gleam/int
 import gleam/list
 
+/// A bounded live metric tracked by the online detector.
 pub type Metric {
   Mailbox
   Memory
@@ -13,6 +21,7 @@ pub type Metric {
   DistributionQueue
 }
 
+/// A stable classification for an anomaly alert.
 pub type AnomalyKind {
   MailboxGrowth
   MemoryGrowth
@@ -26,6 +35,7 @@ pub type AnomalyKind {
   LargeHeap
 }
 
+/// An exact VM signal received directly from the runtime.
 pub type SystemSignal {
   LongGc
   LongScheduleSignal
@@ -33,6 +43,7 @@ pub type SystemSignal {
   BusyDistPort
 }
 
+/// An evidence-bearing anomaly observation and its opening time.
 pub type Alert {
   Alert(
     kind: AnomalyKind,
@@ -42,6 +53,7 @@ pub type Alert {
   )
 }
 
+/// The EWMA and hysteresis counters for one metric.
 pub type Baseline {
   Baseline(
     metric: Metric,
@@ -52,6 +64,7 @@ pub type Baseline {
   )
 }
 
+/// Pure detector state. Its metric and alert lists remain bounded by `Metric`.
 pub type Detector {
   Detector(
     alpha: Float,
@@ -62,6 +75,8 @@ pub type Detector {
   )
 }
 
+/// Create an empty detector, clamping alpha to 0.01–1.0 and thresholds to at
+/// least one sample. This is O(1), pure, and cannot fail.
 pub fn new_detector(
   alpha alpha: Float,
   open_after open_after: Int,
@@ -76,6 +91,9 @@ pub fn new_detector(
   )
 }
 
+/// Incorporate one sample and deterministically open or close an alert.
+/// Work is O(m + a) for the bounded metric and active-alert lists and cannot
+/// fail; inferred alerts record the threshold inputs used.
 pub fn observe(
   detector: Detector,
   metric: Metric,
@@ -206,6 +224,7 @@ fn summary(metric: Metric) -> String {
   }
 }
 
+/// Convert one runtime signal into an exact-evidence alert in O(1).
 pub fn from_system_signal(signal: SystemSignal, value: Int) -> Alert {
   case signal {
     LongGc ->

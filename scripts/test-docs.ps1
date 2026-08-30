@@ -6,13 +6,13 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $expectations = [ordered]@{
     'README.md' = @(
-        'SQLite WAL metadata',
-        'durable annotations and hash-chained audit history',
-        'Admin-only `/api/v1/audit`',
-        'outbound relay WebSocket',
-        'separately authorized bounded raw capture',
-        'Native release archives include ERTS',
-        'Merging its release PR is the publication approval'
+        '## Install',
+        '## 60-second demo',
+        '### Gleam',
+        '### Elixir',
+        '### Erlang',
+        '`/api/v2/openapi.json`',
+        'mise run test'
     )
     'docs/roadmap.md' = @(
         '## Post-alpha release operations',
@@ -27,6 +27,19 @@ $expectations = [ordered]@{
         'Registered relay public keys are restored after a hub restart',
         'Credit is replenished only after durable acceptance',
         'Raw batches additionally require a relay-bound one-time grant'
+    )
+    'docs/reading-results.md' = @(
+        'Observation end',
+        'Delivery verification and issues',
+        'Exact and Inferred',
+        'First divergence'
+    )
+    'docs/api-reference.md' = @(
+        '/api/v2/openapi.json',
+        'code',
+        'message',
+        'hint',
+        'v0.4 removal headers'
     )
     'docs/development.md' = @(
         './scripts/test-web-e2e.ps1',

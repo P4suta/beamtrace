@@ -13,8 +13,14 @@
     write_text/2,
     random_secret/0,
     capture_id/0,
+    default_archive_path/0,
+    temporary_archive_path/0,
+    path_exists/1,
+    delete_file/1,
     web_root/0,
     doctor/3,
+    terminal_interactive/0,
+    confirm_seq_trace/0,
     run_command/1,
     start_gated_command/3,
     start_gated_command/4,
@@ -116,6 +122,68 @@ random_secret() ->
 capture_id() ->
     Random = binary:part(shared_random_hex(16), 0, 24),
     <<"capture-", Random/binary>>.
+
+default_archive_path() ->
+    {{Year, Month, Day}, {Hour, Minute, Second}} = calendar:universal_time(),
+    Stamp = lists:flatten(io_lib:format(
+        "~4..0B~2..0B~2..0BT~2..0B~2..0B~2..0BZ",
+        [Year, Month, Day, Hour, Minute, Second]
+    )),
+    available_archive_name("beamtrace-" ++ Stamp, 0).
+
+available_archive_name(Base, Suffix) ->
+    Candidate = case Suffix of
+        0 -> Base ++ ".beamtrace";
+        _ -> Base ++ "-" ++ integer_to_list(Suffix) ++ ".beamtrace"
+    end,
+    case file:read_link_info(Candidate) of
+        {error, enoent} -> unicode:characters_to_binary(Candidate);
+        _ -> available_archive_name(Base, Suffix + 1)
+    end.
+
+temporary_archive_path() ->
+    Root = case temporary_root() of
+        {ok, Value} -> Value;
+        {error, _} -> filename:absname(".")
+    end,
+    Random = binary:part(shared_random_hex(16), 0, 24),
+    Name = "beamtrace-demo-" ++ binary_to_list(Random) ++ ".beamtrace",
+    unicode:characters_to_binary(filename:join(Root, Name)).
+
+path_exists(Path) when is_binary(Path) ->
+    case file:read_link_info(binary_to_list(Path)) of
+        {error, enoent} -> false;
+        _ -> true
+    end;
+path_exists(_Path) -> true.
+
+delete_file(Path) when is_binary(Path) ->
+    case file:delete(Path) of
+        ok -> nil;
+        {error, enoent} -> nil;
+        {error, _} -> nil
+    end;
+delete_file(_Path) -> nil.
+
+terminal_interactive() ->
+    case {io:columns(standard_io), io:columns(standard_error)} of
+        {{ok, _}, {ok, _}} -> true;
+        _ -> false
+    end.
+
+confirm_seq_trace() ->
+    Prompt =
+        "BeamTrace exact capture acquires the VM-global seq_trace lease. "
+        "Cleanup resets its label and can affect another seq_trace user.\n"
+        "Continue for this run only? [y/N] ",
+    _ = io:put_chars(standard_error, Prompt),
+    case io:get_line(standard_io, "") of
+        eof -> false;
+        {error, _} -> false;
+        Line ->
+            Normalized = string:lowercase(string:trim(Line)),
+            Normalized =:= "y" orelse Normalized =:= "yes"
+    end.
 
 doctor(Json, ProfileStatus, ConfiguredCookieFiles)
         when is_boolean(Json), is_binary(ProfileStatus),

@@ -1,3 +1,10 @@
+//// Safe parsing, evaluation, and agent planning for BeamTrace Query Language.
+////
+//// Parsing returns an offset-bearing `AqlError`; evaluation reads only the
+//// supplied context and compilation emits a bounded predicate plan, never
+//// arbitrary code. Parsing and evaluation are linear in query size and pure
+//// on Erlang and JavaScript.
+
 import beamtrace/types
 import gleam/dict.{type Dict}
 import gleam/float
@@ -7,6 +14,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/order.{Gt, Lt}
 import gleam/string
 
+/// A typed literal accepted by AQL comparisons.
 pub type Value {
   StringValue(String)
   IntValue(Int)
@@ -15,6 +23,7 @@ pub type Value {
   DurationValue(milliseconds: Int)
 }
 
+/// The comparison operations expressible by AQL.
 pub type Comparator {
   Equal
   NotEqual
@@ -24,6 +33,7 @@ pub type Comparator {
   LessThanOrEqual
 }
 
+/// A finite, side-effect-free AQL expression tree.
 pub type Query {
   Compare(field: String, comparator: Comparator, value: Value)
   And(left: Query, right: Query)
@@ -31,14 +41,18 @@ pub type Query {
   Not(query: Query)
 }
 
+/// A parse failure with a zero-based source offset and safe explanation.
 pub type AqlError {
   AqlError(offset: Int, message: String)
 }
 
+/// Compatibility summary of fields safe for the agent and fields left for the
+/// relay. Prefer `compile_trigger` when an executable split is required.
 pub type AgentPlan {
   AgentPlan(match_spec_fields: List(String), residual_fields: List(String))
 }
 
+/// Equality operations supported by dependency-free target match-specs.
 pub type AgentComparator {
   AgentEqual
   AgentNotEqual
@@ -57,6 +71,7 @@ pub type AgentPredicate {
   AgentNot(predicate: AgentPredicate)
 }
 
+/// A safe target predicate paired with any relay-side residual query.
 pub type TriggerPlan {
   TriggerPlan(predicate: AgentPredicate, residual: Option(Query))
 }
@@ -84,6 +99,8 @@ type TokenKind {
   End
 }
 
+/// Parse one AQL expression in O(source length). Invalid syntax returns the
+/// first typed `AqlError`; parsing never performs I/O or executes input.
 pub fn parse(source: String) -> Result(Query, AqlError) {
   use tokens <- result_try(lex(source))
   use parsed <- result_try(parse_or(tokens))
@@ -233,6 +250,9 @@ fn duration_suffix(source: String) -> #(String, Unit) {
   }
 }
 
+/// Evaluate a parsed query against only the supplied fields. Missing or
+/// type-incompatible fields are false. Work is O(query size) plus dictionary
+/// lookups and cannot fail.
 pub fn evaluate(query: Query, context: Dict(String, Value)) -> Bool {
   case query {
     Compare(field, comparator, expected) ->
@@ -304,6 +324,8 @@ fn gt_order() {
   Gt
 }
 
+/// Classify referenced fields as target-safe or relay-only in O(query size).
+/// This compatibility helper cannot fail or emit executable user code.
 pub fn compile_agent(query: Query) -> AgentPlan {
   let fields = fields(query, []) |> list.reverse |> unique([])
   let #(safe, residual) = split_fields(fields, [], [])

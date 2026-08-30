@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
+import beamtrace
 import beamtrace/codec
-import beamtrace/dag
 import beamtrace/diagnostics
+import beamtrace/mfa
 import beamtrace/types
 import gleam/int
 import gleam/io
@@ -31,15 +32,22 @@ pub fn main() {
     )
 
   let encoded = codec.encode_event(event)
-  let assert Ok(decoded) = codec.decode_event(encoded)
-  let assert Ok(graph) = dag.build([decoded])
-  let assert [finding] = diagnostics.hot_senders([decoded], minimum_messages: 1)
+  let assert Ok(trace) = beamtrace.decode_events([encoded])
+  let graph = beamtrace.graph(trace)
+  let report = beamtrace.compare(trace, trace)
+  let assert Ok(parsed_mfa) = mfa.parse("shop:checkout/1")
+  let assert [finding] =
+    diagnostics.hot_senders(beamtrace.events(trace), minimum_messages: 1)
   let assert diagnostics.CountValue(message_count) = finding.value
 
   io.println(
-    "codec=round-trip dag_boundaries="
+    "facade=checked dag_boundaries="
     <> { graph.boundaries |> list.length |> int.to_string }
     <> " diagnostic_messages="
-    <> int.to_string(message_count),
+    <> int.to_string(message_count)
+    <> " diff_changed="
+    <> int.to_string(report.changed)
+    <> " mfa="
+    <> mfa.to_string(parsed_mfa),
   )
 }

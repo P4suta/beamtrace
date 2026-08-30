@@ -3,7 +3,6 @@ import beamtrace_web/page
 import beamtrace_web/workspace
 import gleam/dynamic/decode
 import gleam/json
-import gleam/string
 import lustre/effect.{type Effect}
 
 type TopologyPayload {
@@ -39,7 +38,10 @@ pub fn decode_snapshot(
 ) -> Result(workspace.LiveSnapshot, String) {
   case json.parse(source, snapshot_decoder()) {
     Ok(snapshot) -> Ok(snapshot)
-    Error(errors) -> Error(string.inspect(errors))
+    Error(_) ->
+      Error(
+        "Live sample is not valid API v2 data. Check the target and reload Live.",
+      )
   }
 }
 

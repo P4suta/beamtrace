@@ -208,7 +208,7 @@ fn load() -> Result(Option(ProjectConfig), String) {
 
 pub fn parse(path: String, source: String) -> Result(ProjectConfig, String) {
   case tom.parse(source) {
-    Error(error) -> Error("invalid TOML: " <> string.inspect(error))
+    Error(_error) -> Error("invalid TOML syntax")
     Ok(document) -> {
       use Nil <- result_try(reject_forbidden(document, []))
       use Nil <- result_try(reject_unknown_top_level(dict.keys(document)))

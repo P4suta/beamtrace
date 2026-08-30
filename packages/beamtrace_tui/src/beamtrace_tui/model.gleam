@@ -11,6 +11,18 @@ pub type Screen {
   LiveScreen
   AnomalyScreen
   TraceLibraryScreen
+  CompareScreen
+}
+
+pub type CompareRunSummary {
+  CompareRunSummary(
+    path: String,
+    added: Int,
+    removed: Int,
+    changed: Int,
+    ambiguity_count: Int,
+    first_divergence: String,
+  )
 }
 
 pub type TeamTrace {
@@ -77,6 +89,10 @@ pub type Model {
     live_summary: String,
     team_traces: List(TeamTrace),
     selected_trace: Int,
+    compare_baseline: String,
+    compare_run_count: Int,
+    compare_runs: List(CompareRunSummary),
+    compare_statistics_count: Int,
   )
 }
 
@@ -90,6 +106,7 @@ pub type Msg {
   OpenCapture
   OpenLive
   OpenTraceLibrary
+  OpenCompare
   AttachSubmitted(String)
   AttachAccepted(String)
   AttachFailed(String)
@@ -133,6 +150,10 @@ pub fn init(events: List(Event)) -> Model {
     live_summary: "Waiting for bounded process samples",
     team_traces: [],
     selected_trace: 0,
+    compare_baseline: "",
+    compare_run_count: 0,
+    compare_runs: [],
+    compare_statistics_count: 0,
   )
 }
 
@@ -180,6 +201,24 @@ pub fn remote_with_traces(
   Model(..remote(events, server_url), team_traces: list.take(traces, 100))
 }
 
+pub fn compare(
+  baseline: String,
+  run_count: Int,
+  runs: List(CompareRunSummary),
+  statistics_count: Int,
+) -> Model {
+  Model(
+    ..init([]),
+    screen: CompareScreen,
+    focus: NormalFocus,
+    compare_baseline: baseline,
+    compare_run_count: run_count,
+    compare_runs: runs,
+    compare_statistics_count: statistics_count,
+    notice: "Comparison loaded · PID and clock origins excluded",
+  )
+}
+
 pub fn update(model: Model, message: Msg) -> Model {
   case message {
     OpenAttach -> Model(..model, screen: AttachScreen, focus: AttachFocus)
@@ -197,6 +236,7 @@ pub fn update(model: Model, message: Msg) -> Model {
     OpenLive -> Model(..model, screen: LiveScreen, focus: NormalFocus)
     OpenTraceLibrary ->
       Model(..model, screen: TraceLibraryScreen, focus: NormalFocus)
+    OpenCompare -> Model(..model, screen: CompareScreen, focus: NormalFocus)
     AttachSubmitted(node) ->
       Model(
         ..model,
@@ -338,6 +378,7 @@ pub fn key_to_message(key: String) -> Option(Msg) {
     "c" -> Some(OpenCapture)
     "l" -> Some(OpenLive)
     "t" -> Some(OpenTraceLibrary)
+    "d" -> Some(OpenCompare)
     _ -> None
   }
 }

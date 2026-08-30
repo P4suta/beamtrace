@@ -3,6 +3,7 @@ import beamtrace/codec
 import beamtrace/dag
 import beamtrace/diff
 import beamtrace/merge
+import beamtrace/mfa as core_mfa
 import beamtrace/stats
 import beamtrace/types
 import beamtrace_runtime/capture
@@ -95,6 +96,13 @@ fn compare_response_for(
                 Error(compare_workspace.LoadFailed(path, _)) ->
                   json.object([
                     #("error", json.string("trace_load_failed")),
+                    #("path", json.string(path)),
+                  ])
+                  |> json.to_string
+                  |> wisp.json_response(422)
+                Error(compare_workspace.InvalidTrace(path, _)) ->
+                  json.object([
+                    #("error", json.string("invalid_trace_graph")),
                     #("path", json.string(path)),
                   ])
                   |> json.to_string
@@ -235,7 +243,7 @@ fn compare_payload_decoder() -> decode.Decoder(ComparePayload) {
   decode.success(ComparePayload(paths))
 }
 
-fn compare_report_json(report: compare_workspace.Report) -> json.Json {
+pub fn compare_report_json(report: compare_workspace.Report) -> json.Json {
   json.object([
     #("baseline", json.string(report.baseline)),
     #("run_count", json.int(report.run_count)),
@@ -342,23 +350,15 @@ pub fn capture_status_v2_response(
   case context.authorize(rbac.ViewSession) {
     False -> wisp.response(401)
     True ->
-      case context.local_capture {
-        None -> wisp.not_found()
-        Some(store) ->
+      case context.local_capture, context.archive_path {
+        Some(store), _ ->
           case capture_session.result(store) {
             Ok(captured) ->
-              json.object([
-                #("status", json.string("sealed")),
-                #("event_count", json.int(list.length(captured.events))),
-                #("outcome", codec.outcome_json(captured.outcome)),
-                #(
-                  "delivery_verified",
-                  json.bool(types.delivery_verified(captured.outcome)),
-                ),
-                #("clocks", codec.clocks_json(captured.clocks)),
-              ])
-              |> json.to_string
-              |> wisp.json_response(200)
+              capture_status_ready_response(
+                captured.events,
+                captured.outcome,
+                captured.clocks,
+              )
             Error(capture_session.CaptureNotReady) ->
               store
               |> capture_session.status
@@ -366,8 +366,35 @@ pub fn capture_status_v2_response(
               |> wisp.json_response(200)
             Error(_) -> wisp.json_response("{\"status\":\"failed\"}", 422)
           }
+        None, Some(path) ->
+          case storage.load(path) {
+            Ok(archive) ->
+              capture_status_ready_response(
+                archive.events,
+                archive.manifest.outcome,
+                archive.clocks,
+              )
+            Error(_) -> wisp.json_response("{\"status\":\"failed\"}", 422)
+          }
+        None, None -> wisp.not_found()
       }
   }
+}
+
+fn capture_status_ready_response(
+  events: List(types.TraceEvent),
+  outcome: types.CaptureOutcome,
+  clocks: types.ClockCalibration,
+) -> wisp.Response {
+  json.object([
+    #("status", json.string("sealed")),
+    #("event_count", json.int(list.length(events))),
+    #("outcome", codec.outcome_json(outcome)),
+    #("delivery_verified", json.bool(types.delivery_verified(outcome))),
+    #("clocks", codec.clocks_json(clocks)),
+  ])
+  |> json.to_string
+  |> wisp.json_response(200)
 }
 
 pub fn graph_response(
@@ -862,17 +889,9 @@ fn decode_json_body(
 }
 
 fn parse_capture_mfa(source: String) -> Result(types.Mfa, Nil) {
-  case string.split_once(source, ":") {
-    Ok(#(module_, function_and_arity)) if module_ != "" ->
-      case string.split_once(function_and_arity, "/") {
-        Ok(#(function_, arity_source)) if function_ != "" ->
-          case int.parse(arity_source) {
-            Ok(arity) if arity >= 0 -> Ok(types.Mfa(module_, function_, arity))
-            _ -> Error(Nil)
-          }
-        _ -> Error(Nil)
-      }
-    _ -> Error(Nil)
+  case core_mfa.parse(source) {
+    Ok(value) -> Ok(value)
+    Error(_) -> Error(Nil)
   }
 }
 

@@ -27,10 +27,10 @@ foreach ($marker in @(
     'RUN apk add --no-cache ca-certificates=20260611-r0',
     'gleam export erlang-shipment',
     'HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=3',
-    'http://127.0.0.1:4040/api/v1/ready',
+    'http://127.0.0.1:4040/api/v2/ready',
     'USER 10001:10001',
     'ENTRYPOINT ["/bin/sh", "/opt/beamtrace/runtime/entrypoint.sh", "run"]',
-    'CMD ["serve"]'
+    'CMD ["serve", "--port", "4040", "--no-open"]'
 )) {
     if (-not $source.Contains($marker)) { throw "OCI Dockerfile missing: $marker" }
 }
@@ -74,7 +74,7 @@ try {
     }
     if ($health -ne 'healthy') {
         $logs = (& docker logs $containerName 2>&1 | Out-String).Trim()
-        throw "OCI /api/v1/ready healthcheck did not become healthy (status: $health): $logs"
+        throw "OCI /api/v2/ready healthcheck did not become healthy (status: $health): $logs"
     }
 }
 finally {

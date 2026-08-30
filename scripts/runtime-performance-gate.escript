@@ -71,8 +71,8 @@ warm_up() ->
     CoreEvents = events(1, 500, []),
     _ = 'beamtrace@diff':compare(CoreEvents, CoreEvents),
     _ = 'beamtrace@diff':compare_prepared(
-        'beamtrace@diff':prepare(CoreEvents),
-        'beamtrace@diff':prepare(CoreEvents)
+        prepare_checked(CoreEvents),
+        prepare_checked(CoreEvents)
     ),
     RawEvents = raw_events(1, 500, []),
     {capture_result, Warmed, _, _} = normalize(RawEvents),
@@ -96,15 +96,21 @@ repeated_compare(Events, Remaining) ->
     repeated_compare(Events, Remaining - 1).
 
 prepared_compare(Events, Count) ->
-    Baseline = 'beamtrace@diff':prepare(Events),
+    Baseline = prepare_checked(Events),
     prepared_compare_candidates(Events, Baseline, Count).
 
 prepared_compare_candidates(_Events, _Baseline, 0) -> ok;
 prepared_compare_candidates(Events, Baseline, Remaining) ->
-    Candidate = 'beamtrace@diff':prepare(Events),
+    Candidate = prepare_checked(Events),
     {diff_report, _Items, 0, 0, 0, 0, none} =
         'beamtrace@diff':compare_prepared(Baseline, Candidate),
     prepared_compare_candidates(Events, Baseline, Remaining - 1).
+
+prepare_checked(Events) ->
+    case 'beamtrace@diff':prepare(Events) of
+        {ok, Prepared} -> Prepared;
+        {error, Reason} -> erlang:error({prepare_failed, Reason})
+    end.
 
 capture_gate() ->
     Events = raw_events(1, 100000, []),

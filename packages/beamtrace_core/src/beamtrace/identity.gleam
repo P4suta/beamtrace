@@ -1,3 +1,9 @@
+//// Resolve physical processes to evidence-backed logical actor identities.
+////
+//// Resolution never treats a PID as stable across runs and never fabricates
+//// identity evidence. Operations are linear in the small evidence lists and
+//// have no runtime-specific effects, so results match on both Gleam targets.
+
 import beamtrace/types
 import gleam/int
 import gleam/list
@@ -29,6 +35,9 @@ pub fn resolve(
   )
 }
 
+/// Return true only when both identities have the same evidence-derived
+/// logical identifier. Missing logical identity never falls back to PID.
+/// Comparison is O(identifier length) and cannot fail.
 pub fn same_logical_actor(
   left: types.ProcessIdentity,
   right: types.ProcessIdentity,

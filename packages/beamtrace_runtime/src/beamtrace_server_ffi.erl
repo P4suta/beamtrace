@@ -7,7 +7,8 @@
     begin_listener_start/0,
     end_listener_start/1,
     stop_worker/1,
-    stop_listener/1
+    stop_listener/1,
+    open_browser/1
 ]).
 -export([
     init/1,
@@ -119,6 +120,79 @@ stop_worker(Worker) when is_pid(Worker) ->
         nil
     end;
 stop_worker(_Worker) -> nil.
+
+open_browser(Url) when is_binary(Url) ->
+    case local_bootstrap_url(Url) of
+        false -> {error, <<"refused a non-loopback bootstrap URL">>};
+        true ->
+            case browser_command() of
+                {error, Reason} -> {error, Reason};
+                {ok, Executable, Prefix} ->
+                    browser_port(Executable, Prefix ++ [binary_to_list(Url)])
+            end
+    end;
+open_browser(_Url) -> {error, <<"invalid bootstrap URL">>}.
+
+local_bootstrap_url(Url) ->
+    lists:any(fun(Prefix) ->
+        binary:match(Url, Prefix) =:= {0, byte_size(Prefix)}
+    end, [
+        <<"http://127.0.0.1:">>,
+        <<"http://localhost:">>,
+        <<"http://[::1]:">>
+    ]).
+
+browser_command() ->
+    case os:type() of
+        {win32, _} -> find_browser_executable(
+            ["rundll32.exe"], ["url.dll,FileProtocolHandler"]
+        );
+        {unix, darwin} -> find_browser_executable(["open"], []);
+        {unix, _} ->
+            case find_browser_executable(["xdg-open"], []) of
+                {error, _} -> find_browser_executable(["gio"], ["open"]);
+                Found -> Found
+            end
+    end.
+
+find_browser_executable([], _Prefix) ->
+    {error, <<"no OS browser launcher was found">>};
+find_browser_executable([Name | Rest], Prefix) ->
+    case os:find_executable(Name) of
+        false -> find_browser_executable(Rest, Prefix);
+        Path -> {ok, Path, Prefix}
+    end.
+
+browser_port(Executable, Arguments) ->
+    try open_port(
+        {spawn_executable, Executable},
+        [binary, exit_status, stderr_to_stdout, hide,
+         {args, Arguments}]
+    ) of
+        Port ->
+            receive
+                {Port, {exit_status, 0}} -> {ok, nil};
+                {Port, {exit_status, _Status}} ->
+                    {error, <<"OS browser launcher exited unsuccessfully">>};
+                {Port, {data, _Data}} -> browser_port_drain(Port)
+            after 5000 ->
+                try port_close(Port) catch _:_ -> ok end,
+                {ok, nil}
+            end
+    catch
+        _:_ -> {error, <<"OS browser launcher could not be started">>}
+    end.
+
+browser_port_drain(Port) ->
+    receive
+        {Port, {exit_status, 0}} -> {ok, nil};
+        {Port, {exit_status, _Status}} ->
+            {error, <<"OS browser launcher exited unsuccessfully">>};
+        {Port, {data, _Data}} -> browser_port_drain(Port)
+    after 5000 ->
+        try port_close(Port) catch _:_ -> ok end,
+        {ok, nil}
+    end.
 
 init(Owner) when is_pid(Owner) -> {ok, Owner};
 init({Owner, _PreviousHandlerState}) when is_pid(Owner) -> {ok, Owner}.

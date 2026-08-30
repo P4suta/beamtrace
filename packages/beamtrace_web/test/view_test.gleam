@@ -86,7 +86,7 @@ pub fn workspace_exposes_keyboard_and_motion_accessibility_hints_test() {
   html |> string.contains("aria-live=\"polite\"") |> should.be_true()
 }
 
-pub fn capture_workspace_has_real_arm_cancel_and_save_controls_test() {
+pub fn capture_workspace_keeps_advanced_fields_disclosed_and_save_post_capture_test() {
   let html = rendered_workspace()
   html |> string.contains("aria-label=\"MFA trigger\"") |> should.be_true()
   html |> string.contains("aria-label=\"AQL condition\"") |> should.be_true()
@@ -94,9 +94,33 @@ pub fn capture_workspace_has_real_arm_cancel_and_save_controls_test() {
   html |> string.contains("aria-label=\"Max roots\"") |> should.be_true()
   html |> string.contains("Arm capture") |> should.be_true()
   html |> string.contains("Cancel capture") |> should.be_true()
-  html |> string.contains("Save capture") |> should.be_true()
+  html |> string.contains("Advanced") |> should.be_true()
+  html |> string.contains("Save capture") |> should.be_false()
   html |> string.contains("checkout@local") |> should.be_false()
   html |> string.contains("list=\"mfa-candidates\"") |> should.be_true()
+
+  let ready =
+    workspace.init([])
+    |> workspace.update(
+      workspace.CaptureStatusLoaded(workspace.Ready(
+        1,
+        "sealed after 250ms quiet period · delivery verified",
+      )),
+    )
+    |> view.workspace
+    |> element.to_string
+  ready |> string.contains("Save capture") |> should.be_true()
+  ready |> string.contains("Choose a save path") |> should.be_true()
+}
+
+pub fn workspace_has_bt_brand_theme_mobile_drawers_and_evidence_summary_test() {
+  let html = rendered_workspace()
+  html |> string.contains(">BT<") |> should.be_true()
+  html |> string.contains("Theme · System") |> should.be_true()
+  html |> string.contains("Mobile workspace mode") |> should.be_true()
+  html |> string.contains("What this trace establishes") |> should.be_true()
+  html |> string.contains("Delivery verification") |> should.be_true()
+  html |> string.contains("Evidence basis") |> should.be_true()
 }
 
 pub fn capture_workspace_renders_only_candidates_returned_by_the_target_test() {

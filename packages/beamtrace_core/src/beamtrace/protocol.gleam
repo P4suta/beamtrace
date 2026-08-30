@@ -1,6 +1,13 @@
+//// Classify privacy-safe term views into small semantic protocol labels.
+////
+//// Classification uses only already-redacted structure, is total, performs no
+//// I/O, and is O(size of the bounded view). It produces the same labels on
+//// Erlang and JavaScript.
+
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace/types
 
+/// A conservative label for recognizable BEAM protocol message shapes.
 pub type SemanticMessage {
   Call
   Cast
@@ -31,6 +38,7 @@ pub fn classify(message: types.TermView) -> SemanticMessage {
   }
 }
 
+/// Return the stable display label for a redacted term view in O(view size).
 pub fn label(message: types.TermView) -> String {
   case classify(message) {
     Call -> "call"

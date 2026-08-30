@@ -1,0 +1,29 @@
+[tools]
+gleam = "1.18.1"
+erlang = "29.0.5"
+node = "24.19.0"
+powershell = "7.6.5"
+
+[tasks."test:unit"]
+description = "Run deterministic unit suites without external sockets or optional ecosystems"
+run = "bash scripts/test-unit.sh"
+
+[tasks."test:integration"]
+description = "Run socket, EPMD, Rebar3, and Mix integration tests when prerequisites exist"
+run = "bash scripts/test-integration.sh"
+
+[tasks.test]
+description = "Run the reproducible local unit and available integration suites"
+run = "bash scripts/test-unit.sh && bash scripts/test-integration.sh && pwsh -NoProfile -File scripts/test-docs.ps1"
+
+[tasks."test:docs"]
+description = "Validate user documentation and versioned reference markers"
+run = "pwsh -NoProfile -File scripts/test-docs.ps1"
+
+[tasks.format]
+description = "Format every Gleam package"
+run = "for package in packages/beamtrace_core packages/beamtrace_runtime packages/beamtrace_tui packages/beamtrace_web; do (cd \"$package\" && gleam format src test); done"
+
+[tasks."web:build"]
+description = "Build the checked-in Web distribution"
+run = "bash scripts/build-web.sh"

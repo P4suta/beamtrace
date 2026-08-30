@@ -179,7 +179,7 @@ fn save(
             )
           {
             Ok(Nil) -> Ok(Nil)
-            Error(error) -> Error(string.inspect(error))
+            Error(_) -> Error("archive_write_failed")
           }
         }
       }

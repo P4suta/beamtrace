@@ -12,6 +12,12 @@ pub type Mode {
   Team
 }
 
+pub type Theme {
+  SystemTheme
+  LightTheme
+  DarkTheme
+}
+
 pub type TeamTrace {
   TeamTrace(
     id: String,
@@ -183,6 +189,7 @@ pub type Model {
   Model(
     remote: Bool,
     mode: Mode,
+    theme: Theme,
     events: List(EventRow),
     graph_edges: List(GraphEdge),
     graph_boundaries: List(GraphBoundary),
@@ -231,6 +238,7 @@ pub type Model {
     team_loading: Bool,
     team_error: Option(String),
     selected_trace_id: Option(String),
+    selected_team_trace_ids: List(String),
     team_events: List(EventRow),
     team_events_next_cursor: Option(String),
     team_events_loading: Bool,
@@ -240,6 +248,7 @@ pub type Model {
 
 pub type Msg {
   UserSelectedMode(Mode)
+  UserCycledTheme
   UserSelectedEvent(String)
   UserChangedQuery(String)
   UserToggledInternalNoise
@@ -284,6 +293,8 @@ pub type Msg {
   TeamTracesLoaded(TeamTracePage)
   TeamTracesFailed(String)
   UserSelectedTeamTrace(String)
+  UserToggledTeamCompare(String)
+  UserRequestedTeamCompare
   UserRequestedMoreTeamEvents
   TeamEventsLoaded(TeamEventPage)
   TeamEventsFailed(trace_id: String, reason: String)
@@ -296,6 +307,7 @@ pub fn init(events: List(EventRow)) -> Model {
   Model(
     remote: False,
     mode: Capture,
+    theme: SystemTheme,
     events: events,
     graph_edges: [],
     graph_boundaries: [],
@@ -344,6 +356,7 @@ pub fn init(events: List(EventRow)) -> Model {
     team_loading: False,
     team_error: None,
     selected_trace_id: None,
+    selected_team_trace_ids: [],
     team_events: [],
     team_events_next_cursor: None,
     team_events_loading: False,
@@ -365,6 +378,7 @@ pub fn init_remote() -> Model {
 
 pub fn update(model: Model, message: Msg) -> Model {
   case message {
+    UserCycledTheme -> Model(..model, theme: next_theme(model.theme))
     UserSelectedMode(mode) ->
       Model(
         ..model,
@@ -599,6 +613,51 @@ pub fn update(model: Model, message: Msg) -> Model {
             },
           )
       }
+    UserToggledTeamCompare(id) ->
+      case list.contains(model.selected_team_trace_ids, id) {
+        True ->
+          Model(
+            ..model,
+            selected_team_trace_ids: list.filter(
+              model.selected_team_trace_ids,
+              fn(selected) { selected != id },
+            ),
+          )
+        False ->
+          case list.length(model.selected_team_trace_ids) < 20 {
+            True ->
+              Model(
+                ..model,
+                selected_team_trace_ids: list.append(
+                  model.selected_team_trace_ids,
+                  [id],
+                ),
+              )
+            False ->
+              Model(
+                ..model,
+                team_error: Some("Select at most 20 traces for comparison"),
+              )
+          }
+      }
+    UserRequestedTeamCompare ->
+      case list.length(model.selected_team_trace_ids) >= 2 {
+        True ->
+          Model(
+            ..model,
+            mode: Compare,
+            compare_paths_input: model.selected_team_trace_ids
+              |> list.map(fn(id) { "team:" <> id })
+              |> string.join("\n"),
+            compare_loading: True,
+            compare_error: None,
+          )
+        False ->
+          Model(
+            ..model,
+            team_error: Some("Select between 2 and 20 traces to compare"),
+          )
+      }
     UserRequestedMoreTeamEvents ->
       Model(..model, team_events_loading: True, team_events_error: None)
     TeamEventsLoaded(page) ->
@@ -657,6 +716,14 @@ fn merge_team_traces(
     }
   })
   |> list.take(100)
+}
+
+fn next_theme(theme: Theme) -> Theme {
+  case theme {
+    SystemTheme -> LightTheme
+    LightTheme -> DarkTheme
+    DarkTheme -> SystemTheme
+  }
 }
 
 pub fn selected_team_trace(model: Model) -> Option(TeamTrace) {
@@ -730,6 +797,7 @@ fn valid_compare_paths(paths: List(String)) -> Bool {
   && count <= 20
   && list.all(paths, fn(path) {
     string.ends_with(string.lowercase(path), ".beamtrace")
+    || string.starts_with(path, "team:")
   })
   && unique_strings(paths, [])
 }

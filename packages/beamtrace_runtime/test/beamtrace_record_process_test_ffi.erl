@@ -44,12 +44,18 @@ rebar3_wrapper_runs() ->
 
 mix_wrapper_runs() ->
     case os:find_executable("mix") of
-        false ->
-            case os:getenv("BEAMTRACE_REQUIRE_ELIXIR") of
-                "1" -> {error, <<"mix executable was required but not found">>};
-                _ -> {ok, <<"skipped">>}
-            end;
-        _ -> with_wrapper_project(mix)
+        false -> mix_unavailable();
+        _ ->
+            case beamtrace_cli_ffi:run_command([<<"mix">>, <<"--version">>]) of
+                {ok, {0, _Output}} -> with_wrapper_project(mix);
+                _ -> mix_unavailable()
+            end
+    end.
+
+mix_unavailable() ->
+    case os:getenv("BEAMTRACE_REQUIRE_ELIXIR") of
+        "1" -> {error, <<"mix was required but is not usable">>};
+        _ -> {ok, <<"skipped">>}
     end.
 
 with_wrapper_project(Tool) ->

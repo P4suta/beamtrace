@@ -5,6 +5,7 @@ import beamtrace_runtime/audit_store
 import beamtrace_runtime/blob_store
 import beamtrace_runtime/capture_session
 import beamtrace_runtime/enrollment_store
+import beamtrace_runtime/id_token
 import beamtrace_runtime/internal/version as runtime_version
 import beamtrace_runtime/local_auth
 import beamtrace_runtime/log
@@ -24,6 +25,7 @@ import gleam/int
 import gleam/io
 import gleam/option.{type Option, None, Some}
 import gleam/string
+import gleam/uri
 import mist
 import wisp/wisp_mist
 
@@ -73,6 +75,58 @@ pub fn start(
     static_root,
     archive_path,
     None,
+    False,
+    "",
+  )
+}
+
+/// Start a local workspace and optionally launch its one-time bootstrap URL.
+/// Browser launch failure is reported but never stops the bound server.
+pub fn start_with_browser(
+  bind bind: String,
+  port port: Int,
+  mode mode: api.ServerMode,
+  secret_key_base secret_key_base: String,
+  static_root static_root: Option(String),
+  archive_path archive_path: Option(String),
+  open_browser open_browser: Bool,
+) -> Result(Nil, String) {
+  start_local(
+    bind,
+    port,
+    mode,
+    secret_key_base,
+    static_root,
+    archive_path,
+    None,
+    open_browser,
+    "",
+  )
+}
+
+/// Start a local comparison workspace whose bounded path list is consumed
+/// once from the bootstrap redirect. The browser history is cleaned by the Web
+/// client immediately after initialization.
+pub fn start_compare_with_browser(
+  bind bind: String,
+  port port: Int,
+  secret_key_base secret_key_base: String,
+  static_root static_root: Option(String),
+  archive_path archive_path: Option(String),
+  paths paths: List(String),
+  open_browser open_browser: Bool,
+) -> Result(Nil, String) {
+  let query = "?compare=" <> uri.percent_encode(string.join(paths, "\n"))
+  start_local(
+    bind,
+    port,
+    api.Local,
+    secret_key_base,
+    static_root,
+    archive_path,
+    None,
+    open_browser,
+    query,
   )
 }
 
@@ -92,6 +146,30 @@ pub fn start_attached(
     static_root,
     None,
     Some(capture_store),
+    False,
+    "",
+  )
+}
+
+pub fn start_attached_with_browser(
+  bind bind: String,
+  port port: Int,
+  mode mode: api.ServerMode,
+  secret_key_base secret_key_base: String,
+  static_root static_root: Option(String),
+  capture_store capture_store: capture_session.Store,
+  open_browser open_browser: Bool,
+) -> Result(Nil, String) {
+  start_local(
+    bind,
+    port,
+    mode,
+    secret_key_base,
+    static_root,
+    None,
+    Some(capture_store),
+    open_browser,
+    "",
   )
 }
 
@@ -131,6 +209,8 @@ fn start_local(
   static_root: Option(String),
   archive_path: Option(String),
   capture_store: Option(capture_session.Store),
+  open_browser: Bool,
+  bootstrap_query: String,
 ) -> Result(Nil, String) {
   let runtime = new_local(static_root, archive_path, capture_store)
   let listener =
@@ -147,12 +227,19 @@ fn start_local(
         log.Field("port", int.to_string(actual_port)),
       ])
       io.println("BeamTrace workspace: " <> url)
-      io.println(
-        "One-time bootstrap URL: "
-        <> url
-        <> "/bootstrap/"
-        <> runtime.bootstrap_token,
-      )
+      let bootstrap_url =
+        url <> "/bootstrap/" <> runtime.bootstrap_token <> bootstrap_query
+      case open_browser {
+        False -> io.println("One-time bootstrap URL: " <> bootstrap_url)
+        True ->
+          case launch_browser(bootstrap_url) {
+            Ok(Nil) -> io.println("Opened the one-time bootstrap URL.")
+            Error(reason) -> {
+              io.println_error("Could not open the default browser: " <> reason)
+              io.println("One-time bootstrap URL: " <> bootstrap_url)
+            }
+          }
+      }
     })
 
   let previous_trap_exit = begin_listener_start()
@@ -166,21 +253,14 @@ fn start_local(
       log.emit(log.Info, "server.closed", [log.Field("mode", "local")])
       outcome
     }
-    Error(error) -> {
+    Error(_error) -> {
       close_local(runtime)
       log.emit(log.Error, "server.bind_failed", [
         log.Field("mode", "local"),
         log.Field("bind", bind),
         log.Field("port", int.to_string(port)),
       ])
-      Error(
-        "could not bind "
-        <> bind
-        <> ":"
-        <> int.to_string(port)
-        <> ": "
-        <> string.inspect(error),
-      )
+      Error("could not bind " <> bind <> ":" <> int.to_string(port))
     }
   }
 }
@@ -199,6 +279,10 @@ pub fn new_team(
   archive_path: Option(String),
   now_ms: Int,
 ) -> Result(TeamRuntime, String) {
+  use Nil <- result_try(case id_token.validate_signing_jwks(config.jwks_json) {
+    Ok(Nil) -> Ok(Nil)
+    Error(_) -> Error("invalid OIDC public signing JWKS")
+  })
   use paths <- result_try(prepare_data_paths(config.data_dir))
   let #(database_path, blob_root) = paths
   use blob_backend <- result_try(configured_blob_backend(
@@ -471,7 +555,7 @@ pub fn start_team(
           log.emit(log.Info, "server.closed", [log.Field("mode", "team")])
           outcome
         }
-        Error(error) -> {
+        Error(_error) -> {
           close_team(runtime)
           log.emit(log.Error, "server.bind_failed", [
             log.Field("mode", "team"),
@@ -482,9 +566,7 @@ pub fn start_team(
             "could not bind "
             <> config.bind
             <> ":"
-            <> int.to_string(config.port)
-            <> ": "
-            <> string.inspect(error),
+            <> int.to_string(config.port),
           )
         }
       }
@@ -570,3 +652,6 @@ fn stop_listener(listener: process.Pid) -> Nil
 
 @external(erlang, "beamtrace_server_ffi", "stop_worker")
 fn stop_worker(worker: process.Pid) -> Nil
+
+@external(erlang, "beamtrace_server_ffi", "open_browser")
+fn launch_browser(url: String) -> Result(Nil, String)

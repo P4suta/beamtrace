@@ -130,3 +130,30 @@ pub fn team_trace_selector_shows_locked_rows_and_selection_test() {
   ansi |> string.contains("trace-raw") |> should.be_true()
   ansi |> string.contains("🔒") |> should.be_true()
 }
+
+pub fn compare_screen_renders_count_statistics_and_first_divergence_test() {
+  let state =
+    model.compare(
+      "baseline.beamtrace",
+      3,
+      [
+        model.CompareRunSummary(
+          "candidate.beamtrace",
+          1,
+          0,
+          2,
+          1,
+          "root → send → receive",
+        ),
+      ],
+      5,
+    )
+  let ansi =
+    view.render(state, geometry.rect_new(0, 0, 140, 40))
+    |> buffer.to_ansi
+
+  ansi |> string.contains("MULTI-TRACE ALIGNMENT") |> should.be_true()
+  ansi |> string.contains("3 traces") |> should.be_true()
+  ansi |> string.contains("5 branch signatures") |> should.be_true()
+  ansi |> string.contains("root → send → receive") |> should.be_true()
+}

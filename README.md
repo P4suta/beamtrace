@@ -4,141 +4,212 @@
 [![TDD](https://github.com/P4suta/beamtrace/actions/workflows/ci.yml/badge.svg)](https://github.com/P4suta/beamtrace/actions/workflows/ci.yml)
 [![Security](https://github.com/P4suta/beamtrace/actions/workflows/security.yml/badge.svg)](https://github.com/P4suta/beamtrace/actions/workflows/security.yml)
 
-BeamTrace is an open-source causal workbench for Gleam, Elixir, and Erlang systems on the BEAM. It attaches to an OTP 27–29 node without application changes, arms a selected MFA, and produces a bounded, delivery-verified causal observation of one operation.
+BeamTrace records one bounded causal operation from Gleam, Elixir, or Erlang,
+then explains what was observed, what was inferred, and where evidence ends.
+It does not add an RPC shell, process mutation, process killing, or an ETS
+browser.
 
-The command is `beamtrace`, and its portable trace archive uses the `.beamtrace` extension.
+## Install
 
-The project is alpha software. Exact single-node and distributed capture, metadata-safe trace storage, offline and multi-run compare, bounded live sampling, indexed search, the Web workspace, and the TUI client are implemented. Team mode includes OIDC discovery and callback verification, RBAC/CSRF enforcement, SQLite WAL metadata, durable annotations and hash-chained audit history, filesystem or S3-compatible blob storage, one-time Ed25519 enrollment, a signed outbound relay WebSocket with credit flow, and separately authorized bounded raw capture.
+### Native ZIP (recommended CLI)
 
-## Why BeamTrace
+Download the archive for your platform from the
+[GitHub release](https://github.com/P4suta/beamtrace/releases):
 
-- **Capture** — arm `Module:function/arity`, perform one operation, then seal agents, pass delivery barriers, drain queues, and retain receipts and integrity issues with the observed causal graph.
-- **Compare** — align traces by logical process and causal shape instead of PID or wall-clock identity.
-- **Live** — inspect bounded process samples and diagnose mailbox, reductions, memory, restart, fan-in, and dangling-call signals without reading every mailbox.
-- **Honest evidence** — every edge is `Exact` or `Inferred(method, reason, inputs)`. Missing nodes, dropped events, ports, ETS, external I/O, and ambiguous matches remain explicit issues or boundaries; BeamTrace displays no uncalibrated probabilities.
+- `beamtrace-<version>-linux-x64.zip`
+- `beamtrace-<version>-linux-arm64.zip`
+- `beamtrace-<version>-macos-x64.zip`
+- `beamtrace-<version>-macos-arm64.zip`
+- `beamtrace-<version>-windows-x64.zip`
 
-BeamTrace does not expose an RPC shell, process killing, state mutation, or an ETS browser.
+Each self-contained archive includes ERTS. Download its adjacent `.sha256`
+file, verify the checksum, and verify the GitHub artifact attestation before
+running it:
 
-## Quick start
-
-Building from source requires Gleam 1.18.x and Erlang/OTP 27, 28, or 29. Native release archives include ERTS and do not require a host Erlang installation.
-
-```powershell
-# Run the complete local TDD gate
-./scripts/test-all.ps1
-
-# Capture the bundled fixture through the real record path, without setup
-./scripts/beamtrace.ps1 demo --no-ui --out demo.beamtrace
-
-# Create and validate project-local, non-secret capture profiles
-./scripts/beamtrace.ps1 init
-./scripts/beamtrace.ps1 config check
-
-# Check the local runtime
-./scripts/beamtrace.ps1 doctor --json
-
-# Use a profile; explicit CLI values override profile and project defaults.
-./scripts/beamtrace.ps1 capture --profile local --node app@host
-
-# Open a bounded Web workspace on an OS-selected loopback port
-./scripts/beamtrace.ps1 open checkout.beamtrace --web --port 0
+```sh
+sha256sum --check beamtrace-<version>-linux-x64.zip.sha256
+gh attestation verify beamtrace-<version>-linux-x64.zip --repo P4suta/beamtrace
+unzip beamtrace-<version>-linux-x64.zip
+./beamtrace-<version>-linux-x64/bin/beamtrace version
 ```
 
-On macOS or Linux, invoke the same PowerShell scripts with `pwsh -File`, or run the package commands directly from their directories.
+On Windows, use `Get-FileHash -Algorithm SHA256` and compare it with the
+downloaded checksum file. The release page is the source of truth; BeamTrace
+does not currently advertise an unpublished Homebrew tap or Scoop bucket.
 
-`beamtrace init` creates `beamtrace.toml` only when it does not already exist.
-Its `[defaults]` and `[profiles.NAME]` tables may contain `node`, `trigger`,
-`where`, `out`, `cookie_file`, `max_roots`, and `preset`. Precedence is explicit
-CLI value, selected profile, project defaults, then built-in defaults. Relative
-`out` and `cookie_file` paths resolve from the configuration file, not the
-invoking directory. Commands, cookie values, grants, tokens, and OIDC/S3 secret
-keys are rejected recursively. `beamtrace config check` validates TOML, MFA,
-AQL, presets, bounds, and paths without starting capture.
+### Gleam library
 
-## Repository layout
+Add the target-independent package from Hex:
 
-| Path | Responsibility |
-| --- | --- |
-| `packages/beamtrace_core` | target-independent types, AQL, DAG, identity, anomaly, diff, codec |
-| `packages/beamtrace_runtime` | CLI, hub API, collector, relay protocol, storage, exports |
-| `packages/beamtrace_web` | Lustre SPA and bounded Canvas renderer |
-| `packages/beamtrace_tui` | canonical terminal client built with `etui` |
-| `agent` | dependency-free Erlang module injected temporarily into target nodes |
-| `fixtures` | equivalent Gleam, Elixir, and Erlang supervision/call/crash fixtures |
-
-The hub never receives a distribution cookie in team mode. A relay joins the target environment, registers an Ed25519 public key through a one-time HTTPS enrollment code, and initiates outbound connections only. The public key and enrollment audit survive hub restarts; relay private keys, distribution cookies, and nonce replay caches are never persisted by the hub.
-
-The Admin-only `/api/v1/audit` endpoint exposes the verified audit chain with bounded pagination (at most 200 entries per request). Viewer and unauthenticated requests are rejected, and each page includes the current chain head for integrity checks.
-
-See [team mode](docs/team-mode.md) for OIDC, relay, raw-capture, and S3 configuration.
-
-## Operational boundaries
-
-- Metadata capture remains the default. Raw relay capture requires both Investigator and Raw Capture roles, a short-lived one-time grant, explicit redaction keys, and strict duration/event/byte/depth/binary budgets; every authorization outcome is audited.
-- Raw and conservatively classified `unknown` content can be read only by an Admin or a subject holding both Investigator and Raw Capture roles. Authorization happens before any memory, filesystem, or S3 blob fetch, and allowed and denied reads are audited.
-- The S3-compatible adapter uses HTTPS path-style requests and SigV4 credentials from process environment only. It intentionally does not accept credentials in BeamTrace configuration or implement a general cloud credential-provider chain.
-- Causal order crosses nodes through sequence serials. Clock offsets retain uncertainty and are never presented as a perfectly synchronized global clock.
-- Quiet time starts sealing; it is not a completeness claim. A capture outcome separately records why observation ended, all integrity issues, and each node receipt.
-- Package-manager registry publication and the first signed release remain release operations, not runtime implementation gaps.
-
-## CLI
-
-```text
-beamtrace attach <node> [--web|--tui] [--port PORT] --acknowledge-seq-trace-reset
-beamtrace capture [<node>] [--profile NAME] --trigger Module:function/arity [--where AQL] --out file.beamtrace --acknowledge-seq-trace-reset
-beamtrace record [--profile NAME] [--node NODE] [options] -- <gleam|mix|rebar3|erl command>
-beamtrace open <file.beamtrace> [--web|--tui] [--port PORT]
-beamtrace compare <left.beamtrace> <right.beamtrace>
-beamtrace export <file.beamtrace> --format html|jsonl|mermaid|otlp
-beamtrace validate <file.beamtrace> [--json]
-beamtrace migrate <v1.beamtrace> --output <v2.beamtrace>
-beamtrace serve [--port PORT]
-beamtrace demo [--web|--tui|--no-ui] [--out PATH] [--port PORT]
-beamtrace relay <https-hub-url> --enroll <one-time-token> [--node NODE --trigger MFA]
-                [--cookie-file PATH] [--raw-grant-file PATH]
-beamtrace tui [--server <url>] [--session-cookie-file <0600-file>]
-beamtrace init
-beamtrace config check
-beamtrace doctor [--json]
-beamtrace mcp
+```sh
+gleam add beamtrace_core
 ```
 
-Exit codes are `0` success, `1` comparison/diagnostic policy failure, `2` usage/connect/configuration error, `3` capture integrity issue, and `4` permission or safety refusal.
+The high-level `beamtrace` module validates events, constructs the causal DAG
+once, and exposes checked comparison on both Erlang and JavaScript. See the
+[`beamtrace_core` guide](packages/beamtrace_core/README.md).
 
-`record` resolves the requested executable once and launches it without a shell, preserving every argument boundary and mise/asdf shim path. Direct Erlang gates its VM immediately. `gleam run`, `mix run`, and `rebar3 shell` first perform a bounded compile only when the trigger BEAM is absent, then gate the final project VM; Gleam recording requires the Erlang target and adds it when omitted. All paths use a private one-time OS temp directory and remove it after success, failure, timeout, or termination.
+### OCI
 
-Team TUI loading uses the same bounded `/api/v1/traces` response as the Web selector. Pass the current OIDC session ID through a regular `0600` file; BeamTrace never accepts it as a command-line value. Cleartext HTTP is accepted only for `localhost`, `127.0.0.1`, or `::1`; remote Team origins require verified HTTPS.
+The release workflow publishes immutable version and commit tags to
+`ghcr.io/p4suta/beamtrace`. Pin the digest reported by your verified release:
+
+```sh
+docker pull ghcr.io/p4suta/beamtrace:<version>
+docker run --rm ghcr.io/p4suta/beamtrace:<version> version
+```
+
+## 60-second demo
+
+From an extracted native archive:
+
+```sh
+beamtrace demo
+```
+
+BeamTrace records its bundled fixture, binds an OS-selected loopback port, and
+opens a one-time bootstrap URL in the default browser. If the browser cannot be
+opened, the URL is printed and the server continues. Use `--no-open` to print
+the URL deliberately, or use this CI-safe command:
+
+```sh
+beamtrace demo --no-ui --json
+```
+
+Without `--out`, the demo archive is temporary and removed when the command
+ends. Keep it explicitly with `--out demo.beamtrace`.
+
+## Record a real application
+
+Choose the MFA that represents the operation and put the application command
+after `--`. Output defaults to an exclusively created
+`beamtrace-YYYYMMDDTHHMMSSZ[-N].beamtrace` file.
+
+### Gleam
+
+```sh
+beamtrace record --trigger app:main/0 -- gleam run
+```
+
+### Elixir
+
+```sh
+beamtrace record --trigger Elixir.MyApp.Worker:run/1 -- mix run
+```
+
+### Erlang
+
+```sh
+beamtrace record --trigger orders_worker:run/1 -- rebar3 shell
+```
+
+Interactive terminals use the Web result workspace by default; non-interactive
+runs use no UI. Override that choice with `--web`, `--tui`, `--no-ui`, or
+`--no-open`. Progress reports connection, arming, observation end, sealing,
+verification, and the final path.
+
+Recording from an already running node is equally direct:
+
+```sh
+beamtrace capture app@host --trigger shop:checkout/1
+```
+
+Exact capture uses VM-global `seq_trace`. An interactive terminal explains and
+asks once immediately before execution. Non-interactive automation must make
+the existing explicit acknowledgement:
+
+```sh
+beamtrace capture app@host \
+  --trigger shop:checkout/1 \
+  --acknowledge-seq-trace-reset \
+  --json
+```
+
+An existing destination is never replaced implicitly. Pass a different path,
+or use `--force` only when replacement is intentional.
+
+## Read a result
+
+The result overview comes before the event table and reports:
+
+- why observation ended;
+- whether final delivery receipts verify the captured set;
+- integrity issues and causal boundaries;
+- the evidence basis for every Exact or Inferred relationship;
+- what the trace cannot establish.
+
+See [Reading results](docs/reading-results.md) for the interpretation contract.
+Clock calibration remains an interval, quiet time is not a completeness claim,
+and ambiguous comparison alignment remains explicit.
+
+## CLI and API
+
+Run `beamtrace` with no arguments for the short path, or use generated help and
+completion from the declarative command specification:
+
+```sh
+beamtrace help compare
+beamtrace capture --help
+beamtrace completion bash
+beamtrace completion zsh
+beamtrace completion fish
+beamtrace completion powershell
+```
+
+`compare` accepts 2–20 archives and supports Web, TUI, and JSON modes:
+
+```sh
+beamtrace compare run-1.beamtrace run-2.beamtrace run-3.beamtrace --web
+```
+
+Finite commands accept `--json` and emit one stdout object containing
+`schema_version`, `command`, `ok`, `exit_code`, `artifact`, `outcome`, and
+`error`. Human errors provide a stable code, explanation, and next action.
+
+The supported HTTP surface is `/api/v2`; its OpenAPI 3.1 document is included
+in the distribution and served at `/api/v2/openapi.json`. `/api/v1` remains a
+deprecated compatibility projection through v0.3 and advertises removal in
+v0.4.
+
+References:
+
+- [Getting started](docs/getting-started.md)
+- [Gleam recording](docs/record-gleam.md), [Elixir recording](docs/record-elixir.md), [Erlang recording](docs/record-erlang.md)
+- [CLI reference](docs/cli-reference.md), [API reference](docs/api-reference.md), [MCP reference](docs/mcp-reference.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Archive format](docs/trace-format.md), [threat model](docs/threat-model.md), [Team mode](docs/team-mode.md)
 
 ## Safety defaults
 
-- OTP isolated trace sessions avoid changing another tracer's flags.
-- Exact capture refuses to replace an occupied system tracer.
-- Metadata mode exports term tags, shapes, sizes, and salted fingerprints—not scalar or binary values.
-- Raw grants are token-hashed at rest, relay-bound, atomically budgeted, and removed from canonical stored payloads.
-- Exact capture stops at a configured budget and records that observation end; Live drops old samples only with an explicit `Gap`.
-- Trace archives reject unsafe paths, duplicate entries, suspicious compression ratios, oversized entries, and checksum mismatches before import.
-- Local Web mode binds loopback and exchanges a one-time URL for an HttpOnly, SameSite cookie.
-- `/api/v2` returns structured outcomes, evidence inputs, interval time, and real graph edges. `/api/v1` is a one-release deprecated projection and refuses events whose uncertainty or inference cannot be represented honestly.
-- `/api/v1/health` reports liveness and `/api/v1/ready` is installed only after initialization and bind succeed. URLs, bootstrap tokens, and enrollment codes are never printed before a successful bind.
-- Human and JSON logs omit distribution cookies, session tokens, raw payloads, OIDC material, and S3 credentials.
-- There is no telemetry, CDN, external font, or external request in exported HTML.
-
-Read the [v0.3 migration guide](docs/migration-v0.3.md), [format specification](docs/trace-format.md), [conformance procedure](docs/conformance.md), and [threat model](docs/threat-model.md) before deploying a relay or enabling raw capture.
+- Metadata capture is the default; raw capture retains its separate, bounded
+  authorization and redaction policy.
+- Distribution cookies, bootstrap tokens, OIDC material, grants, and raw
+  payloads are not persisted in command configuration or logs.
+- Archives reject unsafe paths, duplicate entries, suspicious compression,
+  excessive size, checksum mismatch, non-canonical events, and invalid DAGs.
+- Local Web binds loopback and exchanges a one-time URL for an HttpOnly,
+  SameSite cookie.
+- There is no telemetry, CDN, external font, or usage tracking.
 
 ## Development
 
-Every change follows Red → Green → Refactor. The merge gate is:
+Tool versions and standard tasks are pinned in [`.mise.toml`](.mise.toml):
 
-```powershell
-./scripts/test-all.ps1
+```sh
+mise install
+mise run test
 ```
 
-CI runs OTP 27–29 on Windows, Linux, and macOS, plus shortname, longname, TLS distribution, real S3-compatible TLS, Chromium, PTY, MCP official-client, clean Erlang/JavaScript Hex-consumer, package, and OCI suites. Every native ZIP is compared with the published v0.1.0 target baseline and fails above 5% growth. See [development.md](docs/development.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [repository governance](docs/github-governance.md).
+`mise run test:unit` avoids external sockets and optional ecosystems;
+`mise run test:integration` owns the socket, EPMD, Rebar3, and Mix runtime
+tests and reports missing optional tools as skipped prerequisites rather than
+code failures. The release gate still runs OTP 27–29, five native archives,
+distribution/TLS/S3/Chromium/PTY/MCP, performance, and archive-size checks.
 
-Questions belong in [GitHub Discussions](https://github.com/P4suta/beamtrace/discussions/categories/q-a), confirmed defects use the structured issue forms, and suspected vulnerabilities use a private security advisory. See [SUPPORT.md](SUPPORT.md), [SECURITY.md](SECURITY.md), and [GOVERNANCE.md](GOVERNANCE.md).
-
-Release Please proposes alpha releases from Conventional Commits. Merging its release PR is the publication approval; the resulting protected tag builds five self-contained native OS/architecture archives, publishes `beamtrace_core` to Hex, publishes immutable version and commit tags to GHCR, and attaches Homebrew/Scoop metadata to a GitHub prerelease. Archives contain ERTS, checksums, and SPDX SBOM data; GitHub OIDC artifact attestations record build provenance. Windows ARM64 is deferred until a reproducible native Erlang/OTP runtime can be provisioned; an x64 runtime is never relabeled as ARM64. See [releasing.md](docs/releasing.md).
+See [Development](docs/development.md), [Contributing](CONTRIBUTING.md), and
+[Release procedure](docs/releasing.md).
 
 ## License
 
-BeamTrace is dual-licensed under your choice of [Apache-2.0](LICENSES/Apache-2.0.txt) or [MIT](LICENSES/MIT.txt). The repository follows REUSE metadata conventions.
+BeamTrace is dual-licensed under your choice of
+[Apache-2.0](LICENSES/Apache-2.0.txt) or [MIT](LICENSES/MIT.txt).

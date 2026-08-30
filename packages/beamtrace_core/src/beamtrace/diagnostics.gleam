@@ -1,3 +1,10 @@
+//// Bounded offline diagnostics over trace-event lists.
+////
+//// Findings retain counts, durations, and evidence rather than confidence
+//// scores. Empty or unmatched input returns no finding; invalid events should
+//// be rejected before this layer. Analyses are linear or O(n log n), depending
+//// on grouping, and are portable across Erlang and JavaScript.
+
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace/types
 import gleam/dict.{type Dict}
@@ -8,6 +15,7 @@ import gleam/order
 import gleam/result
 import gleam/string
 
+/// A stable diagnostic category suitable for filtering and reporting.
 pub type FindingKind {
   HotSender
   FanIn
@@ -19,11 +27,13 @@ pub type FindingKind {
   CriticalPath
 }
 
+/// A finding's exact count or uncertainty-preserving time estimate.
 pub type FindingValue {
   CountValue(Int)
   TimeValue(types.TimeEstimate)
 }
 
+/// One bounded diagnostic conclusion with its evidence and source events.
 pub type Finding {
   Finding(
     kind: FindingKind,

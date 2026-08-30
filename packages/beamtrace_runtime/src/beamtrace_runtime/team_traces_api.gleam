@@ -3,13 +3,16 @@ import beamtrace/types
 import beamtrace_runtime/audit
 import beamtrace_runtime/audit_store
 import beamtrace_runtime/blob_store
+import beamtrace_runtime/compare_workspace
 import beamtrace_runtime/csrf
+import beamtrace_runtime/local_api
 import beamtrace_runtime/rbac
 import beamtrace_runtime/relay_archive
 import beamtrace_runtime/relay_payload
 import beamtrace_runtime/team_auth
 import beamtrace_runtime/team_store
 import gleam/bit_array
+import gleam/dynamic/decode
 import gleam/http
 import gleam/http/request
 import gleam/int
@@ -39,6 +42,223 @@ pub type TeamSecurity {
 
 pub type Context {
   Context(mode: ServerMode, team_security: Option(TeamSecurity))
+}
+
+type ComparePayload {
+  ComparePayload(paths: List(String))
+}
+
+/// Compare 2–20 Team traces after applying the same session and raw-content
+/// authorization used by the event endpoint. Decoded events never bypass the
+/// checked DAG preparation path.
+pub fn compare_response(
+  incoming: wisp.Request,
+  context: Context,
+  now_ms: Int,
+) -> wisp.Response {
+  case
+    context.mode,
+    context.team_security,
+    team_session(incoming, context, now_ms)
+  {
+    Team, Some(security), Ok(session) ->
+      case
+        rbac.authorize(session.roles, rbac.ViewSession),
+        security.relay_archive,
+        decode_compare_body(incoming)
+      {
+        False, _, _ -> wisp.response(403)
+        _, None, _ -> wisp.response(503)
+        _, _, Error("too_large") -> wisp.response(413)
+        _, _, Error(_) ->
+          wisp.json_response("{\"error\":\"invalid_request\"}", 400)
+        True, Some(archive), Ok(ComparePayload(paths)) -> {
+          let #(store, backend) = relay_archive_parts(archive)
+          case team_compare_ids(paths) {
+            Error(_) -> wisp.json_response("{\"error\":\"invalid_paths\"}", 400)
+            Ok(ids) ->
+              case
+                load_compare_runs(
+                  store,
+                  backend,
+                  security,
+                  session,
+                  ids,
+                  now_ms,
+                  [],
+                )
+              {
+                Error("not_found") -> wisp.not_found()
+                Error("permission_denied") -> wisp.response(403)
+                Error("too_many_events") -> wisp.response(413)
+                Error(_) -> wisp.response(503)
+                Ok(runs) ->
+                  case compare_workspace.compare_events(runs) {
+                    Error(compare_workspace.InvalidPaths) ->
+                      wisp.json_response("{\"error\":\"invalid_paths\"}", 400)
+                    Error(compare_workspace.InvalidTrace(path, _)) ->
+                      json.object([
+                        #("error", json.string("invalid_trace_graph")),
+                        #("path", json.string(path)),
+                      ])
+                      |> json.to_string
+                      |> wisp.json_response(422)
+                    Error(compare_workspace.LoadFailed(_, _)) ->
+                      wisp.response(503)
+                    Ok(report) ->
+                      report
+                      |> local_api.compare_report_json
+                      |> json.to_string
+                      |> wisp.json_response(200)
+                  }
+              }
+          }
+        }
+      }
+    Team, Some(_), Error(_) -> wisp.response(401)
+    _, _, _ -> wisp.not_found()
+  }
+}
+
+fn decode_compare_body(
+  incoming: wisp.Request,
+) -> Result(ComparePayload, String) {
+  case wisp.read_body_bits(incoming) {
+    Error(_) -> Error("too_large")
+    Ok(body) ->
+      case bit_array.byte_size(body) > 16_384, bit_array.to_string(body) {
+        True, _ -> Error("too_large")
+        _, Error(_) -> Error("invalid_utf8")
+        False, Ok(source) ->
+          case json.parse(source, compare_payload_decoder()) {
+            Ok(payload) -> Ok(payload)
+            Error(_) -> Error("invalid_json")
+          }
+      }
+  }
+}
+
+fn compare_payload_decoder() -> decode.Decoder(ComparePayload) {
+  use paths <- decode.field("paths", decode.list(decode.string))
+  decode.success(ComparePayload(paths))
+}
+
+fn team_compare_ids(paths: List(String)) -> Result(List(String), Nil) {
+  let count = list.length(paths)
+  case count >= 2 && count <= 20 {
+    False -> Error(Nil)
+    True ->
+      paths
+      |> list.map(fn(path) {
+        case string.starts_with(path, "team:") {
+          True -> {
+            let id = string.drop_start(path, 5)
+            case id != "" && string.byte_size(id) <= 256 {
+              True -> Ok(id)
+              False -> Error(Nil)
+            }
+          }
+          False -> Error(Nil)
+        }
+      })
+      |> collect_results([])
+  }
+}
+
+fn load_compare_runs(
+  store: team_store.Store,
+  backend: blob_store.Backend,
+  security: TeamSecurity,
+  session: team_auth.Session,
+  ids: List(String),
+  now_ms: Int,
+  accumulator: List(#(String, List(types.TraceEvent))),
+) -> Result(List(#(String, List(types.TraceEvent))), String) {
+  case ids {
+    [] -> Ok(list.reverse(accumulator))
+    [id, ..rest] ->
+      case team_store.trace_session(store, id) {
+        Error(_) -> Error("storage_failed")
+        Ok(None) -> Error("not_found")
+        Ok(Some(trace)) ->
+          case authorize_trace_contents(security, session, trace, now_ms) {
+            False -> Error("permission_denied")
+            True ->
+              case trace.event_count > 100_000 {
+                True -> Error("too_many_events")
+                False ->
+                  case load_complete_trace(store, backend, trace, 0, []) {
+                    Error(error) -> Error(error)
+                    Ok(events) ->
+                      load_compare_runs(
+                        store,
+                        backend,
+                        security,
+                        session,
+                        rest,
+                        now_ms,
+                        [#("team:" <> id, events), ..accumulator],
+                      )
+                  }
+              }
+          }
+      }
+  }
+}
+
+fn load_complete_trace(
+  store: team_store.Store,
+  backend: blob_store.Backend,
+  trace: team_store.TraceSession,
+  start: Int,
+  accumulator: List(types.TraceEvent),
+) -> Result(List(types.TraceEvent), String) {
+  case start >= trace.event_count {
+    True -> Ok(accumulator)
+    False -> {
+      let limit = int.min(200, trace.event_count - start)
+      case team_store.segments_in_window(store, trace.id, start:, limit:) {
+        Error(error) -> Error(error)
+        Ok([]) -> Error("missing_trace_segment")
+        Ok(segments) ->
+          case load_trace_segments(store, backend, trace, segments, []) {
+            Error(error) -> Error(error)
+            Ok(segment_events) -> {
+              let first_event = case segments {
+                [first, ..] -> first.first_event
+                [] -> start
+              }
+              let page =
+                segment_events
+                |> list.drop(int.max(0, start - first_event))
+                |> list.take(limit)
+              case page {
+                [] -> Error("missing_trace_events")
+                _ ->
+                  load_complete_trace(
+                    store,
+                    backend,
+                    trace,
+                    start + list.length(page),
+                    list.append(accumulator, page),
+                  )
+              }
+            }
+          }
+      }
+    }
+  }
+}
+
+fn collect_results(
+  results: List(Result(a, e)),
+  accumulator: List(a),
+) -> Result(List(a), e) {
+  case results {
+    [] -> Ok(list.reverse(accumulator))
+    [Ok(value), ..rest] -> collect_results(rest, [value, ..accumulator])
+    [Error(error), ..] -> Error(error)
+  }
 }
 
 pub fn audit_response(

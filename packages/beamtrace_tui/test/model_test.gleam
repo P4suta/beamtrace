@@ -139,3 +139,26 @@ pub fn offline_archive_is_not_misrepresented_as_a_live_connection_test() {
   state.screen |> should.equal(model.CaptureScreen)
   state.notice |> should.equal("Opened offline trace")
 }
+
+pub fn compare_model_keeps_bounded_run_statistics_test() {
+  let state =
+    model.compare(
+      "baseline.beamtrace",
+      3,
+      [
+        model.CompareRunSummary(
+          "candidate.beamtrace",
+          1,
+          2,
+          3,
+          1,
+          "root → send → receive",
+        ),
+      ],
+      4,
+    )
+
+  state.screen |> should.equal(model.CompareScreen)
+  state.compare_run_count |> should.equal(3)
+  state.compare_statistics_count |> should.equal(4)
+}

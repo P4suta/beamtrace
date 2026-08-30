@@ -64,7 +64,7 @@ pub fn save_rejects_event_nodes_not_declared_by_manifest_test() {
   ])
   |> should.equal(
     Error(storage.CodecError(
-      "InvalidField(\"events.node\", \"references a node not declared by the manifest\")",
+      "invalid_field:events.node:references a node not declared by the manifest",
     )),
   )
 }
@@ -172,4 +172,40 @@ pub fn full_text_search_rejects_empty_or_unbounded_queries_test() {
   |> should.equal(Error(storage.InvalidSearch))
   storage.search("unused.beamtrace", "valid", start: -1, limit: 10)
   |> should.equal(Error(storage.InvalidWindow))
+}
+
+pub fn exclusive_save_refuses_an_existing_archive_without_replacing_it_test() {
+  let path = "build/beamtrace-exclusive-output-test.beamtrace"
+  let original = fixture_event()
+  let replacement = types.TraceEvent(..original, id: "replacement")
+  storage.save(path, fixture_manifest(), [original]) |> should.equal(Ok(Nil))
+
+  storage.save_exclusive_with_clocks(
+    path,
+    fixture_manifest(),
+    [replacement],
+    types.empty_calibration(),
+  )
+  |> should.equal(Error(storage.IoError("destination_exists")))
+
+  let assert Ok(archive) = storage.load(path)
+  archive.events |> should.equal([original])
+}
+
+pub fn force_writer_replaces_an_existing_archive_test() {
+  let path = "build/beamtrace-force-output-test.beamtrace"
+  let original = fixture_event()
+  let replacement = types.TraceEvent(..original, id: "replacement")
+  storage.save(path, fixture_manifest(), [original]) |> should.equal(Ok(Nil))
+
+  storage.save_with_clocks(
+    path,
+    fixture_manifest(),
+    [replacement],
+    types.empty_calibration(),
+  )
+  |> should.equal(Ok(Nil))
+
+  let assert Ok(archive) = storage.load(path)
+  archive.events |> should.equal([replacement])
 }

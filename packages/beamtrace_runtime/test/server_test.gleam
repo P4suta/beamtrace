@@ -274,7 +274,7 @@ fn team_configuration(data_dir: String, retention_days: Int) {
     issuer: "https://id.example",
     client_id: "beamtrace",
     redirect_uri: "https://hub.example/auth/oidc/callback",
-    jwks_json: "{\"keys\":[]}",
+    jwks_json: "{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"key-1\",\"use\":\"sig\",\"alg\":\"RS256\",\"n\":\"AQ\",\"e\":\"Aw\"}]}",
     group_roles: [#("beam-viewers", rbac.Viewer)],
     project: "shop",
     environment: "prod",

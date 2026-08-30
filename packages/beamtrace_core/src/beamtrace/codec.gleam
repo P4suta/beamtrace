@@ -1,3 +1,10 @@
+//// Canonical archive-v2 JSON encoding, decoding, and typed validation.
+////
+//// Decoders reject malformed, non-canonical, unknown-version, and invalid
+//// field data with `CodecError`; no permissive coercion is performed. Work is
+//// linear in the encoded value plus bounded nested collections. On either
+//// target, decoding an encoded valid event round-trips it.
+
 import beamtrace/types
 import gleam/dynamic/decode
 import gleam/int
@@ -7,8 +14,11 @@ import gleam/option.{type Option, None, Some}
 import gleam/order
 import gleam/string
 
+/// The canonical archive and event schema emitted by this release.
 pub const schema_version = 2
 
+/// A stable decoding or typed validation failure. `InvalidJson` deliberately
+/// avoids exposing runtime-specific parser internals.
 pub type CodecError {
   InvalidJson(message: String)
   UnknownSchemaVersion(version: Int)
@@ -16,6 +26,7 @@ pub type CodecError {
   InvalidField(field: String, reason: String)
 }
 
+/// Archive metadata, declared nodes, observation outcome, and privacy policy.
 pub type Manifest {
   Manifest(
     schema_version: Int,
@@ -27,6 +38,8 @@ pub type Manifest {
   )
 }
 
+/// A bounded serialized slice of event identifiers, causal edges, and explicit
+/// observation boundaries.
 pub type GraphSegment {
   GraphSegment(
     event_ids: List(String),
@@ -57,10 +70,13 @@ type VersionedClocks {
   UnsupportedClocks(Int)
 }
 
+/// Encode one validated event to canonical schema-v2 JSON in O(event size).
 pub fn encode_event(event: types.TraceEvent) -> String {
   event_json(event) |> json.to_string
 }
 
+/// Decode and validate one canonical event in O(source length). Schema v1 is
+/// adapted; malformed, unsupported, or non-canonical v2 input is rejected.
 pub fn decode_event(source: String) -> Result(types.TraceEvent, CodecError) {
   case decode_versioned_event(source) {
     Error(error) -> Error(error)
@@ -90,7 +106,7 @@ fn decode_versioned_event(
   source: String,
 ) -> Result(#(types.TraceEvent, Int), CodecError) {
   case json.parse(source, versioned_event_decoder()) {
-    Error(error) -> Error(InvalidJson(string.inspect(error)))
+    Error(_) -> Error(InvalidJson("JSON does not match the expected schema"))
     Ok(EventV2(event)) -> validate_event(event) |> result_replace(#(event, 2))
     Ok(EventV1(event)) ->
       validate_legacy_event(event) |> result_replace(#(event, 1))
@@ -98,6 +114,7 @@ fn decode_versioned_event(
   }
 }
 
+/// Encode a manifest to canonical schema-v2 JSON in O(manifest size).
 pub fn encode_manifest(manifest: Manifest) -> String {
   json.object([
     #("schema_version", json.int(schema_version)),
@@ -110,9 +127,11 @@ pub fn encode_manifest(manifest: Manifest) -> String {
   |> json.to_string
 }
 
+/// Decode and validate a manifest in O(source length), rejecting unknown
+/// versions, invalid fields, and non-canonical schema-v2 bytes.
 pub fn decode_manifest(source: String) -> Result(Manifest, CodecError) {
   case json.parse(source, versioned_manifest_decoder()) {
-    Error(error) -> Error(InvalidJson(string.inspect(error)))
+    Error(_) -> Error(InvalidJson("JSON does not match the expected schema"))
     Ok(ManifestV2(manifest)) ->
       case validate_manifest(manifest) {
         Error(error) -> Error(error)
@@ -218,6 +237,7 @@ fn tagged_string(kind: String, value: String) -> json.Json {
   ])
 }
 
+/// Encode exact or fully attributed inferred evidence in O(input count).
 pub fn evidence_json(evidence: types.Evidence) -> json.Json {
   case evidence {
     types.Exact -> json.object([#("kind", json.string("exact"))])
@@ -421,6 +441,8 @@ fn term_json(term: types.TermView) -> json.Json {
   }
 }
 
+/// Encode the observation end, integrity issues, and delivery receipts without
+/// collapsing them to a completeness boolean. Work is O(issues + receipts).
 pub fn outcome_json(outcome: types.CaptureOutcome) -> json.Json {
   json.object([
     #("end", observation_end_json(outcome.end)),
@@ -453,6 +475,7 @@ pub fn time_estimate_json(estimate: types.TimeEstimate) -> json.Json {
   }
 }
 
+/// Encode a multi-run time summary and its valid/missing sample counts in O(1).
 pub fn time_summary_json(summary: types.TimeSummary) -> json.Json {
   json.object([
     #("estimate", time_estimate_json(summary.estimate)),
@@ -556,6 +579,7 @@ fn receipt_json(receipt: types.NodeReceipt) -> json.Json {
   ])
 }
 
+/// Encode a bounded graph segment to canonical schema-v2 JSON in O(v + e).
 pub fn encode_graph_segment(segment: GraphSegment) -> String {
   json.object([
     #("schema_version", json.int(schema_version)),
@@ -607,10 +631,12 @@ fn tagged_kind(kind: String) -> json.Json {
   json.object([#("kind", json.string(kind))])
 }
 
+/// Encode clock calibration to canonical schema-v2 JSON in O(nodes).
 pub fn encode_clocks(calibration: types.ClockCalibration) -> String {
   clocks_json(calibration) |> json.to_string
 }
 
+/// Build the structured clock-calibration JSON value in O(nodes).
 pub fn clocks_json(calibration: types.ClockCalibration) -> json.Json {
   json.object([
     #("schema_version", json.int(schema_version)),
@@ -1189,11 +1215,13 @@ fn legacy_outcome_decoder() -> decode.Decoder(types.CaptureOutcome) {
   }
 }
 
+/// Decode and validate one canonical bounded graph segment in O(v + e).
+/// Invalid references, limits, versions, and byte representations fail closed.
 pub fn decode_graph_segment(
   source: String,
 ) -> Result(GraphSegment, CodecError) {
   case json.parse(source, versioned_graph_segment_decoder()) {
-    Error(error) -> Error(InvalidJson(string.inspect(error)))
+    Error(_) -> Error(InvalidJson("JSON does not match the expected schema"))
     Ok(GraphSegmentV2(segment)) ->
       case validate_graph_segment(segment) {
         Error(error) -> Error(error)
@@ -1250,11 +1278,13 @@ fn edge_kind_decoder() -> decode.Decoder(types.EdgeKind) {
   }
 }
 
+/// Decode and validate canonical clock calibration in O(nodes), preserving
+/// uncertainty samples and rejecting invalid or non-canonical input.
 pub fn decode_clocks(
   source: String,
 ) -> Result(types.ClockCalibration, CodecError) {
   case json.parse(source, versioned_clocks_decoder()) {
-    Error(error) -> Error(InvalidJson(string.inspect(error)))
+    Error(_) -> Error(InvalidJson("JSON does not match the expected schema"))
     Ok(ClocksV2(clocks)) ->
       case validate_clocks(clocks) {
         Error(error) -> Error(error)

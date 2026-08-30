@@ -1,5 +1,7 @@
 import beamtrace/aql
+import beamtrace/mfa as core_mfa
 import beamtrace/types
+import beamtrace_runtime/cli_spec
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -11,6 +13,7 @@ pub type Mfa {
 
 pub type UiMode {
   Web
+  WebNoOpen
   TuiMode
 }
 
@@ -23,8 +26,23 @@ pub type ExportFormat {
 
 pub type DemoMode {
   DemoWeb
+  DemoWebNoOpen
   DemoTui
   DemoNoUi
+}
+
+pub type CompareDisplay {
+  CompareTerminal
+  CompareWeb
+  CompareWebNoOpen
+  CompareTui
+}
+
+pub type RecordDisplay {
+  RecordWeb
+  RecordWebNoOpen
+  RecordTui
+  RecordNoUi
 }
 
 pub type RelayTarget {
@@ -62,10 +80,12 @@ pub type Command {
   )
   Open(path: String, mode: UiMode, port: Int)
   Compare(left: String, right: String)
+  CompareMany(paths: List(String), display: CompareDisplay, port: Int)
   Export(path: String, format: ExportFormat, otlp_anchor_now: Bool)
   Validate(path: String, json: Bool)
   Migrate(path: String, output: String)
   Serve(port: Int)
+  ServeNoOpen(port: Int)
   Demo(mode: DemoMode, out: String, port: Int)
   Relay(hub_url: String, enrollment_token: String, target: Option(RelayTarget))
   Tui(server: Option(String), session_cookie_file: Option(String))
@@ -73,8 +93,14 @@ pub type Command {
   ConfigCheck
   Doctor(json: Bool)
   Mcp
+  Guide
   Help
+  CommandHelp(name: String)
+  Completion(shell: String)
   Version
+  Json(command: Command)
+  Force(command: Command)
+  RecordUi(command: Command, display: RecordDisplay)
 }
 
 pub type ParseError {
@@ -103,6 +129,7 @@ type RecordOptions {
     cookie_file: Option(String),
     max_roots: Int,
     preset: types.Preset,
+    display: Option(RecordDisplay),
   )
 }
 
@@ -119,6 +146,15 @@ type RelayOptions {
   )
 }
 
+type ParsedCompare {
+  ParsedCompare(
+    paths: List(String),
+    display: CompareDisplay,
+    explicit_display: Bool,
+    port: Int,
+  )
+}
+
 pub fn parse(arguments: List(String)) -> Result(Command, ParseError) {
   case list.contains(arguments, "--cookie") {
     True ->
@@ -126,20 +162,70 @@ pub fn parse(arguments: List(String)) -> Result(Command, ParseError) {
         "--cookie is forbidden; use --cookie-file, the environment, or the secure prompt",
         4,
       ))
-    False -> parse_command(arguments)
+    False -> {
+      let #(cleaned, json, force) = extract_global_options(arguments)
+      case parse_command(cleaned) {
+        Error(error) -> Error(error)
+        Ok(command) -> wrap_global_options(command, json, force)
+      }
+    }
+  }
+}
+
+/// Whether execution still needs the one-time VM-global seq_trace approval.
+/// Help, completion, and already acknowledged invocations never request it.
+pub fn requires_seq_trace_ack(arguments: List(String)) -> Bool {
+  case list.contains(arguments, "--acknowledge-seq-trace-reset"), arguments {
+    True, _ -> False
+    _, ["attach", ..] | _, ["capture", ..] ->
+      !list.contains(arguments, "--help")
+    _, ["relay", ..] ->
+      list.contains(arguments, "--node") && !list.contains(arguments, "--help")
+    _, _ -> False
+  }
+}
+
+/// Add the non-persistent approval flag after an interactive confirmation.
+pub fn add_seq_trace_ack(arguments: List(String)) -> List(String) {
+  list.append(arguments, ["--acknowledge-seq-trace-reset"])
+}
+
+/// Whether the common JSON contract was requested before a record child
+/// command delimiter. Child arguments are never interpreted as BeamTrace
+/// options.
+pub fn json_requested(arguments: List(String)) -> Bool {
+  case arguments {
+    [] | ["--", ..] -> False
+    ["--json", ..] -> True
+    [_, ..rest] -> json_requested(rest)
+  }
+}
+
+/// Best-effort stable command name for a parse-error JSON envelope.
+pub fn invoked_command(arguments: List(String)) -> String {
+  case arguments {
+    [] -> "guide"
+    ["--json", ..rest] | ["--force", ..rest] -> invoked_command(rest)
+    ["--", ..] -> "record"
+    [name, ..] -> name
   }
 }
 
 fn parse_command(arguments: List(String)) -> Result(Command, ParseError) {
   case arguments {
-    [] -> Error(usage("a command is required"))
+    [] -> Ok(Guide)
     ["help"] | ["--help"] | ["-h"] -> Ok(Help)
+    ["help", "--help"] -> command_help("help")
+    ["help", command] -> command_help(command)
     ["version"] | ["--version"] | ["-V"] -> Ok(Version)
+    ["completion", shell] -> parse_completion(shell)
+    ["config", "check", "--help"] -> command_help("config")
+    [command, "--help"] -> command_help(command)
     ["attach", node, ..options] -> parse_attach(node, options)
     ["capture", ..options] -> parse_capture_command(options)
     ["record", ..options] -> parse_record(options)
     ["open", path, ..options] -> parse_open(path, options)
-    ["compare", left, right] -> Ok(Compare(left, right))
+    ["compare", ..options] -> parse_compare(options)
     ["export", path, "--format", format, ..options] ->
       parse_export(path, format, options)
     ["export", path, "--otlp-anchor-now", "--format", format] ->
@@ -149,8 +235,7 @@ fn parse_command(arguments: List(String)) -> Result(Command, ParseError) {
       Ok(Validate(path, True))
     ["migrate", path, "--output", output] -> Ok(Migrate(path, output))
     ["serve", ..options] -> parse_serve(options)
-    ["demo", ..options] ->
-      parse_demo(options, DemoWeb, "beamtrace-demo.beamtrace", 4040)
+    ["demo", ..options] -> parse_demo(options, DemoWeb, "", 0)
     ["relay", hub_url, "--enroll", token, ..options] ->
       parse_relay(hub_url, token, options)
     ["tui", ..options] -> parse_tui(options, None, None)
@@ -174,8 +259,9 @@ fn parse_command(arguments: List(String)) -> Result(Command, ParseError) {
       || known == "config"
       || known == "doctor"
       || known == "demo"
+      || known == "completion"
     -> Error(usage("invalid arguments for '" <> known <> "'"))
-    [unknown, ..] -> Error(usage("unknown command '" <> unknown <> "'"))
+    [unknown, ..] -> Error(unknown_command(unknown))
   }
 }
 
@@ -191,6 +277,80 @@ fn parse_tui(
     ["--session-cookie-file", value, ..rest] ->
       parse_tui(rest, server, Some(value))
     [option, ..] -> Error(usage("unknown tui option '" <> option <> "'"))
+  }
+}
+
+fn parse_compare(options: List(String)) -> Result(Command, ParseError) {
+  use parsed <- try_result(parse_compare_options(
+    options,
+    ParsedCompare([], CompareTerminal, False, 0),
+  ))
+  let paths = list.reverse(parsed.paths)
+  let count = list.length(paths)
+  case count >= 2 && count <= 20 {
+    False -> Error(usage("compare requires between 2 and 20 .beamtrace files"))
+    True ->
+      case paths, parsed.display, parsed.explicit_display, parsed.port {
+        [left, right], CompareTerminal, False, 0 -> Ok(Compare(left, right))
+        _, display, _, port -> Ok(CompareMany(paths, display, port))
+      }
+  }
+}
+
+fn parse_compare_options(
+  options: List(String),
+  parsed: ParsedCompare,
+) -> Result(ParsedCompare, ParseError) {
+  case options {
+    [] -> Ok(parsed)
+    ["--web", ..rest] -> {
+      use next <- try_result(set_compare_display(parsed, CompareWeb))
+      parse_compare_options(rest, next)
+    }
+    ["--tui", ..rest] -> {
+      use next <- try_result(set_compare_display(parsed, CompareTui))
+      parse_compare_options(rest, next)
+    }
+    ["--no-open", ..rest] -> {
+      use next <- try_result(set_compare_display(parsed, CompareWebNoOpen))
+      parse_compare_options(rest, next)
+    }
+    ["--port", value, ..rest] -> {
+      use port <- try_result(parse_port(value))
+      let display = case parsed.display {
+        CompareTerminal -> CompareWeb
+        current -> current
+      }
+      case display == CompareTui {
+        True -> Error(usage("--port cannot be used with --tui"))
+        False ->
+          parse_compare_options(
+            rest,
+            ParsedCompare(..parsed, display: display, port: port),
+          )
+      }
+    }
+    [path, ..rest] ->
+      case string.starts_with(path, "--") {
+        True -> Error(usage("unknown compare option '" <> path <> "'"))
+        False ->
+          parse_compare_options(
+            rest,
+            ParsedCompare(..parsed, paths: [path, ..parsed.paths]),
+          )
+      }
+  }
+}
+
+fn set_compare_display(
+  parsed: ParsedCompare,
+  display: CompareDisplay,
+) -> Result(ParsedCompare, ParseError) {
+  case parsed.explicit_display, parsed.display == display {
+    True, False ->
+      Error(usage("choose only one of --web, --tui, --no-open, or --json"))
+    _, _ ->
+      Ok(ParsedCompare(..parsed, display: display, explicit_display: True))
   }
 }
 
@@ -296,7 +456,7 @@ fn parse_relay_options(
 fn parse_record(options: List(String)) -> Result(Command, ParseError) {
   parse_record_options(
     options,
-    RecordOptions(None, None, None, None, None, 1, types.Generic),
+    RecordOptions(None, None, None, None, None, 1, types.Generic, None),
   )
 }
 
@@ -342,6 +502,37 @@ fn parse_record_options(
       use preset <- try_result(parse_capture_preset(value))
       parse_record_options(rest, RecordOptions(..parsed, preset: preset))
     }
+    ["--web", ..rest] -> {
+      use display <- try_result(set_record_display(parsed.display, RecordWeb))
+      parse_record_options(
+        rest,
+        RecordOptions(..parsed, display: Some(display)),
+      )
+    }
+    ["--tui", ..rest] -> {
+      use display <- try_result(set_record_display(parsed.display, RecordTui))
+      parse_record_options(
+        rest,
+        RecordOptions(..parsed, display: Some(display)),
+      )
+    }
+    ["--no-ui", ..rest] -> {
+      use display <- try_result(set_record_display(parsed.display, RecordNoUi))
+      parse_record_options(
+        rest,
+        RecordOptions(..parsed, display: Some(display)),
+      )
+    }
+    ["--no-open", ..rest] -> {
+      use display <- try_result(set_record_display(
+        parsed.display,
+        RecordWebNoOpen,
+      ))
+      parse_record_options(
+        rest,
+        RecordOptions(..parsed, display: Some(display)),
+      )
+    }
     [option, ..] -> Error(usage("unknown record option '" <> option <> "'"))
   }
 }
@@ -354,19 +545,38 @@ fn finish_record(
   case parsed.trigger, parsed.out, command {
     None, _, _ ->
       Error(usage("record requires --trigger Module:function/arity"))
-    _, None, _ -> Error(usage("record requires --out <file.beamtrace>"))
     _, _, [] -> Error(usage("record requires '-- <command>'"))
-    Some(trigger), Some(out), [_, ..] ->
-      Ok(Record(
-        node: parsed.node,
-        trigger: trigger,
-        where_aql: parsed.where_aql,
-        out: out,
-        cookie_file: parsed.cookie_file,
-        max_roots: parsed.max_roots,
-        preset: parsed.preset,
-        command: command,
-      ))
+    Some(trigger), out, [_, ..] -> {
+      let command =
+        Record(
+          node: parsed.node,
+          trigger: trigger,
+          where_aql: parsed.where_aql,
+          out: case out {
+            Some(path) -> path
+            None -> ""
+          },
+          cookie_file: parsed.cookie_file,
+          max_roots: parsed.max_roots,
+          preset: parsed.preset,
+          command: command,
+        )
+      case parsed.display {
+        None -> Ok(command)
+        Some(display) -> Ok(RecordUi(command, display))
+      }
+    }
+  }
+}
+
+fn set_record_display(
+  current: Option(RecordDisplay),
+  requested: RecordDisplay,
+) -> Result(RecordDisplay, ParseError) {
+  case current {
+    None -> Ok(requested)
+    Some(value) if value == requested -> Ok(requested)
+    Some(_) -> Error(usage("choose only one of --web, --tui, or --no-ui"))
   }
 }
 
@@ -374,7 +584,7 @@ fn parse_attach(
   node: String,
   options: List(String),
 ) -> Result(Command, ParseError) {
-  use parsed <- try_result(parse_attach_options(options, Web, None, 4040, False))
+  use parsed <- try_result(parse_attach_options(options, Web, None, 0, False))
   let #(mode, cookie_file, port, acknowledged) = parsed
   case acknowledged {
     True -> Ok(Attach(node, mode, cookie_file, port))
@@ -395,6 +605,12 @@ fn parse_attach_options(
       parse_attach_options(rest, Web, cookie_file, port, acknowledged)
     ["--tui", ..rest] ->
       parse_attach_options(rest, TuiMode, cookie_file, port, acknowledged)
+    ["--no-open", ..rest] ->
+      case mode {
+        TuiMode -> Error(usage("--no-open cannot be used with --tui"))
+        _ ->
+          parse_attach_options(rest, WebNoOpen, cookie_file, port, acknowledged)
+      }
     ["--cookie-file", path, ..rest] ->
       parse_attach_options(rest, mode, Some(path), port, acknowledged)
     ["--port", value, ..rest] -> {
@@ -415,8 +631,8 @@ fn parse_capture(
     CaptureOptions(node, None, None, None, None, 1, types.Generic, False)
   use parsed <- try_result(parse_capture_options(options, initial))
   use _ <- try_result(validate_where(parsed.where_aql))
-  case parsed.node, parsed.trigger, parsed.out {
-    Some(node), Some(trigger), Some(out) ->
+  case parsed.node, parsed.trigger {
+    Some(node), Some(trigger) ->
       case parsed.acknowledge_seq_trace_reset {
         False -> Error(seq_trace_acknowledgement_error())
         True ->
@@ -424,16 +640,17 @@ fn parse_capture(
             node: node,
             trigger: trigger,
             where_aql: parsed.where_aql,
-            out: out,
+            out: case parsed.out {
+              Some(path) -> path
+              None -> ""
+            },
             cookie_file: parsed.cookie_file,
             max_roots: parsed.max_roots,
             preset: parsed.preset,
           ))
       }
-    None, _, _ -> Error(usage("capture requires a node or --node <node>"))
-    _, None, _ ->
-      Error(usage("capture requires --trigger Module:function/arity"))
-    _, _, None -> Error(usage("capture requires --out <file.beamtrace>"))
+    None, _ -> Error(usage("capture requires a node or --node <node>"))
+    _, None -> Error(usage("capture requires --trigger Module:function/arity"))
   }
 }
 
@@ -513,17 +730,12 @@ fn parse_capture_preset(source: String) -> Result(types.Preset, ParseError) {
 }
 
 pub fn parse_mfa(source: String) -> Result(Mfa, ParseError) {
-  case string.split(source, on: ":") {
-    [module_, function_and_arity] if module_ != "" ->
-      case string.split(function_and_arity, on: "/") {
-        [function_, arity_source] if function_ != "" ->
-          case int.parse(arity_source) {
-            Ok(arity) if arity >= 0 -> Ok(Mfa(module_, function_, arity))
-            _ -> Error(usage("invalid MFA '" <> source <> "'"))
-          }
-        _ -> Error(usage("invalid MFA '" <> source <> "'"))
-      }
-    _ -> Error(usage("invalid MFA '" <> source <> "'"))
+  case core_mfa.parse(source) {
+    Ok(value) -> Ok(Mfa(value.module_, value.function_, value.arity))
+    Error(error) ->
+      Error(usage(
+        "invalid MFA '" <> source <> "': " <> core_mfa.error_message(error),
+      ))
   }
 }
 
@@ -531,7 +743,7 @@ fn parse_open(
   path: String,
   options: List(String),
 ) -> Result(Command, ParseError) {
-  parse_open_options(path, options, Web, 4040)
+  parse_open_options(path, options, Web, 0)
 }
 
 fn parse_open_options(
@@ -544,6 +756,11 @@ fn parse_open_options(
     [] -> Ok(Open(path, mode, port))
     ["--web", ..rest] -> parse_open_options(path, rest, Web, port)
     ["--tui", ..rest] -> parse_open_options(path, rest, TuiMode, port)
+    ["--no-open", ..rest] ->
+      case mode {
+        TuiMode -> Error(usage("--no-open cannot be used with --tui"))
+        _ -> parse_open_options(path, rest, WebNoOpen, port)
+      }
     ["--port", value, ..rest] -> {
       use port <- try_result(parse_port(value))
       parse_open_options(path, rest, mode, port)
@@ -554,8 +771,11 @@ fn parse_open_options(
 
 fn parse_serve(options: List(String)) -> Result(Command, ParseError) {
   case options {
-    [] -> Ok(Serve(4040))
+    [] -> Ok(Serve(0))
     ["--port", value] -> parse_port(value) |> map_result(Serve)
+    ["--no-open"] -> Ok(ServeNoOpen(0))
+    ["--no-open", "--port", value] | ["--port", value, "--no-open"] ->
+      parse_port(value) |> map_result(ServeNoOpen)
     [option, ..] -> Error(usage("unknown serve option '" <> option <> "'"))
   }
 }
@@ -578,6 +798,12 @@ fn parse_demo(
     ["--web", ..rest] -> parse_demo(rest, DemoWeb, out, port)
     ["--tui", ..rest] -> parse_demo(rest, DemoTui, out, port)
     ["--no-ui", ..rest] -> parse_demo(rest, DemoNoUi, out, port)
+    ["--no-open", ..rest] ->
+      case mode {
+        DemoTui | DemoNoUi ->
+          Error(usage("--no-open is only valid with the Web demo"))
+        _ -> parse_demo(rest, DemoWebNoOpen, out, port)
+      }
     ["--out", path, ..rest] if path != "" -> parse_demo(rest, mode, path, port)
     ["--port", value, ..rest] -> {
       use port <- try_result(parse_port(value))
@@ -610,6 +836,121 @@ fn parse_export(
       Error(usage("--otlp-anchor-now is only valid with --format otlp"))
     _, [option, ..] -> Error(usage("unknown export option '" <> option <> "'"))
   }
+}
+
+fn extract_global_options(
+  arguments: List(String),
+) -> #(List(String), Bool, Bool) {
+  extract_global_options_loop(arguments, [], False, False)
+}
+
+fn extract_global_options_loop(
+  arguments: List(String),
+  accumulator: List(String),
+  json: Bool,
+  force: Bool,
+) -> #(List(String), Bool, Bool) {
+  case arguments {
+    [] -> #(list.reverse(accumulator), json, force)
+    ["--", ..child] -> #(
+      list.append(list.reverse(accumulator), ["--", ..child]),
+      json,
+      force,
+    )
+    ["--json", ..rest] ->
+      extract_global_options_loop(rest, accumulator, True, force)
+    ["--force", ..rest] ->
+      extract_global_options_loop(rest, accumulator, json, True)
+    [argument, ..rest] ->
+      extract_global_options_loop(rest, [argument, ..accumulator], json, force)
+  }
+}
+
+fn wrap_global_options(
+  command: Command,
+  json: Bool,
+  force: Bool,
+) -> Result(Command, ParseError) {
+  let forced = case force, force_capable(command), force_allowed(command) {
+    False, _, _ -> Ok(command)
+    True, True, True -> Ok(Force(command))
+    True, True, False -> Error(usage("--force requires an explicit --out path"))
+    True, False, _ ->
+      Error(usage("--force is only valid for capture or record"))
+  }
+  use forced <- try_result(forced)
+  case json, json_allowed(command) {
+    False, _ -> Ok(forced)
+    True, True -> Ok(Json(forced))
+    True, False ->
+      Error(usage(
+        "--json is not available for interactive or long-running commands",
+      ))
+  }
+}
+
+fn force_allowed(command: Command) -> Bool {
+  case command {
+    Capture(_, _, _, out, _, _, _) -> out != ""
+    Record(_, _, _, out, _, _, _, _) -> out != ""
+    RecordUi(inner, _) -> force_allowed(inner)
+    _ -> False
+  }
+}
+
+fn force_capable(command: Command) -> Bool {
+  case command {
+    Capture(..) | Record(..) -> True
+    RecordUi(inner, _) -> force_capable(inner)
+    _ -> False
+  }
+}
+
+fn json_allowed(command: Command) -> Bool {
+  case command {
+    Capture(..)
+    | Record(..)
+    | Compare(..)
+    | Export(..)
+    | Validate(..)
+    | Migrate(..)
+    | Init
+    | ConfigCheck
+    | Doctor(..)
+    | Version -> True
+    CompareMany(_, CompareTerminal, _) -> True
+    Demo(DemoNoUi, _, _) -> True
+    RecordUi(_, RecordNoUi) -> True
+    _ -> False
+  }
+}
+
+fn command_help(command: String) -> Result(Command, ParseError) {
+  case cli_spec.command_help(command) {
+    Some(_) -> Ok(CommandHelp(command))
+    None -> Error(unknown_command(command))
+  }
+}
+
+fn parse_completion(shell: String) -> Result(Command, ParseError) {
+  case cli_spec.completion(string.lowercase(shell)) {
+    Some(_) -> Ok(Completion(string.lowercase(shell)))
+    None ->
+      Error(usage("completion shell must be bash, zsh, fish, or powershell"))
+  }
+}
+
+fn unknown_command(command: String) -> ParseError {
+  let correction = case cli_spec.suggest(command) {
+    Some(candidate) ->
+      ". Did you mean '"
+      <> candidate
+      <> "'? Try: beamtrace "
+      <> candidate
+      <> " --help"
+    None -> ""
+  }
+  usage("unknown command '" <> command <> "'" <> correction)
 }
 
 fn usage(message: String) -> ParseError {

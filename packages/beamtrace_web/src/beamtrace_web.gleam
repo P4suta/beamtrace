@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
+import beamtrace_web/appearance
 import beamtrace_web/canvas
 import beamtrace_web/capture_control
 import beamtrace_web/compare_control
 import beamtrace_web/graph_control
+import beamtrace_web/launch_context
 import beamtrace_web/live_control
 import beamtrace_web/page_loader
 import beamtrace_web/team_control
 import beamtrace_web/view
 import beamtrace_web/workspace
 import gleam/option.{None, Some}
+import gleam/string
 import lustre
 import lustre/effect.{type Effect}
 
@@ -20,7 +23,27 @@ pub fn main() {
 
 fn init(_flags) -> #(workspace.Model, Effect(workspace.Msg)) {
   let model = workspace.init_remote()
-  #(model, startup_effect(model))
+  let compare_paths = launch_context.initial_compare_paths()
+  case string.trim(compare_paths) {
+    "" -> #(model, startup_effect(model))
+    paths -> {
+      let next =
+        model
+        |> workspace.update(workspace.UserSelectedMode(workspace.Compare))
+        |> workspace.update(workspace.UserChangedComparePaths(paths))
+        |> workspace.update(workspace.UserRequestedCompare)
+      case next.compare_loading {
+        True -> #(
+          next,
+          effect.batch([
+            startup_effect(next),
+            compare_control.run(workspace.compare_paths(next)),
+          ]),
+        )
+        False -> #(next, startup_effect(next))
+      }
+    }
+  }
 }
 
 fn update(
@@ -28,6 +51,21 @@ fn update(
   message: workspace.Msg,
 ) -> #(workspace.Model, Effect(workspace.Msg)) {
   case message {
+    workspace.UserCycledTheme -> {
+      let next = workspace.update(model, message)
+      appearance.apply(next.theme)
+      finish_update(next, [])
+    }
+    workspace.UserRequestedTeamCompare -> {
+      let next = workspace.update(model, message)
+      case next.compare_loading {
+        True ->
+          finish_update(next, [
+            compare_control.run(workspace.compare_paths(next)),
+          ])
+        False -> finish_update(next, [])
+      }
+    }
     workspace.UserSelectedMode(workspace.Live) ->
       finish_update(workspace.update(model, message), [live_control.load()])
     workspace.UserSelectedMode(workspace.Team) -> {

@@ -19,8 +19,16 @@ try {
     }
 
     $help = (& $launcher help | Out-String)
-    if ($LASTEXITCODE -ne 0 -or $help -notmatch 'beamtrace capture' -or $help -notmatch '--raw-grant-file PATH') {
+    if ($LASTEXITCODE -ne 0 -or $help -notmatch 'capture') {
         throw 'help smoke test failed'
+    }
+    $captureHelp = (& $launcher help capture | Out-String)
+    if ($LASTEXITCODE -ne 0 -or $captureHelp -notmatch '--acknowledge-seq-trace-reset') {
+        throw 'capture help smoke test failed'
+    }
+    $relayHelp = (& $launcher help relay | Out-String)
+    if ($LASTEXITCODE -ne 0 -or $relayHelp -notmatch '--raw-grant-file PATH') {
+        throw 'relay help smoke test failed'
     }
 
     $doctor = (& $launcher doctor | Out-String)

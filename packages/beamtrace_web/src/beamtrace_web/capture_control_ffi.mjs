@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+import { apiError } from "./api_error_ffi.mjs";
+
 let captureActive = false;
 let mfaSearchTimer;
 let mfaSearchController;
@@ -15,14 +17,7 @@ async function request(path, options = {}) {
   });
   const body = await response.text();
   if (!response.ok) {
-    let detail = `request failed (${response.status})`;
-    try {
-      const parsed = JSON.parse(body);
-      if (typeof parsed.error === "string") detail = parsed.error;
-    } catch {
-      // The bounded status is enough when a proxy returns a non-JSON body.
-    }
-    throw new Error(detail);
+    throw new Error(apiError(body, response.status, "capture request failed"));
   }
   return body;
 }

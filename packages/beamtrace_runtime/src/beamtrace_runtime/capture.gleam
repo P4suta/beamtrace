@@ -1,6 +1,7 @@
 import beamtrace/aql
 import beamtrace/dag
 import beamtrace/identity
+import beamtrace/mfa as core_mfa
 import beamtrace/types
 import gleam/dict.{type Dict}
 import gleam/int
@@ -807,24 +808,16 @@ fn non_empty(value: String) -> Option(String) {
 }
 
 fn optional_mfa(module_: String, function_: String, arity: Int) {
-  case module_ != "" && function_ != "" && arity >= 0 {
+  case module_ != "" && function_ != "" && arity >= 0 && arity <= 255 {
     True -> Some(types.Mfa(module_, function_, arity))
     False -> None
   }
 }
 
 fn parse_mfa(source: String) -> Result(types.Mfa, Nil) {
-  case string.split_once(source, ":") {
-    Ok(#(module_, function_and_arity)) if module_ != "" ->
-      case string.split_once(function_and_arity, "/") {
-        Ok(#(function_, arity_source)) if function_ != "" ->
-          case int.parse(arity_source) {
-            Ok(arity) if arity >= 0 -> Ok(types.Mfa(module_, function_, arity))
-            _ -> Error(Nil)
-          }
-        _ -> Error(Nil)
-      }
-    _ -> Error(Nil)
+  case core_mfa.parse(source) {
+    Ok(value) -> Ok(value)
+    Error(_) -> Error(Nil)
   }
 }
 

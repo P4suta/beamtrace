@@ -3,7 +3,6 @@ import beamtrace_web/page
 import beamtrace_web/workspace
 import gleam/dynamic/decode
 import gleam/json
-import gleam/string
 import lustre/effect.{type Effect}
 
 pub fn load_traces(cursor: String) -> Effect(workspace.Msg) {
@@ -59,7 +58,10 @@ pub fn decode_traces(
 ) -> Result(workspace.TeamTracePage, String) {
   case json.parse(source, traces_decoder()) {
     Ok(page) -> Ok(page)
-    Error(error) -> Error(string.inspect(error))
+    Error(_) ->
+      Error(
+        "Team trace list is not valid API v2 data. Refresh or check the server version.",
+      )
   }
 }
 
@@ -68,14 +70,20 @@ pub fn decode_events(
 ) -> Result(workspace.TeamEventPage, String) {
   case json.parse(source, events_decoder()) {
     Ok(page) -> Ok(page)
-    Error(error) -> Error(string.inspect(error))
+    Error(_) ->
+      Error(
+        "Team event page is not valid API v2 data. Refresh or validate the stored trace.",
+      )
   }
 }
 
 pub fn decode_trace(source: String) -> Result(workspace.TeamTrace, String) {
   case json.parse(source, trace_decoder()) {
     Ok(trace) -> Ok(trace)
-    Error(error) -> Error(string.inspect(error))
+    Error(_) ->
+      Error(
+        "Updated trace metadata is not valid API v2 data. Refresh the trace list.",
+      )
   }
 }
 

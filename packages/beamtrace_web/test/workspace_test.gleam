@@ -423,3 +423,47 @@ pub fn compare_requires_two_to_twenty_paths_and_preserves_capture_state_test() {
   compared.compare_report |> should.equal(Some(report))
   compared.compare_loading |> should.be_false()
 }
+
+pub fn theme_cycles_without_persistence_test() {
+  let initial = workspace.init([])
+  initial.theme |> should.equal(workspace.SystemTheme)
+  let light = workspace.update(initial, workspace.UserCycledTheme)
+  light.theme |> should.equal(workspace.LightTheme)
+  let dark = workspace.update(light, workspace.UserCycledTheme)
+  dark.theme |> should.equal(workspace.DarkTheme)
+  workspace.update(dark, workspace.UserCycledTheme).theme
+  |> should.equal(workspace.SystemTheme)
+}
+
+pub fn team_selects_two_to_twenty_traces_for_compare_test() {
+  let traces = [team_trace("run-a"), team_trace("run-b"), team_trace("run-c")]
+  let selected =
+    workspace.init_remote()
+    |> workspace.update(
+      workspace.TeamTracesLoaded(workspace.TeamTracePage(traces, None)),
+    )
+    |> workspace.update(workspace.UserToggledTeamCompare("run-a"))
+    |> workspace.update(workspace.UserToggledTeamCompare("run-b"))
+    |> workspace.update(workspace.UserRequestedTeamCompare)
+
+  selected.mode |> should.equal(workspace.Compare)
+  selected.compare_loading |> should.be_true()
+  workspace.compare_paths(selected)
+  |> should.equal(["team:run-a", "team:run-b"])
+}
+
+fn team_trace(id: String) -> workspace.TeamTrace {
+  workspace.TeamTrace(
+    id,
+    "app@host",
+    "shop",
+    "checkout",
+    1,
+    "metadata",
+    "delivered",
+    10,
+    1000,
+    False,
+    False,
+  )
+}

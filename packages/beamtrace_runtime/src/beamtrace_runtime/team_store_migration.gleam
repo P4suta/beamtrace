@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import gleam/dynamic/decode
-import gleam/string
 import sqlight
 
 const schema = "
@@ -357,6 +356,6 @@ fn result_try(
   }
 }
 
-fn sql_error(error: sqlight.Error) -> String {
-  string.inspect(error)
+fn sql_error(_error: sqlight.Error) -> String {
+  "database_operation_failed"
 }
