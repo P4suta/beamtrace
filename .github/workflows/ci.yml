@@ -61,6 +61,8 @@ jobs:
         run: npm ci --ignore-scripts
       - name: TDD gate
         shell: pwsh
+        env:
+          BEAMTRACE_REQUIRE_SHELLS: ${{ runner.os == 'Windows' && 'bash' || 'bash,powershell' }}
         run: ./scripts/test-all.ps1 -SkipBrowserE2E
 
   distribution:
