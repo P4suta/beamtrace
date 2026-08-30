@@ -167,6 +167,10 @@ Copy-Item -LiteralPath (Join-Path $repoRoot 'packaging/beamtrace.ps1') -Destinat
 Copy-Item -Path (Join-Path $repoRoot 'packages/beamtrace_web/dist/*') -Destination (Join-Path $resolvedStage 'share/beamtrace/web') -Recurse
 Copy-Item -Path (Join-Path $repoRoot 'LICENSES/*') -Destination (Join-Path $resolvedStage 'LICENSES')
 Copy-Item -Path (Join-Path $repoRoot 'docs/*') -Destination (Join-Path $resolvedStage 'docs') -Recurse
+# Contributor and governance material is not user documentation.
+foreach ($internalDoc in @('adr', 'development.md', 'releasing.md', 'github-governance.md', 'upstream-candidates.md', 'otp-seq-trace-proposal.md')) {
+    Remove-Item -LiteralPath (Join-Path $resolvedStage "docs/$internalDoc") -Recurse -Force -ErrorAction SilentlyContinue
+}
 foreach ($file in @('README.md', 'CHANGELOG.md', 'SECURITY.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'REUSE.toml')) {
     Copy-Item -LiteralPath (Join-Path $repoRoot $file) -Destination $resolvedStage
 }

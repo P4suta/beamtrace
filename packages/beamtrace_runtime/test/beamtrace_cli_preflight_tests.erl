@@ -31,3 +31,32 @@ with_agent_beam(Value, Fun) ->
             _ -> os:putenv("BEAMTRACE_AGENT_BEAM", Previous)
         end
     end.
+
+bundled_record_resolves_commands_from_the_parent_path_test() ->
+    with_environment([
+        {"BEAMTRACE_BUNDLED_RUNTIME", "1"},
+        {"BEAMTRACE_PARENT_PATH_SET", "1"},
+        {"BEAMTRACE_PARENT_PATH", "/nonexistent-toolchain"}
+    ], fun() ->
+        ?assertEqual(
+            {error, <<"executable_not_found: erl">>},
+            beamtrace_cli_ffi:start_gated_command(
+                [<<"erl">>, <<"-noshell">>],
+                <<"beamtrace_parent_path_test@localhost">>,
+                <<"beamtrace_parent_path_cookie">>,
+                <<"erlang">>
+            )
+        )
+    end).
+
+with_environment(Pairs, Fun) ->
+    Previous = [{Name, os:getenv(Name)} || {Name, _} <- Pairs],
+    [os:putenv(Name, Value) || {Name, Value} <- Pairs],
+    try
+        Fun()
+    after
+        [case Old of
+             false -> os:unsetenv(Name);
+             _ -> os:putenv(Name, Old)
+         end || {Name, Old} <- Previous]
+    end.

@@ -200,6 +200,16 @@ try {
     try {
         $emptyPath = Join-Path $resolvedTestRoot 'empty-path'
         New-Item -ItemType Directory -Path $emptyPath -Force | Out-Null
+        if (-not $IsWindows) {
+            # No Erlang toolchain, but the POSIX utilities every host has and the
+            # bundled erl launcher script needs.
+            foreach ($utility in @('dirname', 'basename', 'uname', 'sed', 'sh', 'env')) {
+                $source = Get-Command $utility -ErrorAction SilentlyContinue
+                if ($null -ne $source) {
+                    New-Item -ItemType SymbolicLink -Path (Join-Path $emptyPath $utility) -Target $source.Source | Out-Null
+                }
+            }
+        }
         $env:PATH = $emptyPath
         $launcher = if ($IsWindows) {
             Join-Path $root.FullName 'bin/beamtrace.ps1'

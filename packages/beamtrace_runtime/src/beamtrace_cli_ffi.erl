@@ -320,7 +320,18 @@ doctor_json(
          json_bool(Mix), json_bool(Rebar3)]
     )).
 
-executable_available(Name) -> os:find_executable(Name) =/= false.
+executable_available(Name) -> toolchain_executable(Name) =/= false.
+
+toolchain_executable(Name) ->
+    case {os:getenv("BEAMTRACE_BUNDLED_RUNTIME"), filename:pathtype(Name)} of
+        {"1", relative} ->
+            case {os:getenv("BEAMTRACE_PARENT_PATH_SET"), os:getenv("BEAMTRACE_PARENT_PATH")} of
+                {"1", ParentPath} when is_list(ParentPath) ->
+                    os:find_executable(Name, ParentPath);
+                _ -> false
+            end;
+        _ -> os:find_executable(Name)
+    end.
 
 configured_cookie_files(Configured) ->
     case os:getenv("BEAMTRACE_COOKIE_FILE") of
@@ -891,8 +902,11 @@ gated_command_running(
     end;
 gated_command_running(_Handle) -> false.
 
+%% The application command must come from the user's toolchain. Inside the
+%% release archive erlexec prepends the bundled ERTS to PATH, so resolve
+%% against the PATH the launcher saw instead.
 command_executable(Program) when is_binary(Program) ->
-    case os:find_executable(binary_to_list(Program)) of
+    case toolchain_executable(binary_to_list(Program)) of
         false -> {error, <<"executable_not_found: ", Program/binary>>};
         %% Keep the resolved absolute command path, including its final shim or
         %% symlink name. mise/asdf dispatch on argv[0]; dereferencing the shim
