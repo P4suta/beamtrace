@@ -371,7 +371,7 @@ try {
         $portProbe.Stop()
         $teamOrigin = "https://127.0.0.1:$teamPort"
         $startInfo = [Diagnostics.ProcessStartInfo]::new()
-        if ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop') {
+        if ($IsWindows) {
             $startInfo.FileName = (Get-Command pwsh).Source
             $startInfo.ArgumentList.Add('-NoProfile')
             $startInfo.ArgumentList.Add('-File')
