@@ -222,7 +222,7 @@ fn load_complete_trace(
   accumulator: List(types.TraceEvent),
 ) -> Result(List(types.TraceEvent), String) {
   case start >= trace.event_count {
-    True -> Ok(accumulator)
+    True -> Ok(list.reverse(accumulator))
     False -> {
       let limit = int.min(200, trace.event_count - start)
       case team_store.segments_in_window(store, trace.id, start:, limit:) {
@@ -242,14 +242,19 @@ fn load_complete_trace(
                 |> list.take(limit)
               case page {
                 [] -> Error("missing_trace_events")
-                _ ->
+                _ -> {
+                  let next_accumulator =
+                    list.fold(page, accumulator, fn(events, event) {
+                      [event, ..events]
+                    })
                   load_complete_trace(
                     store,
                     backend,
                     trace,
                     start + list.length(page),
-                    list.append(accumulator, page),
+                    next_accumulator,
                   )
+                }
               }
             }
           }

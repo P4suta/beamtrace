@@ -2,14 +2,13 @@
 import beamtrace_runtime/oidc_discovery
 import gleam/string
 import gleeunit/should
+import v2_fixture
 
 const issuer = "https://id.example/tenant"
 
 const metadata_url = "https://id.example/tenant/.well-known/openid-configuration"
 
 const jwks_url = "https://id.example/tenant/jwks"
-
-const public_jwks = "{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"key-1\",\"use\":\"sig\",\"alg\":\"RS256\",\"n\":\"AQ\",\"e\":\"Aw\"}]}"
 
 fn metadata(returned_issuer: String, authorization: String, jwks: String) {
   "{\"issuer\":\""
@@ -32,7 +31,7 @@ fn successful_fetch(url: String, _maximum: Int) {
           jwks_url,
         ),
       ))
-    _, True -> Ok(#(200, public_jwks))
+    _, True -> Ok(#(200, v2_fixture.public_jwks))
     False, False -> Error("unexpected_url")
   }
 }
@@ -43,7 +42,7 @@ pub fn discovery_fetches_path_issuer_metadata_and_public_signing_keys_test() {
   provider.issuer |> should.equal(issuer)
   provider.authorization_endpoint
   |> should.equal("https://id.example/authorize?tenant=beamtrace")
-  provider.jwks_json |> should.equal(public_jwks)
+  provider.jwks_json |> should.equal(v2_fixture.public_jwks)
 }
 
 pub fn discovery_requires_exact_returned_issuer_test() {
@@ -51,7 +50,7 @@ pub fn discovery_requires_exact_returned_issuer_test() {
     case url == metadata_url {
       True ->
         Ok(#(200, metadata(issuer <> "/", "https://id.example/auth", jwks_url)))
-      False -> Ok(#(200, public_jwks))
+      False -> Ok(#(200, v2_fixture.public_jwks))
     }
   })
   |> should.equal(Error(oidc_discovery.IssuerMismatch))
@@ -76,7 +75,7 @@ pub fn discovery_rejects_http_redirect_oversize_and_private_jwks_test() {
         Ok(#(
           200,
           string.replace(
-            public_jwks,
+            v2_fixture.public_jwks,
             "\"e\":\"Aw\"",
             "\"e\":\"Aw\",\"d\":\"private\"",
           ),
@@ -91,7 +90,7 @@ pub fn discovery_rejects_http_redirect_oversize_and_private_jwks_test() {
       False ->
         Ok(#(
           200,
-          string.drop_end(public_jwks, 2)
+          string.drop_end(v2_fixture.public_jwks, 2)
             <> ",{\"kty\":\"RSA\",\"kid\":\"private\",\"use\":\"sig\",\"alg\":\"RS256\",\"n\":\"AQ\",\"e\":\"Aw\",\"d\":\"secret\"}]}",
         ))
     }

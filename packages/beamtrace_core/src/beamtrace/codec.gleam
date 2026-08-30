@@ -6,6 +6,7 @@
 //// target, decoding an encoded valid event round-trips it.
 
 import beamtrace/types
+import gleam/dict.{type Dict}
 import gleam/dynamic/decode
 import gleam/int
 import gleam/json
@@ -1216,7 +1217,9 @@ fn legacy_outcome_decoder() -> decode.Decoder(types.CaptureOutcome) {
 }
 
 /// Decode and validate one canonical bounded graph segment in O(v + e).
-/// Invalid references, limits, versions, and byte representations fail closed.
+/// Invalid segment-local references, limits, versions, and byte representations
+/// fail closed. Cross-segment endpoints are resolved against the complete event
+/// set by the archive reader.
 pub fn decode_graph_segment(
   source: String,
 ) -> Result(GraphSegment, CodecError) {
@@ -1882,6 +1885,10 @@ fn validate_privacy(privacy: types.Privacy) -> Result(Nil, CodecError) {
 }
 
 /// Validate a typed schema-v2 graph segment without a JSON round trip.
+///
+/// A cross-segment edge may name one event from an adjacent segment, so at
+/// least one endpoint must belong to this segment. Archive readers validate
+/// the other endpoint against the complete event set.
 pub fn validate_graph_segment(
   segment: GraphSegment,
 ) -> Result(Nil, CodecError) {
@@ -1894,22 +1901,34 @@ pub fn validate_graph_segment(
     "graph",
     "segment collection limit exceeded",
   ))
-  use Nil <- result_try(validate_edges(segment.edges))
-  validate_boundaries(segment.boundaries)
+  let event_ids =
+    segment.event_ids
+    |> list.map(fn(event_id) { #(event_id, Nil) })
+    |> dict.from_list
+  use Nil <- result_try(validate_edges(segment.edges, event_ids))
+  validate_boundaries(segment.boundaries, event_ids)
 }
 
-fn validate_edges(edges: List(types.CausalEdge)) -> Result(Nil, CodecError) {
+fn validate_edges(
+  edges: List(types.CausalEdge),
+  event_ids: Dict(String, Nil),
+) -> Result(Nil, CodecError) {
   case edges {
     [] -> Ok(Nil)
     [edge, ..rest] -> {
+      let has_local_endpoint =
+        dict.has_key(event_ids, edge.from) || dict.has_key(event_ids, edge.to)
       use Nil <- result_try(ensure(
-        valid_id(edge.from) && valid_id(edge.to) && edge.from != edge.to,
+        valid_id(edge.from)
+          && valid_id(edge.to)
+          && edge.from != edge.to
+          && has_local_endpoint,
         "graph.edge",
         "invalid edge reference",
       ))
       use Nil <- result_try(validate_edge_kind(edge.kind))
       use Nil <- result_try(validate_evidence(edge.evidence))
-      validate_edges(rest)
+      validate_edges(rest, event_ids)
     }
   }
 }
@@ -1929,17 +1948,20 @@ fn validate_edge_kind(kind: types.EdgeKind) -> Result(Nil, CodecError) {
 
 fn validate_boundaries(
   boundaries: List(types.Boundary),
+  event_ids: Dict(String, Nil),
 ) -> Result(Nil, CodecError) {
   case boundaries {
     [] -> Ok(Nil)
     [boundary, ..rest] -> {
       use Nil <- result_try(ensure(
-        valid_id(boundary.event_id) && valid_text(boundary.reason, 2048),
+        valid_id(boundary.event_id)
+          && dict.has_key(event_ids, boundary.event_id)
+          && valid_text(boundary.reason, 2048),
         "graph.boundary",
         "invalid boundary",
       ))
       use Nil <- result_try(validate_edge_kind(boundary.kind))
-      validate_boundaries(rest)
+      validate_boundaries(rest, event_ids)
     }
   }
 }

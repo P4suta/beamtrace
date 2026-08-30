@@ -3,6 +3,23 @@
 
 -include_lib("eunit/include/eunit.hrl").
 
+mutable_provider_cache_uses_the_latest_jwks_test() ->
+    Issuer = <<"https://id.example/cache-test">>,
+    nil = beamtrace_oidc_discovery_ffi:remember_provider(
+        Issuer,
+        <<"https://id.example/jwks">>,
+        <<"old">>
+    ),
+    ?assertEqual(
+        <<"old">>,
+        beamtrace_oidc_discovery_ffi:cached_jwks(Issuer, <<"fallback">>)
+    ),
+    nil = beamtrace_oidc_discovery_ffi:cache_refreshed_jwks(Issuer, <<"new">>),
+    ?assertEqual(
+        <<"new">>,
+        beamtrace_oidc_discovery_ffi:cached_jwks(Issuer, <<"fallback">>)
+    ).
+
 chunked_response_is_collected_test() ->
     with_server(
         fun(Socket) ->

@@ -6,8 +6,7 @@ import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
 import gleeunit/should
-
-const public_jwks = "{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"key-1\",\"use\":\"sig\",\"alg\":\"RS256\",\"n\":\"AQ\",\"e\":\"Aw\"}]}"
+import v2_fixture
 
 pub fn complete_team_environment_resolves_public_oidc_and_roles_test() {
   let source = valid_source()
@@ -141,9 +140,9 @@ pub fn environment_loader_activates_team_only_explicitly_and_reads_bounded_jwks_
   let assert Ok(Some(loaded)) =
     team_config.load_if_requested_with(source, fn(path) {
       path |> should.equal("C:/secure/idp.jwks.json")
-      Ok(public_jwks)
+      Ok(v2_fixture.public_jwks)
     })
-  loaded.jwks_json |> should.equal(public_jwks)
+  loaded.jwks_json |> should.equal(v2_fixture.public_jwks)
 
   team_config.load_if_requested_with(source, fn(_) { Error("access_denied") })
   |> should.equal(
@@ -157,7 +156,7 @@ pub fn environment_loader_accepts_inline_jwks_with_explicit_provider_test() {
     team_config.load_if_requested_with(source, fn(_) {
       Error("inline_jwks_must_not_read_a_file")
     })
-  loaded.jwks_json |> should.equal(public_jwks)
+  loaded.jwks_json |> should.equal(v2_fixture.public_jwks)
 }
 
 pub fn environment_loader_rejects_ambiguous_team_mode_test() {
@@ -181,7 +180,7 @@ pub fn environment_loader_discovers_standard_provider_metadata_before_bind_test(
       "https://id.example/authorize",
       "https://id.example/token",
       "https://id.example/jwks",
-      public_jwks,
+      v2_fixture.public_jwks,
     )
   let assert Ok(Some(config)) =
     team_config.load_if_requested_with_discovery(
@@ -243,7 +242,7 @@ fn valid_source() {
     #("oidc_issuer", "https://id.example"),
     #("oidc_client_id", "beamtrace"),
     #("oidc_redirect_uri", "https://hub.example/auth/oidc/callback"),
-    #("oidc_jwks_json", public_jwks),
+    #("oidc_jwks_json", v2_fixture.public_jwks),
     #(
       "oidc_group_roles",
       "beam-admins:admin,beam-investigators:investigator,beam-viewers:viewer,beam-raw:raw",

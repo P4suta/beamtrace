@@ -89,7 +89,10 @@ atomic_install(Temporary, Path) ->
             {error, <<"destination_exists">>};
         {error, Reason} ->
             _ = file:delete(Temporary),
-            {error, error_binary({atomic_install, Reason})}
+            case file:read_link_info(Path) of
+                {ok, _Existing} -> {error, <<"destination_exists">>};
+                {error, _} -> {error, error_binary({atomic_install, Reason})}
+            end
     end.
 
 %% Use the OTP file server's replace operation on every supported target. We

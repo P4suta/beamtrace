@@ -105,6 +105,46 @@ pub fn typed_validators_match_codec_boundaries_without_json_round_trip_test() {
   )
 }
 
+pub fn graph_segments_validate_local_and_cross_segment_references_test() {
+  codec.validate_graph_segment(
+    codec.GraphSegment(
+      ["event-1"],
+      [types.CausalEdge("event-1", "event-2", types.ProcessOrder, types.Exact)],
+      [],
+    ),
+  )
+  |> should.equal(Ok(Nil))
+
+  let dangling_edge =
+    codec.GraphSegment(
+      ["event-1"],
+      [
+        types.CausalEdge(
+          "missing-1",
+          "missing-2",
+          types.ProcessOrder,
+          types.Exact,
+        ),
+      ],
+      [],
+    )
+  dangling_edge
+  |> codec.encode_graph_segment
+  |> codec.decode_graph_segment
+  |> should.equal(
+    Error(codec.InvalidField("graph.edge", "invalid edge reference")),
+  )
+
+  codec.validate_graph_segment(
+    codec.GraphSegment(["event-1"], [], [
+      types.Boundary("missing", types.ExternalBoundary, "outside capture"),
+    ]),
+  )
+  |> should.equal(
+    Error(codec.InvalidField("graph.boundary", "invalid boundary")),
+  )
+}
+
 pub fn versioned_event_decode_preserves_legacy_and_canonical_rules_test() {
   let event = sample_event()
   let canonical = codec.encode_event(event)

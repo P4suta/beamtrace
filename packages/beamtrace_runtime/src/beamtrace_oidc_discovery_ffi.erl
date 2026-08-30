@@ -9,7 +9,7 @@
     cache_refreshed_jwks/2
 ]).
 
--define(CACHE_KEY, {?MODULE, provider}).
+-define(CACHE_TABLE, beamtrace_oidc_discovery_cache).
 -define(REQUEST_TIMEOUT_MS, 16000).
 -define(WORKER_TIMEOUT_MS, 17000).
 
@@ -197,17 +197,17 @@ request_next(HandlerPid) ->
 
 remember_provider(Issuer, JwksUri, Jwks)
         when is_binary(Issuer), is_binary(JwksUri), is_binary(Jwks) ->
-    persistent_term:put(?CACHE_KEY, {Issuer, JwksUri, Jwks}),
+    cache_provider(Issuer, JwksUri, Jwks),
     nil.
 
 cached_jwks(Issuer, Fallback) when is_binary(Issuer), is_binary(Fallback) ->
-    case persistent_term:get(?CACHE_KEY, undefined) of
+    case cached_provider() of
         {Issuer, _JwksUri, Jwks} -> Jwks;
         _ -> Fallback
     end.
 
 refresh_jwks(Issuer, MaximumBytes) when is_binary(Issuer) ->
-    case persistent_term:get(?CACHE_KEY, undefined) of
+    case cached_provider() of
         {Issuer, JwksUri, _OldJwks} ->
             case get_json(JwksUri, MaximumBytes) of
                 {ok, {200, Jwks}} -> {ok, Jwks};
@@ -221,12 +221,67 @@ refresh_jwks(Issuer, MaximumBytes) when is_binary(Issuer) ->
     end.
 
 cache_refreshed_jwks(Issuer, Jwks) when is_binary(Issuer), is_binary(Jwks) ->
-    case persistent_term:get(?CACHE_KEY, undefined) of
+    case cached_provider() of
         {Issuer, JwksUri, _OldJwks} ->
-            persistent_term:put(?CACHE_KEY, {Issuer, JwksUri, Jwks});
+            cache_provider(Issuer, JwksUri, Jwks);
         _ -> ok
     end,
     nil.
+
+cached_provider() ->
+    ensure_cache_table(),
+    try ets:lookup(?CACHE_TABLE, provider) of
+        [{provider, Issuer, JwksUri, Jwks}] -> {Issuer, JwksUri, Jwks};
+        [] -> undefined
+    catch
+        error:badarg -> undefined
+    end.
+
+cache_provider(Issuer, JwksUri, Jwks) ->
+    ensure_cache_table(),
+    try ets:insert(?CACHE_TABLE, {provider, Issuer, JwksUri, Jwks}) of
+        true -> ok
+    catch
+        error:badarg ->
+            ensure_cache_table(),
+            true = ets:insert(?CACHE_TABLE, {provider, Issuer, JwksUri, Jwks}),
+            ok
+    end.
+
+ensure_cache_table() ->
+    case ets:whereis(?CACHE_TABLE) of
+        undefined -> start_cache_owner();
+        _Table -> ok
+    end.
+
+start_cache_owner() ->
+    Parent = self(),
+    Reference = make_ref(),
+    _ = spawn(fun() ->
+        try ets:new(?CACHE_TABLE, [
+            named_table,
+            public,
+            set,
+            {read_concurrency, true},
+            {write_concurrency, true}
+        ]) of
+            _Table ->
+                Parent ! {Reference, ready},
+                cache_owner_loop()
+        catch
+            error:badarg -> Parent ! {Reference, ready}
+        end
+    end),
+    receive
+        {Reference, ready} -> ok
+    after 5000 ->
+        erlang:error(cache_start_timeout)
+    end.
+
+cache_owner_loop() ->
+    receive
+        _Message -> cache_owner_loop()
+    end.
 
 reason_binary(Reason) when is_binary(Reason) -> Reason;
 reason_binary(Reason) ->

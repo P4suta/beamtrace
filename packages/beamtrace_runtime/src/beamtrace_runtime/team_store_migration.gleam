@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
+import beamtrace_runtime/log
 import gleam/dynamic/decode
+import gleam/int
 import sqlight
 
 const schema = "
@@ -356,6 +358,12 @@ fn result_try(
   }
 }
 
-fn sql_error(_error: sqlight.Error) -> String {
+fn sql_error(error: sqlight.Error) -> String {
+  let sqlight.SqlightError(code:, message:, offset:) = error
+  log.emit(log.Error, "team_store.migration_failed", [
+    log.Field("sqlite_code", int.to_string(sqlight.error_code_to_int(code))),
+    log.Field("sqlite_message", message),
+    log.Field("sqlite_offset", int.to_string(offset)),
+  ])
   "database_operation_failed"
 }
