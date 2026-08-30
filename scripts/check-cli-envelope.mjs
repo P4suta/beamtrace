@@ -34,7 +34,9 @@ for (const key of ["artifact", "outcome"]) {
   if (!(item === null || (typeof item === "object" && !Array.isArray(item)))) failures.push(`${key} must be null or an object`);
 }
 if ("invoked" in value && typeof value.invoked !== "string") failures.push("invoked must be a string");
-if (value.error !== null) {
+if (value.error !== null && (typeof value.error !== "object" || Array.isArray(value.error))) {
+  failures.push("error must be null or an object");
+} else if (value.error !== null) {
   const error = p.error.oneOf[1];
   for (const key of error.required) if (!(key in value.error)) failures.push(`error.${key} missing`);
   for (const key of Object.keys(value.error)) if (!(key in error.properties)) failures.push(`error.${key} unexpected`);

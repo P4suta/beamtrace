@@ -510,7 +510,9 @@ pub fn palette_capture_action_reopens_the_arming_form_test() {
       workspace.CaptureStatusLoaded(workspace.Ready(3, "sealed")),
     )
     |> workspace.update(workspace.UserSelectedMode(workspace.Compare))
+    |> workspace.update(workspace.UserOpenedPalette)
   let chosen = workspace.update(sealed, workspace.UserChoseCaptureAction)
   chosen.mode |> should.equal(workspace.Capture)
   chosen.capture_form_open |> should.be_true()
+  chosen.palette_open |> should.be_false()
 }

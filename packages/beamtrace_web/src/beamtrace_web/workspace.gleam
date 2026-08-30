@@ -411,7 +411,12 @@ pub fn update(model: Model, message: Msg) -> Model {
     UserFocusedSearch -> model
     UserOpenedCaptureForm -> Model(..model, capture_form_open: True)
     UserChoseCaptureAction ->
-      Model(..model, mode: Capture, capture_form_open: True)
+      Model(
+        ..model,
+        mode: Capture,
+        capture_form_open: True,
+        palette_open: False,
+      )
     UserClosedCaptureForm -> Model(..model, capture_form_open: False)
     UserOpenedPalette -> Model(..model, palette_open: True)
     UserClosedPalette -> Model(..model, palette_open: False)
