@@ -93,6 +93,7 @@ pub type Model {
     compare_run_count: Int,
     compare_runs: List(CompareRunSummary),
     compare_statistics_count: Int,
+    help_open: Bool,
   )
 }
 
@@ -107,6 +108,7 @@ pub type Msg {
   OpenLive
   OpenTraceLibrary
   OpenCompare
+  ToggleHelp
   AttachSubmitted(String)
   AttachAccepted(String)
   AttachFailed(String)
@@ -154,6 +156,7 @@ pub fn init(events: List(Event)) -> Model {
     compare_run_count: 0,
     compare_runs: [],
     compare_statistics_count: 0,
+    help_open: False,
   )
 }
 
@@ -221,6 +224,7 @@ pub fn compare(
 
 pub fn update(model: Model, message: Msg) -> Model {
   case message {
+    ToggleHelp -> Model(..model, help_open: !model.help_open)
     OpenAttach -> Model(..model, screen: AttachScreen, focus: AttachFocus)
     FocusArm -> Model(..model, screen: CaptureScreen, focus: ArmFocus)
     OpenAnomalies -> Model(..model, screen: AnomalyScreen, focus: NormalFocus)
@@ -367,6 +371,27 @@ pub fn visible_live_events(model: Model) -> List(Event) {
   }
 }
 
+/// Every key the normal focus understands, for the footer and the `?` guide.
+pub fn key_guide() -> List(#(String, String)) {
+  [
+    #("q", "quit"),
+    #("a", "attach"),
+    #("r", "arm MFA"),
+    #("c", "capture"),
+    #("l", "live"),
+    #("!", "anomalies"),
+    #("t", "traces"),
+    #("d", "compare"),
+    #("/", "search"),
+    #("s", "save"),
+    #("w", "open Web"),
+    #("↑↓", "select trace"),
+    #("⏎", "open trace"),
+    #("Esc", "close guide or input"),
+    #("?", "help"),
+  ]
+}
+
 pub fn key_to_message(key: String) -> Option(Msg) {
   case string.lowercase(key) {
     "a" -> Some(OpenAttach)
@@ -379,6 +404,7 @@ pub fn key_to_message(key: String) -> Option(Msg) {
     "l" -> Some(OpenLive)
     "t" -> Some(OpenTraceLibrary)
     "d" -> Some(OpenCompare)
+    "?" -> Some(ToggleHelp)
     _ -> None
   }
 }
@@ -387,9 +413,13 @@ pub fn key_to_message(key: String) -> Option(Msg) {
 /// key handling; those operations are emitted as explicit model messages.
 pub fn handle_key(model: Model, raw_key: String) -> Model {
   let key = keys.match(raw_key)
-  case key {
-    keys.Alt("q") -> Model(..model, quit: True)
-    _ ->
+  case key, model.focus {
+    keys.Alt("q"), _ -> Model(..model, quit: True)
+    // Node names never contain "?", so the guide stays reachable while the
+    // attach field has focus; free-text search and save inputs keep it.
+    keys.Char("?"), AttachFocus | keys.Char("?"), NormalFocus ->
+      update(model, ToggleHelp)
+    _, _ ->
       case model.focus {
         AttachFocus -> handle_attach_key(model, key)
         ArmFocus -> handle_arm_key(model, key)
@@ -460,6 +490,7 @@ fn handle_save_key(model: Model, key: keys.Key) -> Model {
 fn handle_normal_key(model: Model, key: keys.Key) -> Model {
   case key {
     keys.Char("q") | keys.Ctrl("c") -> Model(..model, quit: True)
+    keys.Escape -> Model(..model, help_open: False)
     keys.Up -> select_trace(model, model.selected_trace - 1)
     keys.Down -> select_trace(model, model.selected_trace + 1)
     keys.Enter -> open_selected_trace(model)

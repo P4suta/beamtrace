@@ -103,6 +103,14 @@ def main() -> int:
         if not wait_for_marker(process, master, output, READY_MARKER, 30):
             return fail("TUI did not become ready within 30 seconds.", output)
 
+        # The key guide must open and close from the attach screen's node
+        # field as well, because "?" is a command key even while typing.
+        os.write(master, b"?")
+        if not wait_for_marker(process, master, output, b"KEY GUIDE", 10):
+            return fail("TUI did not open the key guide on ?.", output)
+        os.write(master, b"?")
+        pump(master, output, 1)
+
         # The initial screen intentionally focuses the node-name field, where
         # printable "q" is valid input. Alt-q is the global quit chord and is
         # sent as one terminal sequence so its decoder cannot split the keys.
