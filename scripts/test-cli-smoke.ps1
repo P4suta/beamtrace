@@ -84,6 +84,24 @@ try {
     if ($demoResult.command -ne 'demo' -or -not $demoResult.ok -or $demoResult.artifact.event_count -lt 1) {
         throw "demo smoke test did not report a sealed archive: $demo"
     }
+    if (-not [IO.Path]::IsPathRooted($demoResult.artifact.absolute_path)) {
+        throw "demo artifact must carry an absolute path: $demo"
+    }
+
+    $envelopeCheck = Join-Path $PSScriptRoot 'check-cli-envelope.mjs'
+    $doctorJson = (& $launcher doctor --json | Out-String)
+    $doctorResult = $doctorJson | ConvertFrom-Json
+    if ($doctorResult.artifact.checks.agent_beam.ok -isnot [bool] -or $doctorResult.artifact.checks.web_assets.ok -isnot [bool]) {
+        throw "doctor --json must expose structured checks: $doctorJson"
+    }
+    $validateJson = (& $launcher validate nope.beamtrace --json | Out-String)
+    $versionJson = (& $launcher version --json | Out-String)
+    foreach ($sample in @($demo, $doctorJson, $validateJson, $versionJson)) {
+        $sample | node $envelopeCheck
+        if ($LASTEXITCODE -ne 0) {
+            throw "a --json result does not satisfy schemas/beamtrace-cli-v1/envelope.schema.json: $sample"
+        }
+    }
 
     $env:BEAMTRACE_TEAM = 'true'
     $teamFailure = (& $launcher serve 2>&1 | Out-String)

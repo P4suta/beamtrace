@@ -30,6 +30,8 @@ import beamtrace_runtime/team_tui
 import beamtrace_runtime/tui_driver
 import beamtrace_tui
 import beamtrace_tui/model as tui_model
+import gleam/dict
+import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/int
 import gleam/io
@@ -102,6 +104,10 @@ fn run(command_: cli.Command) -> Int {
       io.println(cli_spec.root_help())
       0
     }
+    cli.CommandHelp("errors") -> {
+      io.println(error_catalogue_help())
+      0
+    }
     cli.CommandHelp(name) -> {
       case cli_spec.command_help(name) {
         Some(help) -> io.println(help)
@@ -152,7 +158,16 @@ fn run(command_: cli.Command) -> Int {
         }
       }
     }
-    cli.Capture(node, trigger, where_aql, out, cookie_file, max_roots, preset) ->
+    cli.Capture(
+      node,
+      trigger,
+      where_aql,
+      out,
+      cookie_file,
+      max_roots,
+      preset,
+      window_s,
+    ) ->
       run_capture(
         node,
         trigger,
@@ -161,6 +176,7 @@ fn run(command_: cli.Command) -> Int {
         cookie_file,
         max_roots,
         preset,
+        window_s,
         False,
       )
     cli.Attach(node, mode, cookie_file, port) ->
@@ -181,6 +197,7 @@ fn run(command_: cli.Command) -> Int {
       max_roots,
       preset,
       child,
+      window_s,
     ) -> {
       let display = case terminal_interactive() {
         True -> cli.RecordWeb
@@ -196,6 +213,7 @@ fn run(command_: cli.Command) -> Int {
           max_roots,
           preset,
           child,
+          window_s,
         ),
         display,
         False,
@@ -237,7 +255,16 @@ fn run_force(command_: cli.Command) -> Int {
   case command_ {
     cli.RecordUi(command, display) ->
       run_record_ui_command(command, display, True)
-    cli.Capture(node, trigger, where_aql, out, cookie_file, max_roots, preset) ->
+    cli.Capture(
+      node,
+      trigger,
+      where_aql,
+      out,
+      cookie_file,
+      max_roots,
+      preset,
+      window_s,
+    ) ->
       run_capture(
         node,
         trigger,
@@ -246,6 +273,7 @@ fn run_force(command_: cli.Command) -> Int {
         cookie_file,
         max_roots,
         preset,
+        window_s,
         True,
       )
     cli.Record(..) -> {
@@ -274,6 +302,7 @@ fn run_record_ui_command(
       max_roots,
       preset,
       child,
+      window_s,
     ) -> {
       let output = case out == "" {
         True -> default_archive_path()
@@ -290,6 +319,7 @@ fn run_record_ui_command(
           preset,
           child,
           [],
+          window_s,
           force,
         )
       let archive_saved = record_wrote_archive(recorded)
@@ -330,7 +360,16 @@ fn run_json_with_force(command_: cli.Command, force: Bool) -> Int {
   case command_ {
     cli.Force(command) -> run_json_with_force(command, True)
     cli.RecordUi(command, _) -> run_json_with_force(command, force)
-    cli.Capture(node, trigger, where_aql, out, cookie_file, max_roots, preset) ->
+    cli.Capture(
+      node,
+      trigger,
+      where_aql,
+      out,
+      cookie_file,
+      max_roots,
+      preset,
+      window_s,
+    ) ->
       run_capture_json(
         node,
         trigger,
@@ -339,6 +378,7 @@ fn run_json_with_force(command_: cli.Command, force: Bool) -> Int {
         cookie_file,
         max_roots,
         preset,
+        window_s,
         force,
       )
     cli.Record(
@@ -350,6 +390,7 @@ fn run_json_with_force(command_: cli.Command, force: Bool) -> Int {
       max_roots,
       preset,
       child,
+      window_s,
     ) ->
       run_record_json(
         "record",
@@ -362,6 +403,7 @@ fn run_json_with_force(command_: cli.Command, force: Bool) -> Int {
         preset,
         child,
         [],
+        window_s,
         force,
         False,
       )
@@ -400,7 +442,7 @@ fn run_json_with_force(command_: cli.Command, force: Bool) -> Int {
 fn run_init_json() -> Int {
   case project_config.init() {
     Ok(path) -> {
-      emit_json_success("init", json.object([#("path", json.string(path))]))
+      emit_json_success("init", json.object(path_artifact(path)))
       0
     }
     Error(_) -> {
@@ -446,6 +488,7 @@ fn run_capture_json(
   cookie_file: Option(String),
   max_roots: Int,
   preset: types.Preset,
+  window_s: Int,
   force: Bool,
 ) -> Int {
   let output = case out == "" {
@@ -477,6 +520,7 @@ fn run_capture_json(
           budget: types.TraceBudget(
             ..types.default_budget(),
             max_roots: max_roots,
+            max_duration_ms: window_s * 1000,
           ),
           preset: preset,
         )
@@ -526,10 +570,11 @@ fn run_capture_json(
                 "capture",
                 exit_code,
                 Some(
-                  json.object([
-                    #("path", json.string(output)),
-                    #("event_count", json.int(list.length(result.events))),
-                  ]),
+                  json.object(
+                    list.append(path_artifact(output), [
+                      #("event_count", json.int(list.length(result.events))),
+                    ]),
+                  ),
                 ),
                 codec.outcome_json(result.outcome),
               )
@@ -587,10 +632,11 @@ fn run_export_json(
             Ok(Nil) -> {
               emit_json_success(
                 "export",
-                json.object([
-                  #("path", json.string(output)),
-                  #("format", json.string(export_format_name(format))),
-                ]),
+                json.object(
+                  list.append(path_artifact(output), [
+                    #("format", json.string(export_format_name(format))),
+                  ]),
+                ),
               )
               0
             }
@@ -617,6 +663,7 @@ fn run_migrate_json(path: String, output: String) -> Int {
         json.object([
           #("source", json.string(path)),
           #("path", json.string(output)),
+          #("absolute_path", json.string(absolute_path(output))),
           #("schema_version", json.int(2)),
         ]),
       )
@@ -671,6 +718,7 @@ fn run_demo_json(out: String) -> Int {
         types.Generic,
         child,
         demo_staged_modules,
+        cli.default_window_s,
         False,
         temporary,
       )
@@ -689,6 +737,7 @@ fn run_record_json(
   preset: types.Preset,
   child: List(String),
   staged_modules: List(String),
+  window_s: Int,
   force: Bool,
   delete_after: Bool,
 ) -> Int {
@@ -707,6 +756,7 @@ fn run_record_json(
       preset,
       child,
       staged_modules,
+      window_s,
       force,
     )
   let exit_code = case result {
@@ -724,12 +774,13 @@ fn run_record_json(
         command_name,
         exit_code,
         Some(
-          json.object([
-            #("path", json.string(output)),
-            #("retained", json.bool(!delete_after)),
-            #("event_count", json.int(recorded.event_count)),
-            #("child_exit_code", json.int(recorded.child_status)),
-          ]),
+          json.object(
+            list.append(path_artifact(output), [
+              #("retained", json.bool(!delete_after)),
+              #("event_count", json.int(recorded.event_count)),
+              #("child_exit_code", json.int(recorded.child_status)),
+            ]),
+          ),
         ),
         codec.outcome_json(recorded.outcome),
       )
@@ -753,6 +804,7 @@ fn execute_record_machine(
   preset: types.Preset,
   child: List(String),
   staged_modules: List(String),
+  window_s: Int,
   force: Bool,
 ) -> Result(MachineRecord, MachineRecordError) {
   use Nil <- machine_result(
@@ -821,6 +873,7 @@ fn execute_record_machine(
                   output,
                   max_roots,
                   preset,
+                  window_s,
                   force,
                 )
               capture_session.close(store)
@@ -842,6 +895,7 @@ fn execute_record_machine_session(
   output: String,
   max_roots: Int,
   preset: types.Preset,
+  window_s: Int,
   force: Bool,
 ) -> Result(MachineRecord, MachineRecordError) {
   let cli.Mfa(module_, function_, arity) = trigger
@@ -849,7 +903,7 @@ fn execute_record_machine_session(
     capture_session.ArmSpec(
       trigger: types.Mfa(module_, function_, arity),
       where_aql: where_aql,
-      capture_window_ms: 30_000,
+      capture_window_ms: window_s * 1000,
       drain_timeout_ms: 10_000,
       budget: capture.default_budget(),
       max_roots: max_roots,
@@ -888,7 +942,14 @@ fn execute_record_machine_session(
               ))
             }
             Ok(Nil) ->
-              execute_record_machine_child(store, handle, nodes, output, force)
+              execute_record_machine_child(
+                store,
+                handle,
+                nodes,
+                output,
+                window_s,
+                force,
+              )
           }
       }
   }
@@ -899,9 +960,10 @@ fn execute_record_machine_child(
   handle: record_process.Handle,
   nodes: List(String),
   output: String,
+  window_s: Int,
   force: Bool,
 ) -> Result(MachineRecord, MachineRecordError) {
-  case capture_session.await(store, 35_000) {
+  case capture_session.await(store, window_s * 1000 + 5000) {
     Error(_) -> {
       let _ = capture_session.cancel(store)
       let _ = record_process.release_finish(handle)
@@ -1021,18 +1083,64 @@ fn run_doctor_json() -> Int {
         )
         None -> #("not_found", [])
       }
+      let report = string.trim(doctor(True, profile_status, cookie_files))
       emit_json_success(
         "doctor",
         json.object([
-          #(
-            "report",
-            json.string(string.trim(doctor(True, profile_status, cookie_files))),
-          ),
+          #("report", json.string(report)),
+          #("checks", doctor_checks(report)),
         ]),
       )
       0
     }
   }
+}
+
+/// Structured view of the doctor report: each boolean check with a hint
+/// for the ones that fail.
+fn doctor_checks(report: String) -> json.Json {
+  let fields = case
+    json.parse(report, decode.dict(decode.string, decode.dynamic))
+  {
+    Ok(fields) -> fields
+    Error(_) -> dict.new()
+  }
+  let check = fn(name: String, hint: String) {
+    let ok = case dict.get(fields, name) {
+      Ok(value) ->
+        case decode.run(value, decode.bool) {
+          Ok(flag) -> flag
+          Error(_) -> False
+        }
+      Error(_) -> False
+    }
+    #(
+      name,
+      json.object([
+        #("ok", json.bool(ok)),
+        ..case ok {
+          True -> []
+          False -> [#("hint", json.string(hint))]
+        }
+      ]),
+    )
+  }
+  let bundled = capture.bundled_runtime()
+  json.object([
+    check(
+      "isolated_trace_session",
+      "Install Erlang/OTP 27 or newer; exact capture needs isolated trace sessions.",
+    ),
+    check("seq_trace", "Install an Erlang/OTP build with seq_trace support."),
+    check("zip", "The Erlang zip application is required to read archives."),
+    check("crypto", "The Erlang crypto application is required for checksums."),
+    check("agent_beam", cli_errors.agent_beam_unavailable(bundled).hint),
+    check("web_assets", cli_errors.web_assets_unavailable(bundled).hint),
+    check(
+      "distribution",
+      "Install erl and epmd on PATH so record and capture can reach BEAM nodes.",
+    ),
+  ])
 }
 
 fn run_compare_json(paths: List(String)) -> Int {
@@ -1338,6 +1446,7 @@ fn run_demo(mode: cli.DemoMode, out: String, port: Int) -> Int {
       types.Generic,
       command,
       demo_staged_modules,
+      cli.default_window_s,
       False,
     )
   let result = case recorded, mode {
@@ -1547,6 +1656,7 @@ fn run_capture(
   cookie_file: Option(String),
   max_roots: Int,
   preset: types.Preset,
+  window_s: Int,
   force: Bool,
 ) -> Int {
   let output = case out == "" {
@@ -1565,7 +1675,11 @@ fn run_capture(
       trigger: core_trigger,
       where_aql: where_aql,
       privacy: types.Metadata,
-      budget: types.TraceBudget(..types.default_budget(), max_roots: max_roots),
+      budget: types.TraceBudget(
+        ..types.default_budget(),
+        max_roots: max_roots,
+        max_duration_ms: window_s * 1000,
+      ),
       preset: preset,
     ),
     cookie,
@@ -1778,6 +1892,7 @@ fn run_record(
   preset: types.Preset,
   child: List(String),
   staged_modules: List(String),
+  window_s: Int,
   force: Bool,
 ) -> Int {
   let output = case out == "" {
@@ -1824,6 +1939,7 @@ fn run_record(
                   output,
                   max_roots,
                   preset,
+                  window_s,
                   force,
                 )
               capture_session.close(store)
@@ -1958,6 +2074,7 @@ fn run_record_session(
   out: String,
   max_roots: Int,
   preset: types.Preset,
+  window_s: Int,
   force: Bool,
 ) -> Int {
   let cli.Mfa(module_, function_, arity) = trigger
@@ -1966,7 +2083,7 @@ fn run_record_session(
     capture_session.ArmSpec(
       trigger: core_trigger,
       where_aql: where_aql,
-      capture_window_ms: 30_000,
+      capture_window_ms: window_s * 1000,
       drain_timeout_ms: 10_000,
       budget: capture.default_budget(),
       max_roots: max_roots,
@@ -1997,7 +2114,8 @@ fn run_record_session(
               record_process.stop(handle)
               fail("record could not release child: " <> error, 2)
             }
-            Ok(Nil) -> run_record_child(store, handle, nodes, out, force)
+            Ok(Nil) ->
+              run_record_child(store, handle, nodes, out, window_s, force)
           }
         }
       }
@@ -2009,10 +2127,11 @@ fn run_record_child(
   handle: record_process.Handle,
   nodes: List(String),
   out: String,
+  window_s: Int,
   force: Bool,
 ) -> Int {
   io.println("Waiting for the operation; capture remains armed…")
-  let captured = await_record_with_progress(store, 35_000, 5000)
+  let captured = await_record_with_progress(store, window_s * 1000 + 5000, 5000)
   case record_process.shutdown_exit_code() {
     code if code != 0 -> {
       let _ = capture_session.cancel(store)
@@ -2313,6 +2432,42 @@ fn session_error_message(error: capture_session.SessionError) -> String {
 
 @external(erlang, "beamtrace_cli_ffi", "read_cookie_file")
 fn read_cookie_file(path: String) -> Result(String, String)
+
+@external(erlang, "beamtrace_cli_ffi", "absolute_path")
+fn absolute_path(path: String) -> String
+
+fn error_catalogue_help() -> String {
+  let rows =
+    cli_errors.all()
+    |> list.map(fn(error) {
+      "  "
+      <> string.pad_end(cli_errors.human_label(error), 30, " ")
+      <> "exit "
+      <> int.to_string(cli_errors.exit_code(error))
+      <> "  "
+      <> error.message
+    })
+    |> string.join("\n")
+  let exits =
+    cli_errors.all_exit_codes()
+    |> list.map(fn(exit) {
+      "  "
+      <> string.pad_end(int.to_string(cli_errors.exit_to_int(exit)), 5, " ")
+      <> cli_errors.exit_description(exit)
+    })
+    |> string.join("\n")
+  "Error codes (the JSON error.code is the lower-case label):\n"
+  <> rows
+  <> "\n\nExit codes:\n"
+  <> exits
+}
+
+fn path_artifact(path: String) -> List(#(String, json.Json)) {
+  [
+    #("path", json.string(path)),
+    #("absolute_path", json.string(absolute_path(path))),
+  ]
+}
 
 @external(erlang, "beamtrace_cli_ffi", "read_cookie_default")
 fn read_cookie_default() -> Result(String, String)

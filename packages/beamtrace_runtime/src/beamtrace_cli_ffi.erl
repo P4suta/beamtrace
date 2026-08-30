@@ -11,6 +11,7 @@
     auto_record_node/0,
     demo_command/0,
     agent_beam_status/0,
+    absolute_path/1,
     bundled_runtime/0,
     web_assets_status/0,
     write_text/2,
@@ -108,6 +109,9 @@ agent_beam_status() ->
     end.
 
 bundled_runtime() -> os:getenv("BEAMTRACE_BUNDLED_RUNTIME") =:= "1".
+
+absolute_path(Path) when is_binary(Path) ->
+    unicode:characters_to_binary(filename:absname(unicode:characters_to_list(Path))).
 
 web_assets_status() ->
     case valid_web_assets() of
@@ -241,16 +245,20 @@ doctor(Json, ProfileStatus, ConfiguredCookieFiles)
     CookieFiles = configured_cookie_files(ConfiguredCookieFiles),
     CookiePermissions = cookie_permission_status(CookieFiles),
     CookieFileCount = length(CookieFiles),
+    RuntimeRoot = unicode:characters_to_binary(code:root_dir()),
+    Bundled = bundled_runtime(),
     case Json of
         true -> doctor_json(
             Otp, WordSize, TraceSession, TraceSystem, SeqTrace, Zip, Crypto,
             AgentBeam, valid_web_assets(), Distribution, CookiePermissions,
-            CookieFileCount, ProfileStatus, Erl, Gleam, Mix, Rebar3
+            CookieFileCount, ProfileStatus, Erl, Gleam, Mix, Rebar3,
+            Bundled, RuntimeRoot
         );
         false -> doctor_human(
             Otp, WordSize, TraceSession, TraceSystem, SeqTrace, Zip, Crypto,
             AgentBeam, valid_web_assets(), Distribution, CookiePermissions,
-            CookieFileCount, ProfileStatus, Erl, Gleam, Mix, Rebar3
+            CookieFileCount, ProfileStatus, Erl, Gleam, Mix, Rebar3,
+            Bundled, RuntimeRoot
         )
     end;
 doctor(_Json, _ProfileStatus, _ConfiguredCookieFiles) ->
@@ -260,11 +268,13 @@ doctor_human(
     Otp, WordSize, TraceSession, TraceSystem, SeqTrace, Zip, Crypto,
     AgentBeam, WebAssets, Distribution, CookiePermissions, CookieFileCount,
     ProfileStatus,
-    Erl, Gleam, Mix, Rebar3
+    Erl, Gleam, Mix, Rebar3, Bundled, RuntimeRoot
 ) ->
     unicode:characters_to_binary(io_lib:format(
         "BeamTrace doctor~n"
         "  OTP release: ~s~n"
+        "  runtime root: ~ts~n"
+        "  bundled runtime: ~p~n"
         "  word size: ~B bytes~n"
         "  isolated trace session: ~p~n"
         "  trace:system/3: ~p (OTP 27 uses system_monitor fallback)~n"
@@ -278,7 +288,8 @@ doctor_human(
         "  cookie files checked: ~B~n"
         "  project profile: ~s~n"
         "  executables: erl=~p gleam=~p mix=~p rebar3=~p~n",
-        [Otp, WordSize, TraceSession, TraceSystem, SeqTrace, Zip, Crypto,
+        [Otp, RuntimeRoot, Bundled, WordSize, TraceSession, TraceSystem,
+         SeqTrace, Zip, Crypto,
          status_word(AgentBeam), status_word(WebAssets), Distribution,
          CookiePermissions, CookieFileCount, ProfileStatus,
          Erl, Gleam, Mix, Rebar3]
@@ -288,10 +299,11 @@ doctor_json(
     Otp, WordSize, TraceSession, TraceSystem, SeqTrace, Zip, Crypto,
     AgentBeam, WebAssets, Distribution, CookiePermissions, CookieFileCount,
     ProfileStatus,
-    Erl, Gleam, Mix, Rebar3
+    Erl, Gleam, Mix, Rebar3, Bundled, RuntimeRoot
 ) ->
     unicode:characters_to_binary(io_lib:format(
-        "{\"otp_release\":\"~s\",\"word_size\":~B,"
+        "{\"otp_release\":\"~s\",\"runtime_root\":~s,\"bundled_runtime\":~s,"
+        "\"word_size\":~B,"
         "\"isolated_trace_session\":~s,\"trace_system\":~s,"
         "\"seq_trace\":~s,\"zip\":~s,\"crypto\":~s,"
         "\"agent_beam\":~s,\"web_assets\":~s,"
@@ -299,7 +311,8 @@ doctor_json(
         "\"cookie_files_checked\":~B,"
         "\"profile\":\"~s\",\"executables\":{"
         "\"erl\":~s,\"gleam\":~s,\"mix\":~s,\"rebar3\":~s}}~n",
-        [Otp, WordSize, json_bool(TraceSession), json_bool(TraceSystem),
+        [Otp, json_text(RuntimeRoot), json_bool(Bundled), WordSize,
+         json_bool(TraceSession), json_bool(TraceSystem),
          json_bool(SeqTrace), json_bool(Zip), json_bool(Crypto),
          json_bool(AgentBeam), json_bool(WebAssets), json_bool(Distribution),
          CookiePermissions, CookieFileCount, ProfileStatus,
@@ -341,6 +354,15 @@ cookie_path_status(Path) ->
 
 json_bool(true) -> "true";
 json_bool(false) -> "false".
+
+json_text(Value) ->
+    Escaped = lists:flatmap(fun
+        ($") -> "\\\"";
+        ($\\) -> "\\\\";
+        (Char) when Char < 32 -> io_lib:format("\\u~4.16.0b", [Char]);
+        (Char) -> [Char]
+    end, unicode:characters_to_list(Value)),
+    [$", Escaped, $"].
 
 status_word(true) -> "valid";
 status_word(false) -> "unavailable".

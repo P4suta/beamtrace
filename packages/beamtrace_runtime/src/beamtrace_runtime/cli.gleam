@@ -67,6 +67,7 @@ pub type Command {
     cookie_file: Option(String),
     max_roots: Int,
     preset: types.Preset,
+    window_s: Int,
   )
   Record(
     node: Option(String),
@@ -77,6 +78,7 @@ pub type Command {
     max_roots: Int,
     preset: types.Preset,
     command: List(String),
+    window_s: Int,
   )
   Open(path: String, mode: UiMode, port: Int)
   Compare(left: String, right: String)
@@ -117,6 +119,7 @@ type CaptureOptions {
     max_roots: Int,
     preset: types.Preset,
     acknowledge_seq_trace_reset: Bool,
+    window_s: Int,
   )
 }
 
@@ -130,8 +133,14 @@ type RecordOptions {
     max_roots: Int,
     preset: types.Preset,
     display: Option(RecordDisplay),
+    window_s: Int,
   )
 }
+
+/// Default and bounds of `--capture-window SECONDS`.
+pub const default_window_s = 30
+
+const max_window_s = 300
 
 type RelayOptions {
   RelayOptions(
@@ -308,13 +317,18 @@ pub fn json_requested(arguments: List(String)) -> Bool {
   }
 }
 
-/// Best-effort stable command name for a parse-error JSON envelope.
+/// Stable command name for a parse-error JSON envelope: a specified command
+/// name, or `unknown`.
 pub fn invoked_command(arguments: List(String)) -> String {
   case arguments {
     [] -> "guide"
     ["--json", ..rest] | ["--force", ..rest] -> invoked_command(rest)
     ["--", ..] -> "record"
-    [name, ..] -> name
+    [name, ..] ->
+      case cli_spec.known(name) {
+        True -> name
+        False -> "unknown"
+      }
   }
 }
 
@@ -322,6 +336,7 @@ fn parse_command(arguments: List(String)) -> Result(Command, ParseError) {
   case arguments {
     [] -> Ok(Guide)
     ["help"] | ["--help"] | ["-h"] -> Ok(Help)
+    ["help", "errors"] -> Ok(CommandHelp("errors"))
     ["help", command] -> command_help(command)
     ["version"] | ["--version"] | ["-V"] -> Ok(Version)
     ["completion", shell] -> parse_completion(shell)
@@ -575,7 +590,17 @@ fn parse_relay_options(
 fn parse_record(options: List(String)) -> Result(Command, ParseError) {
   parse_record_options(
     options,
-    RecordOptions(None, None, None, None, None, 1, types.Generic, None),
+    RecordOptions(
+      None,
+      None,
+      None,
+      None,
+      None,
+      1,
+      types.Generic,
+      None,
+      default_window_s,
+    ),
   )
 }
 
@@ -653,6 +678,10 @@ fn parse_record_options(
       )
     }
     ["--profile", _, ..rest] -> parse_record_options(rest, parsed)
+    ["--capture-window", value, ..rest] -> {
+      use window_s <- try_result(parse_window(value))
+      parse_record_options(rest, RecordOptions(..parsed, window_s: window_s))
+    }
     [option, ..] -> Error(unknown_option("record", option))
   }
 }
@@ -680,6 +709,7 @@ fn finish_record(
           max_roots: parsed.max_roots,
           preset: parsed.preset,
           command: command,
+          window_s: parsed.window_s,
         )
       case parsed.display {
         None -> Ok(command)
@@ -764,7 +794,17 @@ fn parse_capture(
   options: List(String),
 ) -> Result(Command, ParseError) {
   let initial =
-    CaptureOptions(node, None, None, None, None, 1, types.Generic, False)
+    CaptureOptions(
+      node,
+      None,
+      None,
+      None,
+      None,
+      1,
+      types.Generic,
+      False,
+      default_window_s,
+    )
   use parsed <- try_result(parse_capture_options(options, initial))
   use _ <- try_result(validate_where(parsed.where_aql))
   case parsed.node, parsed.trigger {
@@ -783,6 +823,7 @@ fn parse_capture(
             cookie_file: parsed.cookie_file,
             max_roots: parsed.max_roots,
             preset: parsed.preset,
+            window_s: parsed.window_s,
           ))
       }
     None, _ -> Error(usage("capture requires a node or --node <node>"))
@@ -850,6 +891,10 @@ fn parse_capture_options(
         CaptureOptions(..parsed, acknowledge_seq_trace_reset: True),
       )
     ["--profile", _, ..rest] -> parse_capture_options(rest, parsed)
+    ["--capture-window", value, ..rest] -> {
+      use window_s <- try_result(parse_window(value))
+      parse_capture_options(rest, CaptureOptions(..parsed, window_s: window_s))
+    }
     [option, ..] -> Error(unknown_option("capture", option))
   }
 }
@@ -952,6 +997,18 @@ fn parse_migrate(
       }
     ["--output", value, ..rest] -> parse_migrate(path, rest, Some(value))
     [option, ..] -> Error(unknown_option("migrate", option))
+  }
+}
+
+fn parse_window(value: String) -> Result(Int, ParseError) {
+  case int.parse(value) {
+    Ok(seconds) if seconds >= 1 && seconds <= max_window_s -> Ok(seconds)
+    _ ->
+      Error(usage(
+        "--capture-window must be between 1 and "
+        <> int.to_string(max_window_s)
+        <> " seconds",
+      ))
   }
 }
 
@@ -1095,8 +1152,8 @@ fn wrap_global_options(
 
 fn force_allowed(command: Command) -> Bool {
   case command {
-    Capture(_, _, _, out, _, _, _) -> out != ""
-    Record(_, _, _, out, _, _, _, _) -> out != ""
+    Capture(out: out, ..) -> out != ""
+    Record(out: out, ..) -> out != ""
     RecordUi(inner, _) -> force_allowed(inner)
     _ -> False
   }

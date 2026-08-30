@@ -79,6 +79,7 @@ pub fn capture_command_contract_test() {
       cookie_file: Some(".secrets/cookie"),
       max_roots: 3,
       preset: types.GenServer,
+      window_s: 30,
     )),
   )
 }
@@ -102,6 +103,7 @@ pub fn capture_defaults_to_one_generic_root_test() {
       cookie_file: None,
       max_roots: 1,
       preset: types.Generic,
+      window_s: 30,
     )),
   )
 }
@@ -126,6 +128,7 @@ pub fn capture_accepts_an_option_node_for_project_profile_expansion_test() {
       cookie_file: None,
       max_roots: 1,
       preset: types.Generic,
+      window_s: 30,
     )),
   )
 }
@@ -402,18 +405,17 @@ pub fn record_parses_capture_options_before_the_child_separator_test() {
     "test",
   ])
   |> should.equal(
-    Ok(
-      cli.Record(
-        node: Some("app@host"),
-        trigger: cli.Mfa("shop", "checkout", 1),
-        where_aql: Some("arg.0.tag == order"),
-        out: "run.beamtrace",
-        cookie_file: Some(".secrets/cookie"),
-        max_roots: 2,
-        preset: types.GleamActor,
-        command: ["gleam", "test"],
-      ),
-    ),
+    Ok(cli.Record(
+      node: Some("app@host"),
+      trigger: cli.Mfa("shop", "checkout", 1),
+      where_aql: Some("arg.0.tag == order"),
+      out: "run.beamtrace",
+      cookie_file: Some(".secrets/cookie"),
+      max_roots: 2,
+      preset: types.GleamActor,
+      command: ["gleam", "test"],
+      window_s: 30,
+    )),
   )
 }
 
@@ -434,18 +436,17 @@ pub fn record_generates_a_target_but_still_requires_trigger_output_and_child_tes
     "run",
   ])
   |> should.equal(
-    Ok(
-      cli.Record(
-        None,
-        cli.Mfa("m", "f", 0),
-        None,
-        "x.beamtrace",
-        None,
-        1,
-        types.Generic,
-        ["gleam", "run"],
-      ),
-    ),
+    Ok(cli.Record(
+      None,
+      cli.Mfa("m", "f", 0),
+      None,
+      "x.beamtrace",
+      None,
+      1,
+      types.Generic,
+      ["gleam", "run"],
+      30,
+    )),
   )
 
   let assert Error(child_error) =
@@ -599,6 +600,7 @@ pub fn capture_and_record_generate_output_names_when_out_is_omitted_test() {
       None,
       1,
       types.Generic,
+      30,
     )),
   )
 

@@ -27,9 +27,9 @@ pub fn commands() -> List(CommandSpec) {
     CommandSpec(
       "help",
       "Show the command guide or detailed help for one command.",
-      "beamtrace help [<command>]",
+      "beamtrace help [<command>|errors]",
       [],
-      ["beamtrace help capture"],
+      ["beamtrace help capture", "beamtrace help errors"],
       [],
     ),
     CommandSpec(
@@ -65,6 +65,10 @@ pub fn commands() -> List(CommandSpec) {
         OptionSpec("--profile NAME", "Project capture profile."),
         OptionSpec("--max-roots N", "Capture between 1 and 1000 roots."),
         OptionSpec("--preset PRESET", "Capture preset; default generic."),
+        OptionSpec(
+          "--capture-window SECONDS",
+          "Seconds to wait for the operation; default 30, at most 300.",
+        ),
         OptionSpec("--json", "Emit one versioned JSON result object."),
         ..capture_safety_options()
       ],
@@ -98,6 +102,10 @@ pub fn commands() -> List(CommandSpec) {
         OptionSpec("--cookie-file PATH", "Read a distribution cookie file."),
         OptionSpec("--max-roots N", "Capture between 1 and 1000 roots."),
         OptionSpec("--preset PRESET", "Capture preset; default generic."),
+        OptionSpec(
+          "--capture-window SECONDS",
+          "Seconds to wait for the operation; default 30, at most 300.",
+        ),
         OptionSpec("--json", "Emit one versioned JSON result object."),
       ],
     ),
@@ -423,7 +431,7 @@ pub fn positional_choices(command: String) -> List(String) {
   case command {
     "completion" -> shells()
     "config" -> ["check"]
-    "help" -> names()
+    "help" -> list.append(names(), ["errors"])
     _ -> []
   }
 }

@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://beamtrace.dev/schema/cli-v1/envelope.schema.json",
+  "title": "BeamTrace CLI result envelope",
+  "description": "One stdout object emitted by finite commands with --json. `ok` is true exactly when `error` is null: the command completed and produced its artifact. `exit_code` carries the outcome even when ok is true (1 = comparison difference or application exit status, 3 = capture integrity issue).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "command",
+    "ok",
+    "exit_code",
+    "artifact",
+    "outcome",
+    "error"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "command": {
+      "type": "string",
+      "enum": [
+        "help",
+        "attach",
+        "capture",
+        "record",
+        "open",
+        "compare",
+        "export",
+        "validate",
+        "migrate",
+        "serve",
+        "demo",
+        "relay",
+        "tui",
+        "init",
+        "config",
+        "doctor",
+        "mcp",
+        "completion",
+        "version",
+        "config check",
+        "unknown"
+      ]
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "exit_code": {
+      "type": "integer",
+      "enum": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        130,
+        143
+      ]
+    },
+    "artifact": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object"
+        }
+      ]
+    },
+    "outcome": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object"
+        }
+      ]
+    },
+    "error": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "message",
+            "hint"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "agent_beam_unavailable",
+                "archive_not_found",
+                "capture_arm_timeout",
+                "capture_failed",
+                "capture_incomplete",
+                "capture_integrity",
+                "checksum_mismatch",
+                "child_crashed",
+                "child_start_failed",
+                "command_failed",
+                "command_not_found",
+                "duplicate_entry",
+                "invalid_arguments",
+                "invalid_container",
+                "invalid_graph",
+                "invalid_search",
+                "invalid_window",
+                "io_error",
+                "migration_output_conflict",
+                "operation_outcome",
+                "output_exists",
+                "safety_refusal",
+                "schema_error",
+                "system_tracer_occupied",
+                "target_unavailable",
+                "target_unreachable",
+                "trigger_timeout",
+                "unsafe_entry",
+                "web_assets_unavailable",
+                "zip_bomb"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1
+            },
+            "hint": {
+              "type": "string",
+              "minLength": 1
+            },
+            "detail": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
