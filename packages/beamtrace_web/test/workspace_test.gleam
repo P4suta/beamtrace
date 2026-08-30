@@ -467,3 +467,38 @@ fn team_trace(id: String) -> workspace.TeamTrace {
     False,
   )
 }
+
+pub fn escape_closes_the_command_palette_test() {
+  let model = workspace.init(events(1))
+  let opened = workspace.update(model, workspace.UserOpenedPalette)
+  opened.palette_open |> should.be_true()
+  let closed = workspace.update(opened, workspace.UserPressedKey("Escape"))
+  closed.palette_open |> should.be_false()
+  workspace.keyboard_shortcut("escape")
+  |> should.equal(Some(workspace.UserClosedPalette))
+}
+
+pub fn sealed_status_on_first_load_hides_the_arming_form_test() {
+  let sealed =
+    workspace.init_remote()
+    |> workspace.update(
+      workspace.CaptureStatusLoaded(workspace.Ready(
+        34,
+        "sealed after 250ms quiet period · delivery verified",
+      )),
+    )
+  sealed.capture_form_open |> should.be_false()
+  let reopened = workspace.update(sealed, workspace.UserOpenedCaptureForm)
+  reopened.capture_form_open |> should.be_true()
+
+  let armed_here =
+    workspace.init_remote()
+    |> workspace.update(workspace.CaptureStatusLoaded(workspace.Idle))
+    |> workspace.update(workspace.UserChangedTrigger("shop:checkout/1"))
+    |> workspace.update(workspace.UserRequestedArm)
+    |> workspace.update(workspace.CaptureStatusLoaded(workspace.Armed))
+    |> workspace.update(
+      workspace.CaptureStatusLoaded(workspace.Ready(1, "sealed")),
+    )
+  armed_here.capture_form_open |> should.be_true()
+}

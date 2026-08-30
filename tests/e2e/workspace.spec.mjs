@@ -83,12 +83,12 @@ test("Compare aligns multiple traces and renders latency and occurrence statisti
   const alignment = page.getByRole("table", { name: "Accessible trace alignment table" });
   await expect(alignment).toContainText("slow.beamtrace");
   await expect(alignment).toContainText("retry-branch");
-  await expect(alignment).toContainText("90 ns estimated [80, 100]");
+  await expect(alignment).toContainText("+90 ns ±10 ns · estimated");
   await expect(alignment).toContainText("unique causal neighborhood");
   const statistics = page.getByRole("table", { name: "Multi-run branch statistics" });
-  await expect(statistics).toContainText("p50 10 ns exact · 2 valid / 1 missing");
+  await expect(statistics).toContainText("p50 +10 ns · exact · 2 valid / 1 missing");
   await expect(statistics).toContainText(
-    "p95 100 ns estimated [95, 105] · 2 valid / 1 missing",
+    "p95 +100 ns ±5 ns · estimated · 2 valid / 1 missing",
   );
   await expect(statistics).toContainText("2/3 runs");
   await expect(
@@ -379,4 +379,48 @@ test("attached workspace arms, polls, loads, and saves a real capture", async ({
   await page.getByRole("textbox", { name: "Save path" }).fill("dogfood.beamtrace");
   await page.getByRole("button", { name: "Save capture" }).click();
   await expect(page.getByText("Saved dogfood.beamtrace")).toBeVisible();
+});
+
+test("keyboard shortcuts drive modes, search focus, and palette dismissal", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("searchbox", { name: "Search events" }).waitFor();
+  await page.keyboard.press("4");
+  await expect(page.locator("main")).toHaveAttribute("data-mode", "team");
+  await page.keyboard.press("1");
+  await expect(page.locator("main")).toHaveAttribute("data-mode", "capture");
+  await page.keyboard.press("/");
+  await expect(page.getByRole("searchbox", { name: "Search events" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("searchbox", { name: "Search events" })).not.toBeFocused();
+  await page.keyboard.press("Control+k");
+  const dialog = page.getByRole("dialog", { name: "Command palette" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Arm capture trigger" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+});
+
+test("sealed archive opens on the result overview", async ({ page }) => {
+  await page.route("**/api/v2/sessions/current", (route) => {
+    route.fulfill({
+      status: 200,
+      contentType: "application/json; charset=utf-8",
+      body: JSON.stringify({
+        status: "sealed",
+        event_count: 34,
+        outcome: { end: { kind: "quiet_period", quiet_ms: 250 }, issues: [], receipts: [] },
+        delivery_verified: true,
+        clocks: { schema_version: 2, unix_anchor_ns: "1774000000000000000", nodes: [] },
+      }),
+    });
+  });
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Sealed archive" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sealed causal observation" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Arm capture" })).toHaveCount(0);
+  await expect(page.getByRole("navigation", { name: "Session navigator" })).toContainText("Sealed archive · 34 events");
+  await page.getByRole("button", { name: "New capture" }).click();
+  await expect(page.getByRole("button", { name: "Arm capture" })).toBeVisible();
+  await page.getByRole("button", { name: "Back to result" }).click();
+  await expect(page.getByRole("heading", { name: "Sealed archive" })).toBeVisible();
 });

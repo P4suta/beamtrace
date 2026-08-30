@@ -25,6 +25,7 @@ $steps = @(
     'test-fixtures.ps1',
     'test-cli-smoke.ps1',
     'build-web.ps1',
+    'test-web-dist.ps1',
     'test-package.ps1',
     'test-hex-package.ps1',
     'test-distribution-metadata.ps1',

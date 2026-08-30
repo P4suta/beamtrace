@@ -220,10 +220,67 @@ export function installShortcuts(handler) {
   window.addEventListener("keydown", (event) => {
     const editable = event.target instanceof HTMLInputElement
       || event.target instanceof HTMLTextAreaElement;
+    const palette = document.querySelector(".command-palette");
+    if (event.key === "Tab" && palette) {
+      trapFocus(event, palette);
+      return;
+    }
+    if (event.key === "Escape") {
+      if (editable && !palette) {
+        event.target.blur();
+        return;
+      }
+      if (palette) {
+        event.preventDefault();
+        handler("escape");
+      }
+      return;
+    }
     const command = (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k";
-    const direct = !editable && ["1", "2", "3", "/"].includes(event.key);
+    const direct = !editable && ["1", "2", "3", "4", "/"].includes(event.key);
     if (!command && !direct) return;
     event.preventDefault();
     handler(command ? "k" : event.key);
+  });
+}
+
+function trapFocus(event, palette) {
+  const focusable = palette.querySelectorAll("button, [href], input, [tabindex]:not([tabindex='-1'])");
+  if (focusable.length === 0) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+let paletteOpener = null;
+
+export function focusSearch() {
+  window.requestAnimationFrame(() => {
+    const search = document.getElementById("event-search");
+    if (search) search.focus();
+  });
+}
+
+export function focusPalette() {
+  paletteOpener = document.activeElement;
+  window.requestAnimationFrame(() => {
+    const first = document.querySelector(".command-palette button");
+    if (first) first.focus();
+  });
+}
+
+export function restoreFocus() {
+  const opener = paletteOpener;
+  paletteOpener = null;
+  window.requestAnimationFrame(() => {
+    if (opener && typeof opener.focus === "function" && document.contains(opener)) {
+      opener.focus();
+    }
   });
 }

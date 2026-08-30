@@ -208,7 +208,7 @@ pub type Model {
     viewport_size: Int,
     zoom: Float,
     palette_open: Bool,
-    search_focused: Bool,
+    capture_form_open: Bool,
     bookmarks: List(String),
     annotation: String,
     trigger_input: String,
@@ -274,6 +274,8 @@ pub type Msg {
   CaptureArmFailed(String)
   PollCaptureStatus
   CaptureStatusLoaded(CapturePhase)
+  UserOpenedCaptureForm
+  UserClosedCaptureForm
   UserRequestedCancel
   CaptureCancelFailed(String)
   UserChangedSavePath(String)
@@ -326,7 +328,7 @@ pub fn init(events: List(EventRow)) -> Model {
     viewport_size: 80,
     zoom: 1.0,
     palette_open: False,
-    search_focused: False,
+    capture_form_open: True,
     bookmarks: [],
     annotation: "",
     trigger_input: "",
@@ -405,7 +407,9 @@ pub fn update(model: Model, message: Msg) -> Model {
       Model(..model, query: query, viewport_start: 0, load_error: None)
     UserToggledInternalNoise ->
       Model(..model, show_internal: !model.show_internal, viewport_start: 0)
-    UserFocusedSearch -> Model(..model, search_focused: True)
+    UserFocusedSearch -> model
+    UserOpenedCaptureForm -> Model(..model, capture_form_open: True)
+    UserClosedCaptureForm -> Model(..model, capture_form_open: False)
     UserOpenedPalette -> Model(..model, palette_open: True)
     UserClosedPalette -> Model(..model, palette_open: False)
     UserChangedAnnotation(annotation) -> Model(..model, annotation: annotation)
@@ -506,6 +510,16 @@ pub fn update(model: Model, message: Msg) -> Model {
           Model(
             ..model,
             capture_phase: phase,
+            // A sealed archive that this session never armed opens on its
+            // result; the arming form stays reachable behind "New capture".
+            capture_form_open: case
+              model.capture_phase,
+              string.trim(model.trigger_input)
+            {
+              Idle, "" -> False
+              Unavailable, "" -> False
+              _, _ -> model.capture_form_open
+            },
             capture_notice: "",
             total_events: count,
             viewport_start: 0,
@@ -864,6 +878,7 @@ pub fn keyboard_shortcut(key: String) -> Option(Msg) {
     "4" -> Some(UserSelectedMode(Team))
     "/" -> Some(UserFocusedSearch)
     "k" -> Some(UserOpenedPalette)
+    "escape" -> Some(UserClosedPalette)
     _ -> None
   }
 }

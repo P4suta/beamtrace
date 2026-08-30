@@ -180,3 +180,12 @@ pub fn draw(root: Dynamic, payload: String, zoom: Float) -> Nil
 
 @external(javascript, "./canvas_ffi.mjs", "installShortcuts")
 pub fn install_shortcuts(handler: fn(String) -> Nil) -> Nil
+
+@external(javascript, "./canvas_ffi.mjs", "focusSearch")
+pub fn focus_search() -> Nil
+
+@external(javascript, "./canvas_ffi.mjs", "focusPalette")
+pub fn focus_palette() -> Nil
+
+@external(javascript, "./canvas_ffi.mjs", "restoreFocus")
+pub fn restore_focus() -> Nil

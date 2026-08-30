@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace_web/appearance
+import beamtrace_web/time_format
 import beamtrace_web/workspace
 import gleam/int
 import gleam/list
@@ -37,7 +38,10 @@ pub fn workspace(model: workspace.Model) -> Element(workspace.Msg) {
 }
 
 fn capture_controls(model: workspace.Model) -> Element(workspace.Msg) {
+  let sealed_landing =
+    capture_ready(model.capture_phase) && !model.capture_form_open
   case model.mode {
+    workspace.Capture if sealed_landing -> archive_overview(model)
     workspace.Capture ->
       html.section(
         [
@@ -78,6 +82,17 @@ fn capture_controls(model: workspace.Model) -> Element(workspace.Msg) {
           ),
           capture_advanced(model),
           capture_save_controls(model),
+          case capture_ready(model.capture_phase) {
+            True ->
+              html.button(
+                [
+                  attribute.class("quiet-button"),
+                  event.on_click(workspace.UserClosedCaptureForm),
+                ],
+                [html.text("Back to result")],
+              )
+            False -> html.div([], [])
+          },
           html.output(
             [
               attribute.class("capture-status"),
@@ -93,6 +108,42 @@ fn capture_controls(model: workspace.Model) -> Element(workspace.Msg) {
     workspace.Compare -> compare_controls(model)
     _ -> html.div([], [])
   }
+}
+
+/// Landing for a sealed archive: what was observed, whether it verified,
+/// and the two actions that still apply (save it, start a new capture).
+fn archive_overview(model: workspace.Model) -> Element(workspace.Msg) {
+  let #(count, outcome) = case model.capture_phase {
+    workspace.Ready(count, outcome) -> #(count, outcome)
+    _ -> #(model.total_events, "")
+  }
+  html.section(
+    [
+      attribute.class("capture-controls archive-overview"),
+      attribute.aria_label("Sealed archive"),
+    ],
+    [
+      html.div([], [
+        html.h2([], [html.text("Sealed archive")]),
+        html.p([], [
+          html.text(
+            int.to_string(count)
+            <> " events · "
+            <> outcome
+            <> ". Choose a save path to retain this archive.",
+          ),
+        ]),
+      ]),
+      capture_save_controls(model),
+      html.button(
+        [
+          attribute.class("quiet-button"),
+          event.on_click(workspace.UserOpenedCaptureForm),
+        ],
+        [html.text("New capture")],
+      ),
+    ],
+  )
 }
 
 fn capture_advanced(model: workspace.Model) -> Element(workspace.Msg) {
@@ -297,6 +348,7 @@ fn workspace_header(model: workspace.Model) -> Element(workspace.Msg) {
       html.label([attribute.class("search")], [
         html.span([attribute.class("sr-only")], [html.text("Search events")]),
         html.input([
+          attribute.id("event-search"),
           attribute.type_("search"),
           attribute.value(model.query),
           attribute.placeholder("Search actor, message, MFA…"),
@@ -413,9 +465,11 @@ fn capture_navigator(model: workspace.Model) -> Element(workspace.Msg) {
       html.section([], [
         html.h2([], [html.text("Capture session")]),
         html.p([], [
-          html.text(case string.trim(model.trigger_input) {
-            "" -> "No trigger armed"
-            trigger -> trigger
+          html.text(case model.capture_phase, string.trim(model.trigger_input) {
+            workspace.Ready(count, _), "" ->
+              "Sealed archive · " <> int.to_string(count) <> " events"
+            _, "" -> "No trigger armed"
+            _, trigger -> trigger
           }),
         ]),
       ]),
@@ -668,7 +722,8 @@ fn team_event_section(model: workspace.Model) -> Element(workspace.Msg) {
         html.h3([], [html.text("Events · " <> trace.id)]),
         case model.team_events_error {
           Some(reason) -> html.p([attribute.role("alert")], [html.text(reason)])
-          None -> event_table(model.team_events)
+          None ->
+            event_table(model.team_events, "This trace page has no events")
         },
         case model.team_events_next_cursor {
           Some(_) ->
@@ -731,7 +786,10 @@ fn compare_workspace(model: workspace.Model) -> Element(workspace.Msg) {
                 attribute.aria_hidden(True),
               ]),
             ]),
-            event_table(workspace.visible_events(model)),
+            event_table(
+              workspace.visible_events(model),
+              event_table_empty_reason(model),
+            ),
             alignment_table(items),
             statistics_table(report.statistics),
           ])
@@ -906,7 +964,13 @@ fn event_workspace(model: workspace.Model) -> Element(workspace.Msg) {
           html.p([attribute.class("eyebrow")], [
             html.text(mode_slug(model.mode)),
           ]),
-          html.h2([], [html.text(mode_title(model.mode))]),
+          html.h2([], [
+            html.text(case model.mode, model.capture_phase {
+              workspace.Capture, workspace.Ready(_, _) ->
+                "Sealed causal observation"
+              _, _ -> mode_title(model.mode)
+            }),
+          ]),
         ]),
         html.div([attribute.class("toolbar-actions")], [
           html.button(
@@ -950,7 +1014,7 @@ fn event_workspace(model: workspace.Model) -> Element(workspace.Msg) {
           attribute.aria_hidden(True),
         ]),
       ]),
-      event_table(visible),
+      event_table(visible, event_table_empty_reason(model)),
     ],
   )
 }
@@ -1149,7 +1213,10 @@ fn live_evidence_label(findings: List(workspace.LiveFinding)) -> String {
   }
 }
 
-fn event_table(rows: List(workspace.EventRow)) -> Element(workspace.Msg) {
+fn event_table(
+  rows: List(workspace.EventRow),
+  empty_reason: String,
+) -> Element(workspace.Msg) {
   html.div([attribute.class("event-table-wrap")], [
     html.table([attribute.aria_label("Accessible causal event table")], [
       html.thead([], [
@@ -1161,9 +1228,33 @@ fn event_table(rows: List(workspace.EventRow)) -> Element(workspace.Msg) {
           html.th([], [html.text("Evidence")]),
         ]),
       ]),
-      html.tbody([], list.map(rows, event_row)),
+      html.tbody([], case rows {
+        [] -> [
+          html.tr([attribute.class("empty-state")], [
+            html.td([attribute.attribute("colspan", "5")], [
+              html.text(empty_reason),
+            ]),
+          ]),
+        ]
+        _ -> list.map(rows, event_row)
+      }),
     ]),
   ])
+}
+
+fn event_table_empty_reason(model: workspace.Model) -> String {
+  case model.loading, workspace.remote_query(model) {
+    True, _ -> "Loading event window…"
+    False, "" ->
+      case
+        !model.show_internal && list.any(model.events, fn(row) { row.internal })
+      {
+        True ->
+          "No events in this window · Expand OTP noise to show system processes"
+        False -> "No events in this window · widen the window or record again"
+      }
+    False, _ -> "No events match · clear the search"
+  }
 }
 
 fn event_row(row: workspace.EventRow) -> Element(workspace.Msg) {
@@ -1183,11 +1274,11 @@ fn event_row(row: workspace.EventRow) -> Element(workspace.Msg) {
       html.td([], [
         html.span([attribute.class("kind-pill")], [html.text(row.kind)]),
       ]),
-      html.td([], [
+      html.td([attribute.title(time_format.raw_label(row.time))], [
         html.text(
-          int.to_string(row.timestamp_ns)
-          <> " ns node-local · "
-          <> time_estimate_label(row.time),
+          time_format.offset_label(row.timestamp_ns)
+          <> " · "
+          <> time_format.instant_label(row.time),
         ),
       ]),
       html.td([], [html.text(evidence_label(row.evidence))]),
@@ -1341,12 +1432,22 @@ fn inspector_event(
     ]),
     definition("Event ID", row.id),
     definition("Evidence", evidence_label(row.evidence)),
-    definition("Calibrated time", time_estimate_label(row.time)),
+    definition("Calibrated time", time_format.instant_label(row.time)),
+    definition("Raw calibrated bounds", time_format.raw_label(row.time)),
     definition(
       "Node-local offset",
-      int.to_string(row.timestamp_ns) <> " ns (not cross-node comparable)",
+      time_format.offset_label(row.timestamp_ns)
+        <> " ("
+        <> int.to_string(row.timestamp_ns)
+        <> " ns, not cross-node comparable)",
     ),
-    definition("Duration", int.to_string(row.duration_ns) <> " ns"),
+    definition(
+      "Duration",
+      time_format.duration_label(row.duration_ns)
+        <> " ("
+        <> int.to_string(row.duration_ns)
+        <> " ns)",
+    ),
     definition("Boundary", event_boundary_label(model, row.id)),
     definition("Source", "Unavailable in this event metadata"),
     html.label([attribute.class("annotation")], [
@@ -1568,7 +1669,10 @@ fn palette(model: workspace.Model) -> Element(workspace.Msg) {
             ]),
           ]),
           html.button(
-            [event.on_click(workspace.UserSelectedMode(workspace.Capture))],
+            [
+              attribute.autofocus(True),
+              event.on_click(workspace.UserSelectedMode(workspace.Capture)),
+            ],
             [
               html.text("Arm capture trigger"),
             ],
@@ -1628,12 +1732,7 @@ fn evidence_label(evidence: workspace.Evidence) -> String {
 }
 
 fn time_estimate_label(estimate: workspace.TimeEstimate) -> String {
-  case estimate {
-    workspace.ExactTime(value) -> value <> " ns exact"
-    workspace.EstimatedTime(value, lower, upper) ->
-      value <> " ns estimated [" <> lower <> ", " <> upper <> "]"
-    workspace.TimeUnavailable(reason) -> "time unavailable · " <> reason
-  }
+  time_format.delta_label(estimate)
 }
 
 fn time_summary_label(summary: workspace.TimeSummary) -> String {

@@ -56,6 +56,23 @@ fn update(
       appearance.apply(next.theme)
       finish_update(next, [])
     }
+    workspace.UserPressedKey(key) ->
+      case workspace.keyboard_shortcut(key) {
+        Some(shortcut) -> update(model, shortcut)
+        None -> finish_update(model, [])
+      }
+    workspace.UserFocusedSearch -> {
+      canvas.focus_search()
+      finish_update(workspace.update(model, message), [])
+    }
+    workspace.UserOpenedPalette -> {
+      canvas.focus_palette()
+      finish_update(workspace.update(model, message), [])
+    }
+    workspace.UserClosedPalette -> {
+      canvas.restore_focus()
+      finish_update(workspace.update(model, message), [])
+    }
     workspace.UserRequestedTeamCompare -> {
       let next = workspace.update(model, message)
       case next.compare_loading {
