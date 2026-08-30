@@ -577,7 +577,7 @@ pub fn completion_is_generated_for_all_supported_shells_test() {
   let assert Some(zsh) = cli_spec.completion("zsh")
   zsh
   |> string.contains(
-    "compare) _arguments '--web' '--tui' '--json' '--port' '--no-open';;",
+    "compare) _arguments '*:archive:_files -g \"*.beamtrace\"' '--web[Open the multi-run comparison workspace.]'",
   )
   |> should.be_true()
 }
