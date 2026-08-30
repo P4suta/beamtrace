@@ -37,7 +37,8 @@
       "get": {
         "operationId": "live",
         "parameters": [
-          { "$ref": "#/components/parameters/Limit" }
+          { "$ref": "#/components/parameters/Node" },
+          { "$ref": "#/components/parameters/EventLimit" }
         ],
         "responses": {
           "200": { "description": "Bounded live process sample" },
@@ -102,8 +103,9 @@
       "get": {
         "operationId": "events",
         "parameters": [
-          { "$ref": "#/components/parameters/Limit" },
-          { "$ref": "#/components/parameters/Cursor" }
+          { "$ref": "#/components/parameters/Start" },
+          { "$ref": "#/components/parameters/EventLimit" },
+          { "$ref": "#/components/parameters/SearchQuery" }
         ],
         "responses": {
           "200": { "description": "Bounded event window with explicit time evidence" },
@@ -155,6 +157,9 @@
     "/audit": {
       "get": {
         "operationId": "audit",
+        "security": [
+          { "SessionCookie": [] }
+        ],
         "parameters": [
           { "$ref": "#/components/parameters/Limit" },
           { "$ref": "#/components/parameters/Cursor" }
@@ -168,6 +173,9 @@
     "/raw-captures/authorize": {
       "post": {
         "operationId": "authorizeRawCapture",
+        "security": [
+          { "SessionCookie": [] }
+        ],
         "responses": {
           "200": { "description": "Short-lived second authorization for raw capture" },
           "default": { "$ref": "#/components/responses/Error" }
@@ -177,6 +185,9 @@
     "/traces": {
       "get": {
         "operationId": "traces",
+        "security": [
+          { "SessionCookie": [] }
+        ],
         "parameters": [
           { "$ref": "#/components/parameters/Limit" },
           { "$ref": "#/components/parameters/Cursor" }
@@ -190,6 +201,9 @@
     "/traces/{trace_id}": {
       "get": {
         "operationId": "traceDetail",
+        "security": [
+          { "SessionCookie": [] }
+        ],
         "parameters": [
           { "$ref": "#/components/parameters/TraceId" }
         ],
@@ -202,6 +216,9 @@
     "/traces/{trace_id}/events": {
       "get": {
         "operationId": "traceEvents",
+        "security": [
+          { "SessionCookie": [] }
+        ],
         "parameters": [
           { "$ref": "#/components/parameters/TraceId" },
           { "$ref": "#/components/parameters/Limit" },
@@ -216,6 +233,9 @@
     "/traces/{trace_id}/hold": {
       "post": {
         "operationId": "placeTraceHold",
+        "security": [
+          { "SessionCookie": [] }
+        ],
         "parameters": [
           { "$ref": "#/components/parameters/TraceId" }
         ],
@@ -226,6 +246,9 @@
       },
       "delete": {
         "operationId": "removeTraceHold",
+        "security": [
+          { "SessionCookie": [] }
+        ],
         "parameters": [
           { "$ref": "#/components/parameters/TraceId" }
         ],
@@ -253,6 +276,33 @@
         "name": "cursor",
         "in": "query",
         "schema": { "type": "string", "maxLength": 512 }
+      },
+      "Start": {
+        "name": "start",
+        "in": "query",
+        "schema": { "type": "integer", "minimum": 0 }
+      },
+      "EventLimit": {
+        "name": "limit",
+        "in": "query",
+        "schema": { "type": "integer", "minimum": 1, "maximum": 1000 }
+      },
+      "SearchQuery": {
+        "name": "q",
+        "in": "query",
+        "schema": { "type": "string", "maxLength": 256 }
+      },
+      "Node": {
+        "name": "node",
+        "in": "query",
+        "schema": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "securitySchemes": {
+      "SessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "beamtrace_session"
       }
     },
     "schemas": {

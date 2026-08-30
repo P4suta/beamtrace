@@ -957,7 +957,7 @@ fn event_workspace(model: workspace.Model) -> Element(workspace.Msg) {
 
 fn evidence_overview(model: workspace.Model) -> Element(workspace.Msg) {
   let #(exact, inferred) =
-    list.fold(model.events, #(0, 0), fn(counts, row) {
+    list.fold(workspace.visible_events(model), #(0, 0), fn(counts, row) {
       case row.evidence {
         workspace.Exact -> #(counts.0 + 1, counts.1)
         workspace.Inferred(_, _) -> #(counts.0, counts.1 + 1)

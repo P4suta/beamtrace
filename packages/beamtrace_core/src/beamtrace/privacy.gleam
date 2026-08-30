@@ -1,8 +1,8 @@
 //// Convert raw terms into metadata-safe views under explicit privacy policy.
 ////
-//// Shape traversal obeys depth, collection, and binary budgets and never
+//// Shape traversal obeys depth and binary budgets and never
 //// exposes scalar or binary values in metadata mode. Runtime is linear in the
-//// visited bounded term shape. Rendering and fingerprints are deterministic
+//// caller-provided finite term shape. Rendering and fingerprints are deterministic
 //// across Erlang and JavaScript.
 
 import beamtrace/types

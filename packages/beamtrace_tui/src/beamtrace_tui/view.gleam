@@ -177,7 +177,7 @@ fn render_inspector(
       <> "\n\n"
       <> state.notice
       <> "\n\nACTIONS\n"
-      <> "a attach\nr arm MFA\nx cancel\n! anomalies\n/ search\ns save\nw open Web"
+      <> "a attach\nr arm MFA\nx cancel\n! anomalies\n/ search\ns save\nt traces\nd compare\nw open Web"
   }
 
   target

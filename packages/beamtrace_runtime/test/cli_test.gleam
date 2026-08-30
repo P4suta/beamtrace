@@ -496,6 +496,13 @@ pub fn completion_is_generated_for_all_supported_shells_test() {
     script |> string.contains("beamtrace") |> should.be_true()
     script |> string.contains("capture") |> should.be_true()
   })
+
+  let assert Some(zsh) = cli_spec.completion("zsh")
+  zsh
+  |> string.contains(
+    "compare) _arguments '--web' '--tui' '--json' '--port' '--no-open';;",
+  )
+  |> should.be_true()
 }
 
 pub fn capture_and_record_generate_output_names_when_out_is_omitted_test() {
@@ -582,4 +589,46 @@ pub fn seq_trace_confirmation_is_requested_only_for_unacknowledged_execution_tes
     "--acknowledge-seq-trace-reset",
   ])
   |> should.be_false()
+  cli.requires_seq_trace_ack([
+    "--force",
+    "capture",
+    "app@host",
+    "--trigger",
+    "m:f/0",
+  ])
+  |> should.be_true()
+  cli.requires_seq_trace_ack([
+    "--json",
+    "relay",
+    "wss://hub.example/relay",
+    "token",
+    "--node",
+    "app@host",
+  ])
+  |> should.be_true()
+}
+
+pub fn compare_rejects_port_and_tui_in_either_order_test() {
+  [
+    [
+      "compare",
+      "one.beamtrace",
+      "two.beamtrace",
+      "--port",
+      "0",
+      "--tui",
+    ],
+    [
+      "compare",
+      "one.beamtrace",
+      "two.beamtrace",
+      "--tui",
+      "--port",
+      "4040",
+    ],
+  ]
+  |> list.each(fn(arguments) {
+    let assert Error(error) = cli.parse(arguments)
+    error.message |> should.equal("--port cannot be used with --tui")
+  })
 }

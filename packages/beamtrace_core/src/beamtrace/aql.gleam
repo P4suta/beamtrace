@@ -327,7 +327,7 @@ fn gt_order() {
 /// Classify referenced fields as target-safe or relay-only in O(query size).
 /// This compatibility helper cannot fail or emit executable user code.
 pub fn compile_agent(query: Query) -> AgentPlan {
-  let fields = fields(query, []) |> list.reverse |> unique([])
+  let fields = fields(query, []) |> list.reverse |> unique(dict.new(), [])
   let #(safe, residual) = split_fields(fields, [], [])
   AgentPlan(safe, residual)
 }
@@ -501,13 +501,18 @@ fn fields(query: Query, accumulator: List(String)) -> List(String) {
   }
 }
 
-fn unique(values: List(String), seen: List(String)) -> List(String) {
+fn unique(
+  values: List(String),
+  seen: Dict(String, Nil),
+  accumulator: List(String),
+) -> List(String) {
   case values {
-    [] -> list.reverse(seen)
+    [] -> list.reverse(accumulator)
     [value, ..rest] ->
-      case list.contains(seen, value) {
-        True -> unique(rest, seen)
-        False -> unique(rest, [value, ..seen])
+      case dict.has_key(seen, value) {
+        True -> unique(rest, seen, accumulator)
+        False ->
+          unique(rest, dict.insert(seen, value, Nil), [value, ..accumulator])
       }
   }
 }

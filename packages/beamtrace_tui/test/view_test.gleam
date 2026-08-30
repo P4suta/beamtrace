@@ -66,6 +66,8 @@ pub fn responsive_layout_uses_three_two_and_one_real_panels_test() {
   wide |> string.contains("NODE / SESSION") |> should.be_true()
   wide |> string.contains("EVENT / ACTIONS") |> should.be_true()
   wide |> string.contains("event-responsive") |> should.be_true()
+  wide |> string.contains("t traces") |> should.be_true()
+  wide |> string.contains("d compare") |> should.be_true()
 
   let medium =
     view.render(state, geometry.rect_new(0, 0, 72, 24))

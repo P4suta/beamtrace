@@ -94,6 +94,21 @@ pub fn openapi_v2_is_served_with_the_typed_error_schema_test() {
   body |> string.contains("\"/targets/current/mfas\"") |> should.be_true()
   body |> string.contains("\"/traces/{trace_id}/events\"") |> should.be_true()
   body |> string.contains("\"/traces/{trace_id}/hold\"") |> should.be_true()
+  body
+  |> string.contains(
+    "\"SessionCookie\":{\"type\":\"apiKey\",\"in\":\"cookie\",\"name\":\"beamtrace_session\"}",
+  )
+  |> should.be_true()
+  body
+  |> string.contains(
+    "\"/live\":{\"get\":{\"operationId\":\"live\",\"parameters\":[{\"$ref\":\"#/components/parameters/Node\"},{\"$ref\":\"#/components/parameters/EventLimit\"}]",
+  )
+  |> should.be_true()
+  body
+  |> string.contains(
+    "\"/sessions/current/events\":{\"get\":{\"operationId\":\"events\",\"parameters\":[{\"$ref\":\"#/components/parameters/Start\"},{\"$ref\":\"#/components/parameters/EventLimit\"},{\"$ref\":\"#/components/parameters/SearchQuery\"}]",
+  )
+  |> should.be_true()
 }
 
 pub fn v2_errors_have_code_message_and_hint_test() {
@@ -818,10 +833,13 @@ pub fn team_trace_library_lists_locks_reads_holds_and_audits_test() {
 
   let compare_body =
     "{\"paths\":[\"team:" <> metadata_id <> "\",\"team:" <> raw_id <> "\"]}"
+  let invalid_csrf =
+    team_compare_request(combined, compare_body, "wrong")
+    |> api.handle_at(context, 3003)
+  invalid_csrf.status |> should.equal(403)
+
   let denied_compare =
-    trace_request(http.Post, "/api/v2/compare", viewer)
-    |> simulate.string_body(compare_body)
-    |> request.set_header("content-type", "application/json")
+    team_compare_request(viewer, compare_body, viewer.csrf_token)
     |> api.handle_at(context, 3003)
   denied_compare.status |> should.equal(403)
   simulate.read_body(denied_compare)
@@ -829,9 +847,7 @@ pub fn team_trace_library_lists_locks_reads_holds_and_audits_test() {
   |> should.be_true()
 
   let compared =
-    trace_request(http.Post, "/api/v2/compare", combined)
-    |> simulate.string_body(compare_body)
-    |> request.set_header("content-type", "application/json")
+    team_compare_request(combined, compare_body, combined.csrf_token)
     |> api.handle_at(context, 3003)
   compared.status |> should.equal(200)
   let compared_body = simulate.read_body(compared)
@@ -1730,6 +1746,25 @@ fn trace_hold_request(
   csrf_token: String,
 ) {
   trace_request(method, "/api/v2/traces/" <> trace_id <> "/hold", session)
+  |> request.set_header("origin", "https://hub.example")
+  |> request.set_header("x-beamtrace-csrf", csrf_token)
+  |> request.set_header(
+    "cookie",
+    "beamtrace_session="
+      <> session.id
+      <> "; beamtrace_csrf="
+      <> session.csrf_token,
+  )
+}
+
+fn team_compare_request(
+  session: team_auth.Session,
+  body: String,
+  csrf_token: String,
+) {
+  trace_request(http.Post, "/api/v2/compare", session)
+  |> simulate.string_body(body)
+  |> request.set_header("content-type", "application/json")
   |> request.set_header("origin", "https://hub.example")
   |> request.set_header("x-beamtrace-csrf", csrf_token)
   |> request.set_header(

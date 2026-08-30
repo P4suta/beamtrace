@@ -133,14 +133,16 @@ pub fn decode_status(source: String) -> Result(workspace.CapturePhase, String) {
               <> case payload.delivery_verified {
               True -> " · delivery verified"
               False ->
-                " · integrity issues present"
-                <> case payload.issue_count {
-                  0 -> ""
-                  count -> " (" <> int.to_string(count) <> ")"
-                }
-                <> case payload.issue_summary {
-                  "" -> ""
-                  summary -> ": " <> summary
+                case payload.issue_count {
+                  0 -> " · delivery unverified"
+                  count ->
+                    " · integrity issues present ("
+                    <> int.to_string(count)
+                    <> ")"
+                    <> case payload.issue_summary {
+                      "" -> ""
+                      summary -> ": " <> summary
+                    }
                 }
             },
           ))

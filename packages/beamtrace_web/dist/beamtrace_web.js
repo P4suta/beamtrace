@@ -7823,23 +7823,21 @@ function decode_status(source) {
         if ($2) {
           return " · delivery verified";
         } else {
-          return " · integrity issues present" + (() => {
-            let $3 = payload2.issue_count;
-            if ($3 === 0) {
-              return "";
-            } else {
-              let count = $3;
-              return " (" + to_string(count) + ")";
-            }
-          })() + (() => {
-            let $3 = payload2.issue_summary;
-            if ($3 === "") {
-              return $3;
-            } else {
-              let summary2 = $3;
-              return ": " + summary2;
-            }
-          })();
+          let $3 = payload2.issue_count;
+          if ($3 === 0) {
+            return " · delivery unverified";
+          } else {
+            let count = $3;
+            return " · integrity issues present (" + to_string(count) + ")" + (() => {
+              let $4 = payload2.issue_summary;
+              if ($4 === "") {
+                return $4;
+              } else {
+                let summary2 = $4;
+                return ": " + summary2;
+              }
+            })();
+          }
         }
       })()));
     } else if ($1 === "sealed") {
@@ -7848,23 +7846,21 @@ function decode_status(source) {
         if ($2) {
           return " · delivery verified";
         } else {
-          return " · integrity issues present" + (() => {
-            let $3 = payload2.issue_count;
-            if ($3 === 0) {
-              return "";
-            } else {
-              let count = $3;
-              return " (" + to_string(count) + ")";
-            }
-          })() + (() => {
-            let $3 = payload2.issue_summary;
-            if ($3 === "") {
-              return $3;
-            } else {
-              let summary2 = $3;
-              return ": " + summary2;
-            }
-          })();
+          let $3 = payload2.issue_count;
+          if ($3 === 0) {
+            return " · delivery unverified";
+          } else {
+            let count = $3;
+            return " · integrity issues present (" + to_string(count) + ")" + (() => {
+              let $4 = payload2.issue_summary;
+              if ($4 === "") {
+                return $4;
+              } else {
+                let summary2 = $4;
+                return ": " + summary2;
+              }
+            })();
+          }
         }
       })()));
     } else if ($1 === "failed") {
@@ -9017,99 +9013,6 @@ function capture_navigator(model) {
     ]))
   ]));
 }
-function evidence_overview(model) {
-  let $ = fold2(model.events, [0, 0], (counts, row) => {
-    let $12 = row.evidence;
-    if ($12 instanceof Exact) {
-      return [counts[0] + 1, counts[1]];
-    } else {
-      return [counts[0], counts[1] + 1];
-    }
-  });
-  let exact = $[0];
-  let inferred = $[1];
-  let _block;
-  let $1 = model.capture_phase;
-  if ($1 instanceof Arming) {
-    _block = "Observation has not ended";
-  } else if ($1 instanceof Armed) {
-    _block = "Observation has not ended";
-  } else if ($1 instanceof Cancelling) {
-    _block = "Observation has not ended";
-  } else if ($1 instanceof Ready) {
-    let summary2 = $1.outcome_summary;
-    _block = summary2;
-  } else if ($1 instanceof Failed) {
-    let reason = $1.reason;
-    _block = "Capture failed · " + reason;
-  } else {
-    _block = "No sealed observation outcome is available";
-  }
-  let outcome = _block;
-  let _block$1;
-  let $2 = contains_string(outcome, "delivery verified");
-  if ($2) {
-    _block$1 = "Verified by final node receipts";
-  } else {
-    _block$1 = "Not verified; inspect integrity issues before drawing conclusions";
-  }
-  let delivery = _block$1;
-  let _block$2;
-  let _pipe = model.events;
-  _block$2 = find_map(_pipe, (row) => {
-    let $3 = row.evidence;
-    if ($3 instanceof Exact) {
-      return new Error2(undefined);
-    } else {
-      let method = $3.method;
-      let reason = $3.reason;
-      return new Ok(method + " · " + reason);
-    }
-  });
-  let inference_basis = _block$2;
-  return section(toList([
-    class$("evidence-overview"),
-    aria_label("What this trace establishes and does not establish")
-  ]), toList([
-    div(List$Empty$const, toList([
-      span(List$Empty$const, toList([text3("Observation end")])),
-      strong(List$Empty$const, toList([text3(outcome)]))
-    ])),
-    div(List$Empty$const, toList([
-      span(List$Empty$const, toList([text3("Delivery verification")])),
-      strong(List$Empty$const, toList([text3(delivery)]))
-    ])),
-    div(List$Empty$const, toList([
-      span(List$Empty$const, toList([text3("Integrity / boundaries")])),
-      strong(List$Empty$const, toList([
-        text3(to_string(length(model.graph_boundaries)) + " causal boundaries · " + (() => {
-          let $3 = model.graph_error;
-          if ($3 instanceof Some) {
-            return "graph issue; reload or validate the archive";
-          } else {
-            return "no graph loader issue";
-          }
-        })())
-      ]))
-    ])),
-    div(List$Empty$const, toList([
-      span(List$Empty$const, toList([text3("Evidence basis")])),
-      strong(List$Empty$const, toList([
-        text3(to_string(exact) + " visible Exact · " + to_string(inferred) + " visible Inferred" + (() => {
-          if (inference_basis instanceof Ok) {
-            let value2 = inference_basis[0];
-            return " · first basis: " + value2;
-          } else {
-            return "";
-          }
-        })())
-      ]))
-    ])),
-    p(List$Empty$const, toList([
-      text3("Known: recorded ordering and stated inference inputs. Unknown: work outside the observation end, missing delivery, and every marked boundary.")
-    ]))
-  ]));
-}
 function mode_title(mode) {
   if (mode instanceof Capture) {
     return "Bounded causal observation";
@@ -9905,6 +9808,99 @@ function team_workspace(model) {
       }
     })(),
     team_event_section(model)
+  ]));
+}
+function evidence_overview(model) {
+  let $ = fold2(visible_events(model), [0, 0], (counts, row) => {
+    let $12 = row.evidence;
+    if ($12 instanceof Exact) {
+      return [counts[0] + 1, counts[1]];
+    } else {
+      return [counts[0], counts[1] + 1];
+    }
+  });
+  let exact = $[0];
+  let inferred = $[1];
+  let _block;
+  let $1 = model.capture_phase;
+  if ($1 instanceof Arming) {
+    _block = "Observation has not ended";
+  } else if ($1 instanceof Armed) {
+    _block = "Observation has not ended";
+  } else if ($1 instanceof Cancelling) {
+    _block = "Observation has not ended";
+  } else if ($1 instanceof Ready) {
+    let summary2 = $1.outcome_summary;
+    _block = summary2;
+  } else if ($1 instanceof Failed) {
+    let reason = $1.reason;
+    _block = "Capture failed · " + reason;
+  } else {
+    _block = "No sealed observation outcome is available";
+  }
+  let outcome = _block;
+  let _block$1;
+  let $2 = contains_string(outcome, "delivery verified");
+  if ($2) {
+    _block$1 = "Verified by final node receipts";
+  } else {
+    _block$1 = "Not verified; inspect integrity issues before drawing conclusions";
+  }
+  let delivery = _block$1;
+  let _block$2;
+  let _pipe = model.events;
+  _block$2 = find_map(_pipe, (row) => {
+    let $3 = row.evidence;
+    if ($3 instanceof Exact) {
+      return new Error2(undefined);
+    } else {
+      let method = $3.method;
+      let reason = $3.reason;
+      return new Ok(method + " · " + reason);
+    }
+  });
+  let inference_basis = _block$2;
+  return section(toList([
+    class$("evidence-overview"),
+    aria_label("What this trace establishes and does not establish")
+  ]), toList([
+    div(List$Empty$const, toList([
+      span(List$Empty$const, toList([text3("Observation end")])),
+      strong(List$Empty$const, toList([text3(outcome)]))
+    ])),
+    div(List$Empty$const, toList([
+      span(List$Empty$const, toList([text3("Delivery verification")])),
+      strong(List$Empty$const, toList([text3(delivery)]))
+    ])),
+    div(List$Empty$const, toList([
+      span(List$Empty$const, toList([text3("Integrity / boundaries")])),
+      strong(List$Empty$const, toList([
+        text3(to_string(length(model.graph_boundaries)) + " causal boundaries · " + (() => {
+          let $3 = model.graph_error;
+          if ($3 instanceof Some) {
+            return "graph issue; reload or validate the archive";
+          } else {
+            return "no graph loader issue";
+          }
+        })())
+      ]))
+    ])),
+    div(List$Empty$const, toList([
+      span(List$Empty$const, toList([text3("Evidence basis")])),
+      strong(List$Empty$const, toList([
+        text3(to_string(exact) + " visible Exact · " + to_string(inferred) + " visible Inferred" + (() => {
+          if (inference_basis instanceof Ok) {
+            let value2 = inference_basis[0];
+            return " · first basis: " + value2;
+          } else {
+            return "";
+          }
+        })())
+      ]))
+    ])),
+    p(List$Empty$const, toList([
+      text3("Known: recorded ordering and stated inference inputs. Unknown: work outside the observation end, missing delivery, and every marked boundary.")
+    ]))
   ]));
 }
 function event_workspace(model) {

@@ -30,3 +30,13 @@ pub fn capture_status_names_integrity_issue_and_node_test() {
     )),
   )
 }
+
+pub fn unverified_delivery_without_issues_is_not_called_an_integrity_issue_test() {
+  capture_control.decode_status(
+    "{\"status\":\"sealed\",\"event_count\":2,\"delivery_verified\":false,"
+    <> "\"outcome\":{\"end\":{\"kind\":\"user_stopped\"},\"issues\":[],\"receipts\":[]}}",
+  )
+  |> should.equal(
+    Ok(workspace.Ready(2, "sealed after user stop · delivery unverified")),
+  )
+}

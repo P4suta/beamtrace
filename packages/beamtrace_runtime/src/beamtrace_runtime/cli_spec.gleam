@@ -461,7 +461,7 @@ fn zsh_completion() -> String {
   <> command_descriptions
   <> ")\n_arguments '1:command:->command' '*::arg:->args'\n"
   <> "case $state in\n  command) _describe command commands ;;\n  args)\n    case $words[2] in\n"
-  <> completion_cases("      ", "_arguments ", ";;")
+  <> zsh_completion_cases()
   <> "    esac\n  ;;\nesac\n"
 }
 
@@ -519,6 +519,19 @@ fn completion_cases(indent: String, prefix: String, suffix: String) -> String {
       |> list.map(fn(option) { option_name(option.flag) })
       |> string.join(" ")
     indent <> spec.name <> ") " <> prefix <> "'" <> options <> "'" <> suffix
+  })
+  |> string.join("\n")
+  |> fn(value) { value <> "\n" }
+}
+
+fn zsh_completion_cases() -> String {
+  commands()
+  |> list.map(fn(spec) {
+    let options =
+      spec.options
+      |> list.map(fn(option) { "'" <> option_name(option.flag) <> "'" })
+      |> string.join(" ")
+    "      " <> spec.name <> ") _arguments " <> options <> ";;"
   })
   |> string.join("\n")
   |> fn(value) { value <> "\n" }

@@ -7,9 +7,12 @@ reference:
 
 ```sh
 beamtrace help
-beamtrace help <command>
-beamtrace <command> --help
-beamtrace completion bash|zsh|fish|powershell
+beamtrace help COMMAND
+beamtrace COMMAND --help
+beamtrace completion bash
+beamtrace completion zsh
+beamtrace completion fish
+beamtrace completion powershell
 ```
 
 Primary commands are `demo`, `record`, `capture`, `attach`, `open`, `compare`,

@@ -84,13 +84,18 @@ pub fn load_if_requested_with_discovery(
     Ok("true") | Ok("1") | Ok("yes") -> {
       case has_explicit_provider(source) {
         True -> {
-          use path <- try_result(required(source, "oidc_jwks_file"))
-          use jwks <- try_result(case read_jwks(path) {
-            Ok(contents) -> Ok(contents)
-            Error(reason) -> Error(JwksReadFailed(path, reason))
-          })
-          resolve(dict.insert(source, "oidc_jwks_json", jwks))
-          |> map_result(Some)
+          case dict.get(source, "oidc_jwks_json") {
+            Ok(_) -> resolve(source) |> map_result(Some)
+            Error(_) -> {
+              use path <- try_result(required(source, "oidc_jwks_file"))
+              use jwks <- try_result(case read_jwks(path) {
+                Ok(contents) -> Ok(contents)
+                Error(reason) -> Error(JwksReadFailed(path, reason))
+              })
+              resolve(dict.insert(source, "oidc_jwks_json", jwks))
+              |> map_result(Some)
+            }
+          }
         }
         False -> {
           use issuer <- try_result(required(source, "oidc_issuer"))

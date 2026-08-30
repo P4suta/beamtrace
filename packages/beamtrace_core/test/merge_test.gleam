@@ -73,6 +73,20 @@ pub fn overlapping_uncertainty_ranges_are_not_claimed_as_ordered_test() {
   merge.bounds(left.time) |> should.equal(Ok(#(50, 150)))
 }
 
+pub fn inverted_uncertainty_ranges_are_rejected_test() {
+  let invalid = types.EstimatedTime(100, 150, 50)
+  merge.bounds(invalid)
+  |> should.equal(Error("estimated time lower bound exceeds upper bound"))
+
+  let left = merge.PositionedEvent(event("left", "a@host", 0), invalid)
+  let right =
+    merge.PositionedEvent(
+      event("right", "b@host", 0),
+      types.EstimatedTime(200, 180, 220),
+    )
+  merge.definitely_before(left, right) |> should.be_false()
+}
+
 pub fn disconnected_expected_node_is_explicitly_partial_test() {
   let result =
     merge.merge(

@@ -11,7 +11,13 @@ pub fn main() {
     list.contains(arguments, "--unit"),
     list.contains(arguments, "--integration")
   {
-    True, _ -> {
+    True, True -> {
+      let unit_ok = run_selected_suite("unit")
+      let integration_ok = run_selected_suite("integration")
+      let assert True = unit_ok && integration_ok
+      Nil
+    }
+    True, False -> {
       let assert True = run_selected_suite("unit")
       Nil
     }

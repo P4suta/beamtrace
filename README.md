@@ -27,10 +27,12 @@ file, verify the checksum, and verify the GitHub artifact attestation before
 running it:
 
 ```sh
-sha256sum --check beamtrace-<version>-linux-x64.zip.sha256
-gh attestation verify beamtrace-<version>-linux-x64.zip --repo P4suta/beamtrace
-unzip beamtrace-<version>-linux-x64.zip
-./beamtrace-<version>-linux-x64/bin/beamtrace version
+VERSION=0.3.0
+TARGET=linux-x64
+sha256sum --check beamtrace-${VERSION}-${TARGET}.zip.sha256
+gh attestation verify beamtrace-${VERSION}-${TARGET}.zip --repo P4suta/beamtrace
+unzip beamtrace-${VERSION}-${TARGET}.zip
+./beamtrace-${VERSION}-${TARGET}/bin/beamtrace version
 ```
 
 On Windows, use `Get-FileHash -Algorithm SHA256` and compare it with the
@@ -55,8 +57,8 @@ The release workflow publishes immutable version and commit tags to
 `ghcr.io/p4suta/beamtrace`. Pin the digest reported by your verified release:
 
 ```sh
-docker pull ghcr.io/p4suta/beamtrace:<version>
-docker run --rm ghcr.io/p4suta/beamtrace:<version> version
+docker pull ghcr.io/p4suta/beamtrace@sha256:DIGEST
+docker run --rm ghcr.io/p4suta/beamtrace@sha256:DIGEST version
 ```
 
 ## 60-second demo

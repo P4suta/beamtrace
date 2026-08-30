@@ -152,6 +152,7 @@ type ParsedCompare {
     display: CompareDisplay,
     explicit_display: Bool,
     port: Int,
+    port_set: Bool,
   )
 }
 
@@ -175,11 +176,13 @@ pub fn parse(arguments: List(String)) -> Result(Command, ParseError) {
 /// Whether execution still needs the one-time VM-global seq_trace approval.
 /// Help, completion, and already acknowledged invocations never request it.
 pub fn requires_seq_trace_ack(arguments: List(String)) -> Bool {
-  case list.contains(arguments, "--acknowledge-seq-trace-reset"), arguments {
+  case
+    list.contains(arguments, "--acknowledge-seq-trace-reset"),
+    invoked_command(arguments)
+  {
     True, _ -> False
-    _, ["attach", ..] | _, ["capture", ..] ->
-      !list.contains(arguments, "--help")
-    _, ["relay", ..] ->
+    _, "attach" | _, "capture" -> !list.contains(arguments, "--help")
+    _, "relay" ->
       list.contains(arguments, "--node") && !list.contains(arguments, "--help")
     _, _ -> False
   }
@@ -283,7 +286,7 @@ fn parse_tui(
 fn parse_compare(options: List(String)) -> Result(Command, ParseError) {
   use parsed <- try_result(parse_compare_options(
     options,
-    ParsedCompare([], CompareTerminal, False, 0),
+    ParsedCompare([], CompareTerminal, False, 0, False),
   ))
   let paths = list.reverse(parsed.paths)
   let count = list.length(paths)
@@ -326,7 +329,12 @@ fn parse_compare_options(
         False ->
           parse_compare_options(
             rest,
-            ParsedCompare(..parsed, display: display, port: port),
+            ParsedCompare(
+              ..parsed,
+              display: display,
+              port: port,
+              port_set: True,
+            ),
           )
       }
     }
@@ -346,10 +354,15 @@ fn set_compare_display(
   parsed: ParsedCompare,
   display: CompareDisplay,
 ) -> Result(ParsedCompare, ParseError) {
-  case parsed.explicit_display, parsed.display == display {
-    True, False ->
-      Error(usage("choose only one of --web, --tui, --no-open, or --json"))
-    _, _ ->
+  case
+    parsed.port_set && display == CompareTui,
+    parsed.explicit_display,
+    parsed.display == display
+  {
+    True, _, _ -> Error(usage("--port cannot be used with --tui"))
+    _, True, False ->
+      Error(usage("choose only one of --web, --tui, or --no-open"))
+    _, _, _ ->
       Ok(ParsedCompare(..parsed, display: display, explicit_display: True))
   }
 }

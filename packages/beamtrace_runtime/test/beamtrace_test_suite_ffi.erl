@@ -21,7 +21,11 @@ unit_modules() ->
     [Module || Module <- discovered_modules(), not lists:member(Module, Excluded)].
 
 integration_modules() ->
-    [record_process_test, server_test].
+    [
+        beamtrace_oidc_discovery_ffi_tests,
+        record_process_test,
+        server_test
+    ].
 
 discovered_modules() ->
     Gleam = [gleam_module(Path) || Path <- filelib:wildcard("test/**/*.gleam")],

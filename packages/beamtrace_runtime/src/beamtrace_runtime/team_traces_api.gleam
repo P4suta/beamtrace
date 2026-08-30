@@ -62,58 +62,66 @@ pub fn compare_response(
     team_session(incoming, context, now_ms)
   {
     Team, Some(security), Ok(session) ->
-      case
-        rbac.authorize(session.roles, rbac.ViewSession),
-        security.relay_archive,
-        decode_compare_body(incoming)
-      {
-        False, _, _ -> wisp.response(403)
-        _, None, _ -> wisp.response(503)
-        _, _, Error("too_large") -> wisp.response(413)
-        _, _, Error(_) ->
-          wisp.json_response("{\"error\":\"invalid_request\"}", 400)
-        True, Some(archive), Ok(ComparePayload(paths)) -> {
-          let #(store, backend) = relay_archive_parts(archive)
-          case team_compare_ids(paths) {
-            Error(_) -> wisp.json_response("{\"error\":\"invalid_paths\"}", 400)
-            Ok(ids) ->
-              case
-                load_compare_runs(
-                  store,
-                  backend,
-                  security,
-                  session,
-                  ids,
-                  now_ms,
-                  [],
-                )
-              {
-                Error("not_found") -> wisp.not_found()
-                Error("permission_denied") -> wisp.response(403)
-                Error("too_many_events") -> wisp.response(413)
-                Error(_) -> wisp.response(503)
-                Ok(runs) ->
-                  case compare_workspace.compare_events(runs) {
-                    Error(compare_workspace.InvalidPaths) ->
-                      wisp.json_response("{\"error\":\"invalid_paths\"}", 400)
-                    Error(compare_workspace.InvalidTrace(path, _)) ->
-                      json.object([
-                        #("error", json.string("invalid_trace_graph")),
-                        #("path", json.string(path)),
-                      ])
-                      |> json.to_string
-                      |> wisp.json_response(422)
-                    Error(compare_workspace.LoadFailed(_, _)) ->
-                      wisp.response(503)
-                    Ok(report) ->
-                      report
-                      |> local_api.compare_report_json
-                      |> json.to_string
-                      |> wisp.json_response(200)
+      case valid_team_csrf(incoming, security, session) {
+        False -> wisp.response(403)
+        True ->
+          case
+            rbac.authorize(session.roles, rbac.ViewSession),
+            security.relay_archive,
+            decode_compare_body(incoming)
+          {
+            False, _, _ -> wisp.response(403)
+            _, None, _ -> wisp.response(503)
+            _, _, Error("too_large") -> wisp.response(413)
+            _, _, Error(_) ->
+              wisp.json_response("{\"error\":\"invalid_request\"}", 400)
+            True, Some(archive), Ok(ComparePayload(paths)) -> {
+              let #(store, backend) = relay_archive_parts(archive)
+              case team_compare_ids(paths) {
+                Error(_) ->
+                  wisp.json_response("{\"error\":\"invalid_paths\"}", 400)
+                Ok(ids) ->
+                  case
+                    load_compare_runs(
+                      store,
+                      backend,
+                      security,
+                      session,
+                      ids,
+                      now_ms,
+                      [],
+                    )
+                  {
+                    Error("not_found") -> wisp.not_found()
+                    Error("permission_denied") -> wisp.response(403)
+                    Error("too_many_events") -> wisp.response(413)
+                    Error(_) -> wisp.response(503)
+                    Ok(runs) ->
+                      case compare_workspace.compare_events(runs) {
+                        Error(compare_workspace.InvalidPaths) ->
+                          wisp.json_response(
+                            "{\"error\":\"invalid_paths\"}",
+                            400,
+                          )
+                        Error(compare_workspace.InvalidTrace(path, _)) ->
+                          json.object([
+                            #("error", json.string("invalid_trace_graph")),
+                            #("path", json.string(path)),
+                          ])
+                          |> json.to_string
+                          |> wisp.json_response(422)
+                        Error(compare_workspace.LoadFailed(_, _)) ->
+                          wisp.response(503)
+                        Ok(report) ->
+                          report
+                          |> local_api.compare_report_json
+                          |> json.to_string
+                          |> wisp.json_response(200)
+                      }
                   }
               }
+            }
           }
-        }
       }
     Team, Some(_), Error(_) -> wisp.response(401)
     _, _, _ -> wisp.not_found()

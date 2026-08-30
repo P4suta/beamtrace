@@ -151,6 +151,15 @@ pub fn environment_loader_activates_team_only_explicitly_and_reads_bounded_jwks_
   )
 }
 
+pub fn environment_loader_accepts_inline_jwks_with_explicit_provider_test() {
+  let source = valid_source() |> dict.insert("team", "true")
+  let assert Ok(Some(loaded)) =
+    team_config.load_if_requested_with(source, fn(_) {
+      Error("inline_jwks_must_not_read_a_file")
+    })
+  loaded.jwks_json |> should.equal(public_jwks)
+}
+
 pub fn environment_loader_rejects_ambiguous_team_mode_test() {
   team_config.load_if_requested_with(
     dict.from_list([#("team", "sometimes")]),

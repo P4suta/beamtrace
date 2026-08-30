@@ -144,6 +144,33 @@ pub fn unknown_kid_refreshes_once_and_private_signing_keys_are_rejected_test() {
   |> should.equal(Error(id_token.UnknownKey))
 }
 
+pub fn signing_jwks_allows_optional_metadata_and_unrelated_public_keys_test() {
+  let item =
+    fixture("RS256", "https://id.example", "beamtrace-client", "nonce-1", 1000)
+  let optional_metadata =
+    item.jwks
+    |> string.replace("\"use\":\"sig\",", "")
+    |> string.replace("\"alg\":\"RS256\",", "")
+  optional_metadata |> id_token.validate_signing_jwks |> should.be_ok()
+  id_token.verify(
+    item.token,
+    optional_metadata,
+    "https://id.example",
+    "beamtrace-client",
+    "nonce-1",
+    1000,
+  )
+  |> should.be_ok()
+
+  optional_metadata
+  |> string.replace(
+    "{\"keys\":[",
+    "{\"keys\":[{\"kty\":\"EC\",\"kid\":\"encryption-key\",\"use\":\"enc\",\"crv\":\"P-256\",\"x\":\"AQ\",\"y\":\"AQ\"},",
+  )
+  |> id_token.validate_signing_jwks
+  |> should.be_ok()
+}
+
 fn tamper(token: String) -> String {
   let assert [header, payload, signature] = string.split(token, ".")
   let replacement = case string.starts_with(signature, "A") {

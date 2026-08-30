@@ -164,7 +164,11 @@ fn estimate_bounds(
 ) -> Result(#(Int, Int, Int), String) {
   case estimate {
     types.ExactTime(value) -> Ok(#(value, value, value))
-    types.EstimatedTime(value, lower, upper) -> Ok(#(value, lower, upper))
+    types.EstimatedTime(value, lower, upper) ->
+      case lower <= upper {
+        True -> Ok(#(value, lower, upper))
+        False -> Error("estimated time lower bound exceeds upper bound")
+      }
     types.TimeUnavailable(reason) -> Error(reason)
   }
 }
