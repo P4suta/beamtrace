@@ -13,4 +13,4 @@ Status: Accepted · 2026-08-30
 
 ## Consequences
 
-Web changes must be committed together with their rebuilt `dist/`; CI rejects drift.
+Web changes must be committed together with their rebuilt `dist/`; Linux and macOS CI reject drift. Windows bundles are not byte-identical, so that leg skips the comparison.

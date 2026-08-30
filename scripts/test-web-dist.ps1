@@ -5,6 +5,12 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
+if ($IsWindows) {
+    # esbuild output is byte-reproducible on Linux and macOS; Windows bundles
+    # differ, so those legs skip the byte comparison.
+    Write-Host 'Web distribution gate: skipped on Windows (Linux and macOS CI own the byte comparison).'
+    exit 0
+}
 & (Join-Path $PSScriptRoot 'build-web.ps1')
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $stale = @(git -C $repoRoot status --porcelain -- packages/beamtrace_web/dist)
