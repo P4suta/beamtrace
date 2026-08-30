@@ -5,6 +5,7 @@ import beamtrace_runtime/cli_spec
 import gleam/dynamic/decode
 import gleam/json
 import gleam/list
+import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
 
@@ -75,6 +76,8 @@ pub fn parse_error_command_name_is_closed_test() {
   cli.invoked_command(["comprae"]) |> should.equal("unknown")
   cli.invoked_command(["config", "check", "--json"]) |> should.equal("config")
   cli.invoked_command(["--json", "validate", "x"]) |> should.equal("validate")
+  cli.invoked_token(["--json", "comprae"]) |> should.equal(Some("comprae"))
+  cli.invoked_token(["--", "erl"]) |> should.equal(None)
 }
 
 pub fn cli_reference_documents_every_error_and_exit_code_test() {

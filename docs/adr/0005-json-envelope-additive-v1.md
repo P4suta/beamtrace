@@ -9,7 +9,7 @@ Status: Accepted · 2026-08-30
 
 ## Decision
 
-Keep `schema_version: 1` and extend only additively: `command` is a closed set (specified names, `config check`, `unknown`); `ok` is true exactly when `error` is null and `exit_code` carries the outcome (1 = difference or child exit status, 3 = capture integrity); file artifacts carry `path` and `absolute_path`; `doctor` adds `checks` (`{ok, hint?}` per check); errors may carry `detail`. `schemas/beamtrace-cli-v1/envelope.schema.json` is generated from the specification and the error catalogue, tested against both, and enforced on real outputs by `scripts/check-cli-envelope.mjs` in the smoke gate.
+Keep `schema_version: 1` and extend only additively: `command` is a closed set (specified names, `config check`, `unknown`) and a parse error that concerns an unknown name carries the typed token in the additive `invoked` field; `ok` is true exactly when `error` is null and `exit_code` carries the outcome (1 = difference or child exit status, 3 = capture integrity); file artifacts carry `path` and `absolute_path`; `doctor` adds `checks` (`{ok, hint?}` per check); errors may carry `detail`. `schemas/beamtrace-cli-v1/envelope.schema.json` is generated from the specification and the error catalogue, tested against both, and enforced on real outputs by `scripts/check-cli-envelope.mjs` in the smoke gate.
 
 ## Consequences
 

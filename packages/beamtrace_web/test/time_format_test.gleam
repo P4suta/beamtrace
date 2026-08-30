@@ -40,6 +40,15 @@ pub fn deltas_keep_intervals_and_evidence_test() {
   |> should.equal("+10 ns · exact")
 }
 
+pub fn reversed_bounds_fall_back_to_the_raw_label_test() {
+  time_format.instant_label(workspace.EstimatedTime(
+    "2000500000",
+    "2000900000",
+    "2000000000",
+  ))
+  |> should.equal("2000500000 ns estimated [2000900000, 2000000000]")
+}
+
 pub fn malformed_values_fall_back_to_the_raw_label_test() {
   time_format.instant_label(workspace.ExactTime("not-a-number"))
   |> should.equal("not-a-number ns exact")

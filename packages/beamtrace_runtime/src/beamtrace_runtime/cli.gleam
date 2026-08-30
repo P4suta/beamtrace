@@ -317,6 +317,15 @@ pub fn json_requested(arguments: List(String)) -> Bool {
   }
 }
 
+/// The first command word exactly as typed, for the `invoked` envelope field.
+pub fn invoked_token(arguments: List(String)) -> Option(String) {
+  case arguments {
+    [] | ["--", ..] -> None
+    ["--json", ..rest] | ["--force", ..rest] -> invoked_token(rest)
+    [name, ..] -> Some(name)
+  }
+}
+
 /// Stable command name for a parse-error JSON envelope: a specified command
 /// name, or `unknown`.
 pub fn invoked_command(arguments: List(String)) -> String {

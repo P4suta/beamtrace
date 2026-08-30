@@ -415,6 +415,7 @@ pub fn handle_key(model: Model, raw_key: String) -> Model {
   let key = keys.match(raw_key)
   case key, model.focus {
     keys.Alt("q"), _ -> Model(..model, quit: True)
+    keys.Escape, _ if model.help_open -> Model(..model, help_open: False)
     // Node names never contain "?", so the guide stays reachable while the
     // attach field has focus; free-text search and save inputs keep it.
     keys.Char("?"), AttachFocus | keys.Char("?"), NormalFocus ->

@@ -209,3 +209,10 @@ pub fn force_writer_replaces_an_existing_archive_test() {
   let assert Ok(archive) = storage.load(path)
   archive.events |> should.equal([replacement])
 }
+
+pub fn missing_archives_are_reported_as_enoent_on_every_read_path_test() {
+  storage.validate("does-not-exist.beamtrace")
+  |> should.equal(Error(storage.IoError("enoent")))
+  storage.window("does-not-exist.beamtrace", start: 0, limit: 1)
+  |> should.equal(Error(storage.IoError("enoent")))
+}

@@ -10,7 +10,7 @@ beamtrace help
 beamtrace help COMMAND
 beamtrace COMMAND --help
 beamtrace help errors
-beamtrace completion bash|zsh|fish|powershell
+beamtrace completion SHELL   # bash, zsh, fish, or powershell
 ```
 
 ## Commands
@@ -53,7 +53,8 @@ Finite commands accept `--json` and emit one stdout object described by
 {"schema_version":1,"command":"version","ok":true,"exit_code":0,"artifact":{"version":"<version>"},"outcome":null,"error":null}
 ```
 
-`command` is one of the specified command names, `config check`, or `unknown`.
+`command` is one of the specified command names, `config check`, or `unknown`;
+an unknown name is echoed verbatim in `invoked`.
 `ok` is true exactly when `error` is null; `exit_code` still carries the outcome
 (1 for a comparison difference or application exit status, 3 for a capture
 integrity issue). Artifacts that name a file carry both `path` and

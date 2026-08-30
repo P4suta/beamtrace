@@ -61,7 +61,14 @@ pub fn main() {
         _ -> cli_errors.invalid_arguments(message)
       }
       case cli.json_requested(arguments) {
-        True -> emit_json_failure(cli.invoked_command(arguments), error)
+        True -> {
+          let command = cli.invoked_command(arguments)
+          let invoked = case command {
+            "unknown" -> cli.invoked_token(arguments)
+            _ -> None
+          }
+          emit_json_parse_failure(command, invoked, error)
+        }
         False -> {
           let _ = fail_with(error)
           Nil
@@ -671,7 +678,7 @@ fn run_migrate_json(path: String, output: String) -> Int {
       0
     }
     Error(error) -> {
-      emit_json_failure("migrate", cli_errors.from_storage(error, path))
+      emit_json_failure("migrate", migrate_error(error, path, output))
       2
     }
   }
@@ -1343,27 +1350,57 @@ fn emit_json_success(command: String, artifact: json.Json) -> Nil {
   emit_json_result(command, True, 0, Some(artifact), None)
 }
 
+fn emit_json_parse_failure(
+  command: String,
+  invoked: Option(String),
+  error: cli_errors.CliError,
+) -> Nil {
+  json.object(
+    list.flatten([
+      [
+        #("schema_version", json.int(1)),
+        #("command", json.string(command)),
+      ],
+      case invoked {
+        Some(token) -> [#("invoked", json.string(token))]
+        None -> []
+      },
+      [
+        #("ok", json.bool(False)),
+        #("exit_code", json.int(cli_errors.exit_code(error))),
+        #("artifact", json.null()),
+        #("outcome", json.null()),
+        #("error", error_json(error)),
+      ],
+    ]),
+  )
+  |> json.to_string
+  |> io.println
+}
+
+fn error_json(error: cli_errors.CliError) -> json.Json {
+  json.object(
+    list.append(
+      [
+        #("code", json.string(error.code)),
+        #("message", json.string(error.message)),
+        #("hint", json.string(error.hint)),
+      ],
+      case error.detail {
+        None -> []
+        Some(detail) -> [#("detail", json.string(detail))]
+      },
+    ),
+  )
+}
+
 fn emit_json_failure(command: String, error: cli_errors.CliError) -> Nil {
   emit_json_result(
     command,
     False,
     cli_errors.exit_code(error),
     None,
-    Some(
-      json.object(
-        list.append(
-          [
-            #("code", json.string(error.code)),
-            #("message", json.string(error.message)),
-            #("hint", json.string(error.hint)),
-          ],
-          case error.detail {
-            None -> []
-            Some(detail) -> [#("detail", json.string(detail))]
-          },
-        ),
-      ),
-    ),
+    Some(error_json(error)),
   )
 }
 
@@ -1719,6 +1756,21 @@ fn run_capture(
   }
 }
 
+/// Migration reads `path` and writes `output`; attribute the failure to the
+/// file it concerns.
+fn migrate_error(
+  error: storage.StorageError,
+  path: String,
+  output: String,
+) -> cli_errors.CliError {
+  case error {
+    storage.MigrationRequiresDistinctOutput
+    | storage.IoError("destination_exists") ->
+      cli_errors.from_storage(error, output)
+    _ -> cli_errors.from_storage(error, path)
+  }
+}
+
 fn run_attach(
   node: String,
   mode: cli.UiMode,
@@ -1883,7 +1935,7 @@ fn run_migrate(path: String, output: String) -> Int {
       io.println("Migrated " <> path <> " to schema v2 at " <> output)
       0
     }
-    Error(error) -> fail_with(cli_errors.from_storage(error, output))
+    Error(error) -> fail_with(migrate_error(error, path, output))
   }
 }
 

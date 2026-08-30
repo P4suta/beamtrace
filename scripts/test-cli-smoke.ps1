@@ -60,7 +60,7 @@ try {
             $preflight = (& gleam run -- record --trigger 'erlang:system_time/0' --no-ui -- erl -noshell -eval 'halt().' 2>&1 | Out-String)
             $preflightExit = $LASTEXITCODE
             $preflightSeconds = ((Get-Date) - $preflightStart).TotalSeconds
-            if ($preflightExit -ne 2 -or $preflight -notmatch 'beamtrace\[E_AGENT_BEAM_UNAVAILABLE\]' -or $preflight -notmatch 'mise run beamtrace') {
+            if ($preflightExit -ne 2 -or $preflightSeconds -gt 15 -or $preflight -notmatch 'beamtrace\[E_AGENT_BEAM_UNAVAILABLE\]' -or $preflight -notmatch 'mise run beamtrace') {
                 throw "record must fail fast without an agent BEAM: $preflight"
             }
             $preflightJson = (& gleam run -- record --trigger 'erlang:system_time/0' --no-ui --json -- erl -noshell -eval 'halt().' | Out-String | ConvertFrom-Json)

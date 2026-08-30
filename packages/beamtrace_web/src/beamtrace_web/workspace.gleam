@@ -276,6 +276,7 @@ pub type Msg {
   CaptureStatusLoaded(CapturePhase)
   UserOpenedCaptureForm
   UserClosedCaptureForm
+  UserChoseCaptureAction
   UserRequestedCancel
   CaptureCancelFailed(String)
   UserChangedSavePath(String)
@@ -409,6 +410,8 @@ pub fn update(model: Model, message: Msg) -> Model {
       Model(..model, show_internal: !model.show_internal, viewport_start: 0)
     UserFocusedSearch -> model
     UserOpenedCaptureForm -> Model(..model, capture_form_open: True)
+    UserChoseCaptureAction ->
+      Model(..model, mode: Capture, capture_form_open: True)
     UserClosedCaptureForm -> Model(..model, capture_form_open: False)
     UserOpenedPalette -> Model(..model, palette_open: True)
     UserClosedPalette -> Model(..model, palette_open: False)

@@ -339,7 +339,7 @@ pub fn from_capture_reason(reason: String) -> CliError {
     "node_start_timeout" -> target_unavailable()
     "system_tracer_occupied" -> system_tracer_occupied()
     "trigger_timeout" -> trigger_timeout()
-    "agent_beam_unavailable" -> agent_beam_unavailable(False)
+    "agent_beam_unavailable" -> agent_beam_unavailable(bundled_runtime())
     _ ->
       case string.starts_with(reason, not_found) {
         True ->
@@ -454,6 +454,9 @@ pub fn from_storage(error: storage.StorageError, path: String) -> CliError {
       |> with_detail(reason)
   }
 }
+
+@external(erlang, "beamtrace_cli_ffi", "bundled_runtime")
+fn bundled_runtime() -> Bool
 
 pub fn classify_child_output(output: String) -> Option(String) {
   case

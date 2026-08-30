@@ -174,3 +174,12 @@ pub fn question_mark_toggles_the_key_guide_and_escape_closes_it_test() {
   |> list.any(fn(entry) { entry.0 == "d" && entry.1 == "compare" })
   |> should.be_true()
 }
+
+pub fn escape_closes_the_guide_opened_from_the_attach_field_test() {
+  let opened = model.init(events()) |> model.handle_key("?")
+  opened.help_open |> should.be_true()
+  opened.focus |> should.equal(model.AttachFocus)
+  let closed = model.handle_key(opened, "esc")
+  closed.help_open |> should.be_false()
+  closed.focus |> should.equal(model.AttachFocus)
+}

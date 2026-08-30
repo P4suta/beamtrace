@@ -6694,6 +6694,9 @@ var Msg$UserOpenedCaptureForm$const = new UserOpenedCaptureForm;
 class UserClosedCaptureForm extends CustomType {
 }
 var Msg$UserClosedCaptureForm$const = new UserClosedCaptureForm;
+class UserChoseCaptureAction extends CustomType {
+}
+var Msg$UserChoseCaptureAction$const = new UserChoseCaptureAction;
 class UserRequestedCancel extends CustomType {
 }
 var Msg$UserRequestedCancel$const = new UserRequestedCancel;
@@ -7108,6 +7111,8 @@ function update2(loop$model, loop$message) {
       return new Model(model.remote, model.mode, model.theme, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, true, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.selected_team_trace_ids, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserClosedCaptureForm) {
       return new Model(model.remote, model.mode, model.theme, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, false, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.selected_team_trace_ids, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+    } else if (message instanceof UserChoseCaptureAction) {
+      return new Model(model.remote, Mode$Capture$const, model.theme, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, true, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.selected_team_trace_ids, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof UserRequestedCancel) {
       return new Model(model.remote, model.mode, model.theme, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.capture_form_open, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, CapturePhase$Cancelling$const, "Stopping capture and cleaning the target", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.selected_team_trace_ids, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
     } else if (message instanceof CaptureCancelFailed) {
@@ -9173,11 +9178,12 @@ function half_width(lower, upper) {
     let upper_s = $1[0][0];
     let upper_ns = $1[0][1];
     let seconds = upper_s - lower_s;
-    let $2 = seconds > 9000000 || seconds < 0;
+    let width = seconds * 1e9 + upper_ns - lower_ns;
+    let $2 = seconds > 9000000 || width < 0;
     if ($2) {
       return new Error2(undefined);
     } else {
-      return new Ok(globalThis.Math.trunc((seconds * 1e9 + upper_ns - lower_ns) / 2));
+      return new Ok(globalThis.Math.trunc(width / 2));
     }
   } else {
     return new Error2(undefined);
@@ -9728,7 +9734,7 @@ function palette2(model) {
       ])),
       button(toList([
         autofocus(true),
-        on_click(new UserSelectedMode(Mode$Capture$const))
+        on_click(Msg$UserChoseCaptureAction$const)
       ]), toList([text3("Arm capture trigger")])),
       button(toList([
         on_click(new UserSelectedMode(Mode$Live$const))
@@ -10116,7 +10122,14 @@ function team_event_section(model) {
             let reason = $1[0];
             return p(toList([role("alert")]), toList([text3(reason)]));
           } else {
-            return event_table(model.team_events, "This trace page has no events");
+            return event_table(model.team_events, (() => {
+              let $2 = model.team_events_loading;
+              if ($2) {
+                return "Loading trace events…";
+              } else {
+                return "This trace page has no events";
+              }
+            })());
           }
         })(),
         (() => {

@@ -34,10 +34,14 @@ skipped(ShellName) ->
     end.
 
 script_path(ShellName) ->
-    Root = case os:getenv("TMPDIR") of
-        false -> "/tmp";
-        [] -> "/tmp";
-        Value -> Value
+    Candidates = [os:getenv(Name) || Name <- ["TMPDIR", "TEMP", "TMP"]],
+    Root = case [Value || Value <- Candidates, Value =/= false, Value =/= []] of
+        [First | _] -> First;
+        [] ->
+            case os:type() of
+                {win32, _} -> filename:absname(".");
+                _ -> "/tmp"
+            end
     end,
     filename:join(Root, "beamtrace-completion-" ++ ShellName ++ "-"
         ++ integer_to_list(erlang:unique_integer([positive]))

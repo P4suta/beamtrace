@@ -29,11 +29,20 @@ if (!p.command.enum.includes(value.command)) failures.push(`command ${value.comm
 if (typeof value.ok !== "boolean") failures.push("ok must be boolean");
 if (!p.exit_code.enum.includes(value.exit_code)) failures.push(`exit_code ${value.exit_code} is not enumerated`);
 if (value.ok !== (value.error === null)) failures.push("ok must be true exactly when error is null");
+for (const key of ["artifact", "outcome"]) {
+  const item = value[key];
+  if (!(item === null || (typeof item === "object" && !Array.isArray(item)))) failures.push(`${key} must be null or an object`);
+}
+if ("invoked" in value && typeof value.invoked !== "string") failures.push("invoked must be a string");
 if (value.error !== null) {
   const error = p.error.oneOf[1];
   for (const key of error.required) if (!(key in value.error)) failures.push(`error.${key} missing`);
   for (const key of Object.keys(value.error)) if (!(key in error.properties)) failures.push(`error.${key} unexpected`);
   if (!error.properties.code.enum.includes(value.error.code)) failures.push(`error.code ${value.error.code} is not catalogued`);
+  for (const key of ["message", "hint"]) {
+    if (typeof value.error[key] !== "string" || value.error[key].length < 1) failures.push(`error.${key} must be a non-empty string`);
+  }
+  if ("detail" in value.error && typeof value.error.detail !== "string") failures.push("error.detail must be a string");
 }
 if (failures.length > 0) {
   console.error(failures.join("\n"));

@@ -143,6 +143,44 @@
           }
         }
       ]
+    },
+    "invoked": {
+      "type": "string",
+      "description": "The first argument as typed, present only when a parse error concerns a name outside the command set."
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "ok": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "error": {
+            "type": "null"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "ok": {
+            "const": false
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "error": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  ]
 }

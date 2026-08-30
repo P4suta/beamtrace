@@ -502,3 +502,15 @@ pub fn sealed_status_on_first_load_hides_the_arming_form_test() {
     )
   armed_here.capture_form_open |> should.be_true()
 }
+
+pub fn palette_capture_action_reopens_the_arming_form_test() {
+  let sealed =
+    workspace.init_remote()
+    |> workspace.update(
+      workspace.CaptureStatusLoaded(workspace.Ready(3, "sealed")),
+    )
+    |> workspace.update(workspace.UserSelectedMode(workspace.Compare))
+  let chosen = workspace.update(sealed, workspace.UserChoseCaptureAction)
+  chosen.mode |> should.equal(workspace.Capture)
+  chosen.capture_form_open |> should.be_true()
+}

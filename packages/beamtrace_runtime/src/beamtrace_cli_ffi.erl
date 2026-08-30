@@ -91,8 +91,11 @@ demo_command() ->
         {false, _} -> {error, <<"erl executable was not found">>};
         {_, error} -> {error, <<"bundled demo fixture is unavailable">>};
         {Executable, _Object} ->
+            %% Boot only kernel and stdlib: the bundled runtime carries no
+            %% sasl, and some hosts alias start.boot to start_sasl.boot.
             {ok, [
                 unicode:characters_to_binary(Executable),
+                <<"-boot">>, <<"start_clean">>,
                 <<"-noshell">>,
                 <<"-s">>, <<"beamtrace_demo_fixture">>, <<"run">>
             ]}
@@ -302,7 +305,7 @@ doctor_json(
     Erl, Gleam, Mix, Rebar3, Bundled, RuntimeRoot
 ) ->
     unicode:characters_to_binary(io_lib:format(
-        "{\"otp_release\":\"~s\",\"runtime_root\":~s,\"bundled_runtime\":~s,"
+        "{\"otp_release\":\"~s\",\"runtime_root\":~ts,\"bundled_runtime\":~s,"
         "\"word_size\":~B,"
         "\"isolated_trace_session\":~s,\"trace_system\":~s,"
         "\"seq_trace\":~s,\"zip\":~s,\"crypto\":~s,"
@@ -497,13 +500,7 @@ start_prepared_gated_command(
                         false -> "";
                         FinishValue -> FinishValue
                     end,
-                    StagedFlags = case StagedBinaries of
-                        [] -> "";
-                        _ -> " -pa " ++ Directory
-                    end,
-                    CombinedFlags = string:trim(
-                        Flags ++ StagedFlags ++ " " ++ Existing
-                    ),
+                    CombinedFlags = string:trim(Flags ++ " " ++ Existing),
                     CombinedFinishFlags = string:trim(
                         ExistingFinish ++ " -eval \""
                         ++ binary_to_list(finish_gate_expression()) ++ "\""
@@ -530,6 +527,10 @@ start_prepared_gated_command(
                                     {"BEAMTRACE_RECORD_NODE_NAME", NodeName},
                                     {"BEAMTRACE_RECORD_NAME_DOMAIN", NameDomain},
                                     {"BEAMTRACE_RECORD_GUARD_BEAM", GuardPath},
+                                    {"BEAMTRACE_RECORD_STAGED_DIR",
+                                     staged_directory_marker(
+                                         Directory, StagedBinaries
+                                     )},
                                     {"BEAMTRACE_RECORD_DIRECT_VM",
                                      direct_vm_marker(Executable)},
                                     {"BEAMTRACE_RECORD_WRAPPER",
@@ -997,6 +998,12 @@ direct_vm_marker(Executable) ->
         true -> "1";
         false -> "0"
     end.
+
+%% Staged modules are added to the child's code path by the guard from this
+%% environment entry; an environment value survives paths with spaces where
+%% an ERL_AFLAGS `-pa` entry would be split.
+staged_directory_marker(_Directory, []) -> false;
+staged_directory_marker(Directory, _Staged) -> Directory.
 
 %% Crash dumps belong to the private gate directory, never to the user's
 %% working directory; their slogan is reported through the output tail.

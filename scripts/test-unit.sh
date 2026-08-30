@@ -21,6 +21,6 @@ fi
 
 node "$repo_root/scripts/check-core-docs.mjs"
 node "$repo_root/scripts/generate-openapi-module.mjs" --check
-(cd "$repo_root" && bash scripts/build-web.sh >/dev/null && git diff --exit-code --quiet -- packages/beamtrace_web/dist) || { echo "packages/beamtrace_web/dist is stale; run scripts/build-web.sh and commit" >&2; exit 1; }
+(cd "$repo_root" && bash scripts/build-web.sh >/dev/null && [ -z "$(git status --porcelain -- packages/beamtrace_web/dist)" ]) || { echo "packages/beamtrace_web/dist is stale; run scripts/build-web.sh and commit" >&2; exit 1; }
 
 echo "Unit suites and the v0.3 package interface passed."

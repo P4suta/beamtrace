@@ -33,7 +33,6 @@ run() ->
 
 actor(Role, Checkout) ->
     put('$process_label', Role),
-    register(Role, self()),
     receive
         {reserve, OrderId, Items} ->
             Checkout ! {reserved, OrderId, length(Items)};

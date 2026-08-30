@@ -108,6 +108,16 @@ def main() -> int:
         os.write(master, b"?")
         if not wait_for_marker(process, master, output, b"KEY GUIDE", 10):
             return fail("TUI did not open the key guide on ?.", output)
+        closed = bytearray()
+        os.write(master, b"?")
+        if not wait_for_marker(process, master, closed, b"ATTACH", 10):
+            return fail("TUI did not close the key guide on the second ?.", output + closed)
+        output += closed
+        reopened = bytearray()
+        os.write(master, b"?")
+        if not wait_for_marker(process, master, reopened, b"KEY GUIDE", 10):
+            return fail("TUI did not reopen the key guide.", output + reopened)
+        output += reopened
         os.write(master, b"?")
         pump(master, output, 1)
 

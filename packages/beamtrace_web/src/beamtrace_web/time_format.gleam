@@ -171,9 +171,10 @@ fn half_width(lower: String, upper: String) -> Result(Int, Nil) {
   case split_ns(lower), split_ns(upper) {
     Ok(#(lower_s, lower_ns)), Ok(#(upper_s, upper_ns)) -> {
       let seconds = upper_s - lower_s
-      case seconds > 9_000_000 || seconds < 0 {
+      let width = seconds * 1_000_000_000 + upper_ns - lower_ns
+      case seconds > 9_000_000 || width < 0 {
         True -> Error(Nil)
-        False -> Ok({ seconds * 1_000_000_000 + upper_ns - lower_ns } / 2)
+        False -> Ok(width / 2)
       }
     }
     _, _ -> Error(Nil)

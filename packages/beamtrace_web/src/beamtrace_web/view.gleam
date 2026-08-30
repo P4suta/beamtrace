@@ -723,7 +723,10 @@ fn team_event_section(model: workspace.Model) -> Element(workspace.Msg) {
         case model.team_events_error {
           Some(reason) -> html.p([attribute.role("alert")], [html.text(reason)])
           None ->
-            event_table(model.team_events, "This trace page has no events")
+            event_table(model.team_events, case model.team_events_loading {
+              True -> "Loading trace events…"
+              False -> "This trace page has no events"
+            })
         },
         case model.team_events_next_cursor {
           Some(_) ->
@@ -1671,7 +1674,7 @@ fn palette(model: workspace.Model) -> Element(workspace.Msg) {
           html.button(
             [
               attribute.autofocus(True),
-              event.on_click(workspace.UserSelectedMode(workspace.Capture)),
+              event.on_click(workspace.UserChoseCaptureAction),
             ],
             [
               html.text("Arm capture trigger"),

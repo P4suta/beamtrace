@@ -171,7 +171,7 @@ Copy-Item -Path (Join-Path $repoRoot 'docs/*') -Destination (Join-Path $resolved
 foreach ($internalDoc in @('adr', 'development.md', 'releasing.md', 'github-governance.md', 'upstream-candidates.md', 'otp-seq-trace-proposal.md')) {
     Remove-Item -LiteralPath (Join-Path $resolvedStage "docs/$internalDoc") -Recurse -Force -ErrorAction SilentlyContinue
 }
-foreach ($file in @('README.md', 'CHANGELOG.md', 'SECURITY.md', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'REUSE.toml')) {
+foreach ($file in @('README.md', 'CHANGELOG.md', 'SECURITY.md',   'REUSE.toml')) {
     Copy-Item -LiteralPath (Join-Path $repoRoot $file) -Destination $resolvedStage
 }
 
