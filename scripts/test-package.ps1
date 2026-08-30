@@ -244,7 +244,7 @@ try {
                 throw "Self-contained package demo did not report a temporary sealed archive: $demo"
             }
             Write-Host "Self-contained package demo recorded $($demoResult.artifact.event_count) events without a host Erlang runtime."
-            $missingTool = (& $launcher record --trigger 'erlang:system_time/0' --no-ui -- erl -noshell -eval 'halt().' 2>&1 | Out-String)
+            $missingTool = (& $launcher record --trigger 'erlang:system_time/0' --no-ui '--' erl -noshell -eval 'halt().' 2>&1 | Out-String)
             if ($LASTEXITCODE -ne 2 -or $missingTool -notmatch 'beamtrace\[E_COMMAND_NOT_FOUND\]') {
                 throw "Self-contained package record must explain a missing host Erlang toolchain: $missingTool"
             }
