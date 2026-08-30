@@ -589,7 +589,10 @@ fn set_record_display(
   case current {
     None -> Ok(requested)
     Some(value) if value == requested -> Ok(requested)
-    Some(_) -> Error(usage("choose only one of --web, --tui, or --no-ui"))
+    Some(RecordWeb) if requested == RecordWebNoOpen -> Ok(RecordWebNoOpen)
+    Some(RecordWebNoOpen) if requested == RecordWeb -> Ok(RecordWebNoOpen)
+    Some(_) ->
+      Error(usage("choose only one of --web, --tui, --no-ui, or --no-open"))
   }
 }
 
@@ -615,9 +618,22 @@ fn parse_attach_options(
   case options {
     [] -> Ok(#(mode, cookie_file, port, acknowledged))
     ["--web", ..rest] ->
-      parse_attach_options(rest, Web, cookie_file, port, acknowledged)
+      parse_attach_options(
+        rest,
+        case mode {
+          WebNoOpen -> WebNoOpen
+          _ -> Web
+        },
+        cookie_file,
+        port,
+        acknowledged,
+      )
     ["--tui", ..rest] ->
-      parse_attach_options(rest, TuiMode, cookie_file, port, acknowledged)
+      case mode {
+        WebNoOpen -> Error(usage("--no-open cannot be used with --tui"))
+        _ ->
+          parse_attach_options(rest, TuiMode, cookie_file, port, acknowledged)
+      }
     ["--no-open", ..rest] ->
       case mode {
         TuiMode -> Error(usage("--no-open cannot be used with --tui"))
@@ -767,8 +783,21 @@ fn parse_open_options(
 ) -> Result(Command, ParseError) {
   case options {
     [] -> Ok(Open(path, mode, port))
-    ["--web", ..rest] -> parse_open_options(path, rest, Web, port)
-    ["--tui", ..rest] -> parse_open_options(path, rest, TuiMode, port)
+    ["--web", ..rest] ->
+      parse_open_options(
+        path,
+        rest,
+        case mode {
+          WebNoOpen -> WebNoOpen
+          _ -> Web
+        },
+        port,
+      )
+    ["--tui", ..rest] ->
+      case mode {
+        WebNoOpen -> Error(usage("--no-open cannot be used with --tui"))
+        _ -> parse_open_options(path, rest, TuiMode, port)
+      }
     ["--no-open", ..rest] ->
       case mode {
         TuiMode -> Error(usage("--no-open cannot be used with --tui"))
@@ -808,9 +837,28 @@ fn parse_demo(
 ) -> Result(Command, ParseError) {
   case options {
     [] -> Ok(Demo(mode, out, port))
-    ["--web", ..rest] -> parse_demo(rest, DemoWeb, out, port)
-    ["--tui", ..rest] -> parse_demo(rest, DemoTui, out, port)
-    ["--no-ui", ..rest] -> parse_demo(rest, DemoNoUi, out, port)
+    ["--web", ..rest] ->
+      parse_demo(
+        rest,
+        case mode {
+          DemoWebNoOpen -> DemoWebNoOpen
+          _ -> DemoWeb
+        },
+        out,
+        port,
+      )
+    ["--tui", ..rest] ->
+      case mode {
+        DemoWebNoOpen ->
+          Error(usage("--no-open is only valid with the Web demo"))
+        _ -> parse_demo(rest, DemoTui, out, port)
+      }
+    ["--no-ui", ..rest] ->
+      case mode {
+        DemoWebNoOpen ->
+          Error(usage("--no-open is only valid with the Web demo"))
+        _ -> parse_demo(rest, DemoNoUi, out, port)
+      }
     ["--no-open", ..rest] ->
       case mode {
         DemoTui | DemoNoUi ->

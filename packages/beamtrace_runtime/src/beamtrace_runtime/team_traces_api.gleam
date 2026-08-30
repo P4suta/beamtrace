@@ -93,7 +93,29 @@ pub fn compare_response(
                     )
                   {
                     Error("not_found") -> wisp.not_found()
-                    Error("permission_denied") -> wisp.response(403)
+                    Error("permission_denied") ->
+                      json.object([
+                        #(
+                          "error",
+                          json.object([
+                            #("code", json.string("permission_denied")),
+                            #(
+                              "message",
+                              json.string(
+                                "This session does not have permission.",
+                              ),
+                            ),
+                            #(
+                              "hint",
+                              json.string(
+                                "Request the required BeamTrace role; raw capture needs both permissions.",
+                              ),
+                            ),
+                          ]),
+                        ),
+                      ])
+                      |> json.to_string
+                      |> wisp.json_response(403)
                     Error("too_many_events") -> wisp.response(413)
                     Error(_) -> wisp.response(503)
                     Ok(runs) ->
@@ -228,6 +250,8 @@ fn load_complete_trace(
       case team_store.segments_in_window(store, trace.id, start:, limit:) {
         Error(error) -> Error(error)
         Ok([]) -> Error("missing_trace_segment")
+        Ok([first, ..]) if first.first_event > start ->
+          Error("missing_trace_segment")
         Ok(segments) ->
           case load_trace_segments(store, backend, trace, segments, []) {
             Error(error) -> Error(error)

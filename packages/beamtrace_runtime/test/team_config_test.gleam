@@ -193,6 +193,7 @@ pub fn environment_loader_discovers_standard_provider_metadata_before_bind_test(
     )
   config.authorization_endpoint
   |> should.equal(provider.authorization_endpoint)
+  config.token_endpoint |> should.equal(provider.token_endpoint)
   config.jwks_json |> should.equal(provider.jwks_json)
 
   team_config.load_if_requested_with_discovery(

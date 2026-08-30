@@ -203,6 +203,77 @@ pub fn demo_parses_ui_output_and_ephemeral_port_test() {
   |> should.equal(Ok(cli.Demo(cli.DemoTui, "custom.beamtrace", 0)))
 }
 
+pub fn no_open_is_an_order_independent_web_modifier_test() {
+  let assert Ok(cli.RecordUi(_, cli.RecordWebNoOpen)) =
+    cli.parse([
+      "record",
+      "--trigger",
+      "app:run/0",
+      "--no-open",
+      "--web",
+      "--",
+      "gleam",
+      "run",
+    ])
+  let assert Ok(cli.RecordUi(_, cli.RecordWebNoOpen)) =
+    cli.parse([
+      "record",
+      "--trigger",
+      "app:run/0",
+      "--web",
+      "--no-open",
+      "--",
+      "gleam",
+      "run",
+    ])
+
+  cli.parse([
+    "attach",
+    "app@host",
+    "--no-open",
+    "--web",
+    "--acknowledge-seq-trace-reset",
+  ])
+  |> should.equal(Ok(cli.Attach("app@host", cli.WebNoOpen, None, 0)))
+  cli.parse(["open", "trace.beamtrace", "--no-open", "--web"])
+  |> should.equal(Ok(cli.Open("trace.beamtrace", cli.WebNoOpen, 0)))
+  cli.parse(["demo", "--no-open", "--web"])
+  |> should.equal(Ok(cli.Demo(cli.DemoWebNoOpen, "", 0)))
+}
+
+pub fn no_open_rejects_later_non_web_display_options_test() {
+  let record =
+    cli.parse([
+      "record",
+      "--trigger",
+      "app:run/0",
+      "--no-open",
+      "--tui",
+      "--",
+      "gleam",
+      "run",
+    ])
+  let assert Error(record_error) = record
+  record_error.message |> string.contains("--no-open") |> should.be_true()
+
+  [
+    cli.parse([
+      "attach",
+      "app@host",
+      "--no-open",
+      "--tui",
+      "--acknowledge-seq-trace-reset",
+    ]),
+    cli.parse(["open", "trace.beamtrace", "--no-open", "--tui"]),
+    cli.parse(["demo", "--no-open", "--tui"]),
+    cli.parse(["demo", "--no-open", "--no-ui"]),
+  ]
+  |> list.each(fn(result) {
+    let assert Error(error) = result
+    error.message |> string.contains("--no-open") |> should.be_true()
+  })
+}
+
 pub fn team_tui_accepts_only_a_session_cookie_file_not_a_cookie_value_test() {
   cli.parse([
     "tui",

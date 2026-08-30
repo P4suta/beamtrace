@@ -101,6 +101,11 @@ pub fn openapi_v2_is_served_with_the_typed_error_schema_test() {
   |> should.be_true()
   body
   |> string.contains(
+    "\"/compare\":{\"post\":{\"operationId\":\"compare\",\"security\":[{\"SessionCookie\":[]}]",
+  )
+  |> should.be_true()
+  body
+  |> string.contains(
     "\"/live\":{\"get\":{\"operationId\":\"live\",\"parameters\":[{\"$ref\":\"#/components/parameters/Node\"},{\"$ref\":\"#/components/parameters/EventLimit\"}]",
   )
   |> should.be_true()

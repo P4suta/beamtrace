@@ -49,6 +49,9 @@
     "/compare": {
       "post": {
         "operationId": "compare",
+        "security": [
+          { "SessionCookie": [] }
+        ],
         "requestBody": {
           "required": true,
           "content": {

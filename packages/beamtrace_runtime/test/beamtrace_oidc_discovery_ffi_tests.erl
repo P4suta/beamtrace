@@ -5,10 +5,16 @@
 
 mutable_provider_cache_uses_the_latest_jwks_test() ->
     Issuer = <<"https://id.example/cache-test">>,
+    OtherIssuer = <<"https://other-id.example/cache-test">>,
     nil = beamtrace_oidc_discovery_ffi:remember_provider(
         Issuer,
         <<"https://id.example/jwks">>,
         <<"old">>
+    ),
+    nil = beamtrace_oidc_discovery_ffi:remember_provider(
+        OtherIssuer,
+        <<"https://other-id.example/jwks">>,
+        <<"other">>
     ),
     ?assertEqual(
         <<"old">>,
@@ -18,6 +24,10 @@ mutable_provider_cache_uses_the_latest_jwks_test() ->
     ?assertEqual(
         <<"new">>,
         beamtrace_oidc_discovery_ffi:cached_jwks(Issuer, <<"fallback">>)
+    ),
+    ?assertEqual(
+        <<"other">>,
+        beamtrace_oidc_discovery_ffi:cached_jwks(OtherIssuer, <<"fallback">>)
     ).
 
 chunked_response_is_collected_test() ->

@@ -201,13 +201,13 @@ remember_provider(Issuer, JwksUri, Jwks)
     nil.
 
 cached_jwks(Issuer, Fallback) when is_binary(Issuer), is_binary(Fallback) ->
-    case cached_provider() of
+    case cached_provider(Issuer) of
         {Issuer, _JwksUri, Jwks} -> Jwks;
         _ -> Fallback
     end.
 
 refresh_jwks(Issuer, MaximumBytes) when is_binary(Issuer) ->
-    case cached_provider() of
+    case cached_provider(Issuer) of
         {Issuer, JwksUri, _OldJwks} ->
             case get_json(JwksUri, MaximumBytes) of
                 {ok, {200, Jwks}} -> {ok, Jwks};
@@ -221,17 +221,17 @@ refresh_jwks(Issuer, MaximumBytes) when is_binary(Issuer) ->
     end.
 
 cache_refreshed_jwks(Issuer, Jwks) when is_binary(Issuer), is_binary(Jwks) ->
-    case cached_provider() of
+    case cached_provider(Issuer) of
         {Issuer, JwksUri, _OldJwks} ->
             cache_provider(Issuer, JwksUri, Jwks);
         _ -> ok
     end,
     nil.
 
-cached_provider() ->
+cached_provider(Issuer) ->
     ensure_cache_table(),
-    try ets:lookup(?CACHE_TABLE, provider) of
-        [{provider, Issuer, JwksUri, Jwks}] -> {Issuer, JwksUri, Jwks};
+    try ets:lookup(?CACHE_TABLE, Issuer) of
+        [{Issuer, JwksUri, Jwks}] -> {Issuer, JwksUri, Jwks};
         [] -> undefined
     catch
         error:badarg -> undefined
@@ -239,12 +239,12 @@ cached_provider() ->
 
 cache_provider(Issuer, JwksUri, Jwks) ->
     ensure_cache_table(),
-    try ets:insert(?CACHE_TABLE, {provider, Issuer, JwksUri, Jwks}) of
+    try ets:insert(?CACHE_TABLE, {Issuer, JwksUri, Jwks}) of
         true -> ok
     catch
         error:badarg ->
             ensure_cache_table(),
-            true = ets:insert(?CACHE_TABLE, {provider, Issuer, JwksUri, Jwks}),
+            true = ets:insert(?CACHE_TABLE, {Issuer, JwksUri, Jwks}),
             ok
     end.
 
