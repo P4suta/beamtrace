@@ -1,3 +1,4 @@
+import beamtrace/dag
 import beamtrace/diff
 import beamtrace/identity
 import beamtrace/types
@@ -193,7 +194,23 @@ pub fn prepared_comparison_matches_compatibility_wrapper_test() {
   ]
 
   list.each(cases, fn(pair) {
-    diff.compare_prepared(diff.prepare(pair.0), diff.prepare(pair.1))
-    |> should.equal(diff.compare(pair.0, pair.1))
+    case diff.prepare(pair.0), diff.prepare(pair.1) {
+      Ok(left), Ok(right) ->
+        diff.compare_prepared(left, right)
+        |> should.equal(diff.compare(pair.0, pair.1))
+      Error(_), _ | _, Error(_) -> Nil
+    }
   })
+}
+
+pub fn checked_comparison_rejects_duplicate_event_ids_test() {
+  let duplicates = [
+    named_event("duplicate", "<0.7.0>", "worker", "a", 1),
+    named_event("duplicate", "<0.7.0>", "worker", "b", 2),
+  ]
+
+  diff.prepare(duplicates)
+  |> should.equal(Error(dag.DuplicateEventId("duplicate")))
+  diff.compare_checked(duplicates, [])
+  |> should.equal(Error(dag.DuplicateEventId("duplicate")))
 }

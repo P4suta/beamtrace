@@ -30,7 +30,12 @@ try {
 finally { Pop-Location }
 
 $mix = Get-Command mix -ErrorAction SilentlyContinue
+$mixUsable = $false
 if ($null -ne $mix) {
+    & mix --version *> $null
+    $mixUsable = $LASTEXITCODE -eq 0
+}
+if ($mixUsable) {
     Push-Location (Join-Path $repoRoot 'fixtures\elixir')
     try {
         & mix test
@@ -40,9 +45,9 @@ if ($null -ne $mix) {
 }
 else {
     if ($env:BEAMTRACE_REQUIRE_ELIXIR -eq '1') {
-        throw 'mix is required for this TDD gate but is not installed.'
+        throw 'mix is required for this TDD gate but is not usable.'
     }
-    Write-Warning 'mix is not installed; Elixir fixture tests were skipped locally.'
+    Write-Warning 'mix is not usable; Elixir fixture tests were skipped locally.'
 }
 
 exit 0

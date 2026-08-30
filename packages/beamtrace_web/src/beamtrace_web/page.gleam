@@ -9,7 +9,10 @@ import gleam/string
 pub fn decode(source: String) -> Result(workspace.EventPage, String) {
   case json.parse(source, page_decoder()) {
     Ok(page) -> Ok(page)
-    Error(errors) -> Error(string.inspect(errors))
+    Error(_) ->
+      Error(
+        "Event page is not valid API v2 data. Validate the archive and reload it.",
+      )
   }
 }
 

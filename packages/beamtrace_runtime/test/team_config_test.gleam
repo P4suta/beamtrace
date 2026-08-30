@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
+import beamtrace_runtime/oidc_discovery
 import beamtrace_runtime/rbac
 import beamtrace_runtime/team_config
 import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
 import gleeunit/should
+import v2_fixture
 
 pub fn complete_team_environment_resolves_public_oidc_and_roles_test() {
   let source = valid_source()
@@ -94,6 +96,21 @@ pub fn team_hub_rejects_cookies_secrets_and_insecure_urls_test() {
   })
 }
 
+pub fn team_configuration_rejects_private_or_empty_signing_jwks_before_bind_test() {
+  valid_source()
+  |> dict.insert("oidc_jwks_json", "{\"keys\":[]}")
+  |> team_config.resolve
+  |> should.equal(Error(team_config.InvalidJwks))
+
+  valid_source()
+  |> dict.insert(
+    "oidc_jwks_json",
+    "{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"private\",\"use\":\"sig\",\"alg\":\"RS256\",\"n\":\"AQ\",\"e\":\"Aw\",\"d\":\"secret\"}]}",
+  )
+  |> team_config.resolve
+  |> should.equal(Error(team_config.InvalidJwks))
+}
+
 pub fn team_role_mapping_rejects_unknown_or_empty_roles_test() {
   valid_source()
   |> dict.insert("oidc_group_roles", "beam-owners:owner")
@@ -123,14 +140,23 @@ pub fn environment_loader_activates_team_only_explicitly_and_reads_bounded_jwks_
   let assert Ok(Some(loaded)) =
     team_config.load_if_requested_with(source, fn(path) {
       path |> should.equal("C:/secure/idp.jwks.json")
-      Ok("{\"keys\":[]}")
+      Ok(v2_fixture.public_jwks)
     })
-  loaded.jwks_json |> should.equal("{\"keys\":[]}")
+  loaded.jwks_json |> should.equal(v2_fixture.public_jwks)
 
   team_config.load_if_requested_with(source, fn(_) { Error("access_denied") })
   |> should.equal(
     Error(team_config.JwksReadFailed("C:/secure/idp.jwks.json", "access_denied")),
   )
+}
+
+pub fn environment_loader_accepts_inline_jwks_with_explicit_provider_test() {
+  let source = valid_source() |> dict.insert("team", "true")
+  let assert Ok(Some(loaded)) =
+    team_config.load_if_requested_with(source, fn(_) {
+      Error("inline_jwks_must_not_read_a_file")
+    })
+  loaded.jwks_json |> should.equal(v2_fixture.public_jwks)
 }
 
 pub fn environment_loader_rejects_ambiguous_team_mode_test() {
@@ -139,6 +165,45 @@ pub fn environment_loader_rejects_ambiguous_team_mode_test() {
     fn(_) { Error("unexpected") },
   )
   |> should.equal(Error(team_config.InvalidValue("team")))
+}
+
+pub fn environment_loader_discovers_standard_provider_metadata_before_bind_test() {
+  let source =
+    valid_source()
+    |> dict.delete("oidc_authorization_endpoint")
+    |> dict.delete("oidc_token_endpoint")
+    |> dict.delete("oidc_jwks_json")
+    |> dict.insert("team", "true")
+  let provider =
+    oidc_discovery.ProviderMetadata(
+      "https://id.example",
+      "https://id.example/authorize",
+      "https://id.example/token",
+      "https://id.example/jwks",
+      v2_fixture.public_jwks,
+    )
+  let assert Ok(Some(config)) =
+    team_config.load_if_requested_with_discovery(
+      source,
+      fn(_) { Error("offline_file_not_expected") },
+      fn(requested_issuer) {
+        requested_issuer |> should.equal("https://id.example")
+        Ok(provider)
+      },
+    )
+  config.authorization_endpoint
+  |> should.equal(provider.authorization_endpoint)
+  config.token_endpoint |> should.equal(provider.token_endpoint)
+  config.jwks_json |> should.equal(provider.jwks_json)
+
+  team_config.load_if_requested_with_discovery(
+    source,
+    fn(_) { Error("offline_file_not_expected") },
+    fn(_) { Error(oidc_discovery.IssuerMismatch) },
+  )
+  |> should.equal(
+    Error(team_config.DiscoveryFailed(oidc_discovery.IssuerMismatch)),
+  )
 }
 
 pub fn team_relay_quota_must_be_positive_and_bounded_test() {
@@ -178,7 +243,7 @@ fn valid_source() {
     #("oidc_issuer", "https://id.example"),
     #("oidc_client_id", "beamtrace"),
     #("oidc_redirect_uri", "https://hub.example/auth/oidc/callback"),
-    #("oidc_jwks_json", "{\"keys\":[]}"),
+    #("oidc_jwks_json", v2_fixture.public_jwks),
     #(
       "oidc_group_roles",
       "beam-admins:admin,beam-investigators:investigator,beam-viewers:viewer,beam-raw:raw",

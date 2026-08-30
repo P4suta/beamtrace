@@ -18,7 +18,9 @@ function Invoke-GleamWithNetworkRetry {
             }
         }
 
-        $transientNetworkFailure = $output -match '(?is)(A HTTP request failed|error sending request for url|temporary failure in name resolution|failed to lookup address information|name or service not known|connection (reset|refused|closed)|operation timed out|request timed out|timeout was reached|unexpected end of file|HTTP[/ ][^\r\n]*(408|425|429|500|502|503|504))'
+        $gleamNetworkContext = $output -match '(?im)^\s*(?:error:\s*)?(?:A HTTP request failed|An error occurred while downloading|Failed to download|Unable to download|Dependency download failed|Package registry request failed)'
+        $transientNetworkDiagnostic = $output -match '(?is)(error sending request for url|FailedToConnect|Posix\("nxdomain"\)|temporary failure in name resolution|failed to lookup address information|name or service not known|connection (reset|refused|closed)|operation timed out|request timed out|timeout was reached|unexpected end of file|HTTP[/ ][^\r\n]*(408|425|429|500|502|503|504))'
+        $transientNetworkFailure = $gleamNetworkContext -and $transientNetworkDiagnostic
         if (-not $transientNetworkFailure -or $attempt -eq $MaximumAttempts) {
             return [pscustomobject]@{
                 ExitCode = $exitCode

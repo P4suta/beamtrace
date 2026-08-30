@@ -3,7 +3,6 @@ import beamtrace_web/page
 import beamtrace_web/workspace
 import gleam/dynamic/decode
 import gleam/json
-import gleam/string
 import lustre/effect.{type Effect}
 
 pub type GraphPayload {
@@ -31,7 +30,10 @@ pub fn load() -> Effect(workspace.Msg) {
 pub fn decode_graph(source: String) -> Result(GraphPayload, String) {
   case json.parse(source, graph_decoder()) {
     Ok(graph) -> Ok(graph)
-    Error(error) -> Error(string.inspect(error))
+    Error(_) ->
+      Error(
+        "Causal graph is not valid API v2 data. Validate the archive and reload it.",
+      )
   }
 }
 

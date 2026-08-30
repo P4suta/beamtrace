@@ -52,8 +52,8 @@ run_started_signal_case(Port, _LauncherOsPid, Signal) ->
     case await_ready(Port, <<>>, Deadline) of
         {error, Reason} -> {error, Reason};
         {ok, HttpPort, BeamOsPid, Output} ->
-            case {http_ok(HttpPort, <<"/api/v1/health">>),
-                  http_ok(HttpPort, <<"/api/v1/ready">>)} of
+            case {http_ok(HttpPort, <<"/api/v2/health">>),
+                  http_ok(HttpPort, <<"/api/v2/ready">>)} of
                 {true, true} -> finish_signal_case(
                     Port, BeamOsPid, Signal, Output, Deadline
                 );

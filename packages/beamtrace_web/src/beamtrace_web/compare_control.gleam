@@ -28,7 +28,10 @@ pub fn decode_report(
 ) -> Result(workspace.CompareReport, String) {
   case json.parse(source, report_decoder()) {
     Ok(report) -> Ok(report)
-    Error(errors) -> Error(string.inspect(errors))
+    Error(_) ->
+      Error(
+        "Comparison is not valid API v2 data. Validate every trace and compare again.",
+      )
   }
 }
 

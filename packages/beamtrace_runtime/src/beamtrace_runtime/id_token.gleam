@@ -59,6 +59,7 @@ type Jwk {
     algorithm: String,
     modulus: String,
     exponent: String,
+    has_private_material: Bool,
   )
 }
 
@@ -86,6 +87,52 @@ pub fn verify(
         expected_nonce,
         now_seconds,
       )
+  }
+}
+
+/// Verify with at most one signing-key refresh, and only when the token's
+/// `kid` is unknown. Signature or claim failures never trigger network work.
+pub fn verify_with_refresh(
+  token: String,
+  jwks_json: String,
+  issuer issuer: String,
+  audience audience: String,
+  expected_nonce expected_nonce: String,
+  now_seconds now_seconds: Int,
+  refresh refresh: fn() -> Result(String, String),
+) -> Result(VerifiedClaims, VerificationError) {
+  case verify(token, jwks_json, issuer, audience, expected_nonce, now_seconds) {
+    Error(UnknownKey) ->
+      case refresh() {
+        Error(_) -> Error(UnknownKey)
+        Ok(refreshed) ->
+          verify(
+            token,
+            refreshed,
+            issuer,
+            audience,
+            expected_nonce,
+            now_seconds,
+          )
+      }
+    result -> result
+  }
+}
+
+/// Validate that a JWKS contains at least one compatible RS256 public signing
+/// key and no private key material. Unrelated public keys are permitted.
+pub fn validate_signing_jwks(source: String) -> Result(Nil, VerificationError) {
+  case json.parse(source, jwks_decoder()) {
+    Error(_) -> Error(Malformed)
+    Ok(keys) -> {
+      let contains_private_material =
+        list.any(keys.keys, fn(key) { key.has_private_material })
+      let contains_signing_key = list.any(keys.keys, valid_signing_key)
+      case contains_private_material, contains_signing_key {
+        True, _ | _, False -> Error(UnknownKey)
+        False, True -> Ok(Nil)
+      }
+    }
   }
 }
 
@@ -154,12 +201,17 @@ fn verify_parsed(
 
 fn select_key(keys: List(Jwk), key_id: String) -> Result(Jwk, Nil) {
   list.find(keys, fn(key) {
-    key.key_id == key_id
-    && key_id != ""
-    && key.key_type == "RSA"
-    && { key.usage == "" || key.usage == "sig" }
-    && { key.algorithm == "" || key.algorithm == "RS256" }
+    key.key_id == key_id && key_id != "" && valid_signing_key(key)
   })
+}
+
+fn valid_signing_key(key: Jwk) -> Bool {
+  key.key_type == "RSA"
+  && { key.usage == "" || key.usage == "sig" }
+  && { key.algorithm == "" || key.algorithm == "RS256" }
+  && key.modulus != ""
+  && key.exponent != ""
+  && !key.has_private_material
 }
 
 fn validate_claims(
@@ -240,9 +292,30 @@ fn jwk_decoder() -> decode.Decoder(Jwk) {
   use key_id <- decode.field("kid", decode.string)
   use use_ <- decode.optional_field("use", "", decode.string)
   use algorithm <- decode.optional_field("alg", "", decode.string)
-  use modulus <- decode.field("n", decode.string)
-  use exponent <- decode.field("e", decode.string)
-  decode.success(Jwk(key_type, key_id, use_, algorithm, modulus, exponent))
+  use modulus <- decode.optional_field("n", "", decode.string)
+  use exponent <- decode.optional_field("e", "", decode.string)
+  use d <- decode.optional_field("d", "", decode.string)
+  use p <- decode.optional_field("p", "", decode.string)
+  use q <- decode.optional_field("q", "", decode.string)
+  use dp <- decode.optional_field("dp", "", decode.string)
+  use dq <- decode.optional_field("dq", "", decode.string)
+  use qi <- decode.optional_field("qi", "", decode.string)
+  use symmetric_key <- decode.optional_field("k", "", decode.string)
+  decode.success(Jwk(
+    key_type,
+    key_id,
+    use_,
+    algorithm,
+    modulus,
+    exponent,
+    d != ""
+      || p != ""
+      || q != ""
+      || dp != ""
+      || dq != ""
+      || qi != ""
+      || symmetric_key != "",
+  ))
 }
 
 @external(erlang, "beamtrace_id_token_ffi", "parts")

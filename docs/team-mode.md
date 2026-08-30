@@ -51,7 +51,7 @@ The relay injects the bounded agent, captures one armed operation, opens a signe
 Raw capture is an exceptional workflow, not a server default. The authenticated subject must have both `investigator` and `raw` roles (an Admin also qualifies), and every allowed or denied authorization is appended to the audit chain.
 
 1. Start the relay with `--raw-grant-file` pointing to a not-yet-created, access-restricted file. After enrollment it prints its relay ID and waits for up to five minutes.
-2. POST JSON to `/api/v1/raw-captures/authorize` from the authenticated team session with the exact Origin, `x-beamtrace-csrf` header, and matching CSRF cookie.
+2. POST JSON to `/api/v2/raw-captures/authorize` from the authenticated team session with the exact Origin, `x-beamtrace-csrf` header, and matching CSRF cookie.
 3. Write the complete `201` JSON response to the requested grant file without modifying it. The relay verifies its ID, expiry, normalized policy, token shape, and all limits before arming.
 4. Delete the receipt file securely after the relay consumes it. The hub stores only the token hash; canonical relay payloads and blobs never contain the bearer token.
 
@@ -75,10 +75,10 @@ Hard ceilings are 30 seconds, 100,000 events, 64 MB, depth 32, binary metadata 1
 
 The Web and TUI trace selectors use these bounded routes:
 
-- `GET /api/v1/traces` uses an opaque cursor, defaults to 50 rows, and accepts at most 100.
-- `GET /api/v1/traces/:id` returns transfer status, node/MFA, privacy, `delivery_status`, event count, receive time, and hold state. Transfer status is not a claim about causal observation integrity.
-- `GET /api/v1/traces/:id/events` returns at most 200 events.
-- `POST` and `DELETE /api/v1/traces/:id/hold` require Admin, an exact Origin, CSRF cookie/header agreement, and an audit write.
+- `GET /api/v2/traces` uses an opaque cursor, defaults to 50 rows, and accepts at most 100.
+- `GET /api/v2/traces/:id` returns transfer status, node/MFA, privacy, `delivery_status`, event count, receive time, and hold state. Transfer status is not a claim about causal observation integrity.
+- `GET /api/v2/traces/:id/events` returns at most 200 events.
+- `POST` and `DELETE /api/v2/traces/:id/hold` require Admin, an exact Origin, CSRF cookie/header agreement, and an audit write.
 
 The former `/api/v1/relays/:id/frames` representation is gone and returns
 `410 Gone`. Viewer, Investigator-only, and Raw-only sessions see raw or legacy

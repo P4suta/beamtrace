@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
+import beamtrace_runtime/id_token
+import beamtrace_runtime/oidc_discovery
 import beamtrace_runtime/rbac
 import beamtrace_runtime/s3_blob
 import gleam/dict.{type Dict}
@@ -48,33 +50,80 @@ pub type ConfigError {
   InvalidInteger(key: String, value: String)
   InvalidValue(key: String)
   JwksReadFailed(path: String, reason: String)
+  InvalidJwks
+  DiscoveryFailed(reason: oidc_discovery.DiscoveryError)
 }
 
 pub fn load_environment() -> Result(Option(Config), ConfigError) {
-  environment_pairs()
-  |> dict.from_list
-  |> load_if_requested_with(read_jwks_file)
+  load_if_requested_with_discovery(
+    environment_pairs() |> dict.from_list,
+    read_jwks_file,
+    oidc_discovery.discover,
+  )
 }
 
 pub fn load_if_requested_with(
   source: Dict(String, String),
   read_jwks: fn(String) -> Result(String, String),
 ) -> Result(Option(Config), ConfigError) {
+  load_if_requested_with_discovery(source, read_jwks, fn(_) {
+    Error(oidc_discovery.TransportFailed)
+  })
+}
+
+pub fn load_if_requested_with_discovery(
+  source: Dict(String, String),
+  read_jwks: fn(String) -> Result(String, String),
+  discover: fn(String) ->
+    Result(oidc_discovery.ProviderMetadata, oidc_discovery.DiscoveryError),
+) -> Result(Option(Config), ConfigError) {
   use Nil <- try_result(reject_forbidden(source))
   case dict.get(source, "team") {
     Error(_) -> Ok(None)
     Ok("false") | Ok("0") | Ok("no") -> Ok(None)
     Ok("true") | Ok("1") | Ok("yes") -> {
-      use path <- try_result(required(source, "oidc_jwks_file"))
-      use jwks <- try_result(case read_jwks(path) {
-        Ok(contents) -> Ok(contents)
-        Error(reason) -> Error(JwksReadFailed(path, reason))
-      })
-      resolve(dict.insert(source, "oidc_jwks_json", jwks))
-      |> map_result(Some)
+      case has_explicit_provider(source) {
+        True -> {
+          case dict.get(source, "oidc_jwks_json") {
+            Ok(_) -> resolve(source) |> map_result(Some)
+            Error(_) -> {
+              use path <- try_result(required(source, "oidc_jwks_file"))
+              use jwks <- try_result(case read_jwks(path) {
+                Ok(contents) -> Ok(contents)
+                Error(reason) -> Error(JwksReadFailed(path, reason))
+              })
+              resolve(dict.insert(source, "oidc_jwks_json", jwks))
+              |> map_result(Some)
+            }
+          }
+        }
+        False -> {
+          use issuer <- try_result(required(source, "oidc_issuer"))
+          use provider <- try_result(case discover(issuer) {
+            Ok(provider) -> Ok(provider)
+            Error(error) -> Error(DiscoveryFailed(error))
+          })
+          source
+          |> dict.insert(
+            "oidc_authorization_endpoint",
+            provider.authorization_endpoint,
+          )
+          |> dict.insert("oidc_token_endpoint", provider.token_endpoint)
+          |> dict.insert("oidc_jwks_json", provider.jwks_json)
+          |> resolve
+          |> map_result(Some)
+        }
+      }
     }
     Ok(_) -> Error(InvalidValue("team"))
   }
+}
+
+fn has_explicit_provider(source: Dict(String, String)) -> Bool {
+  dict.has_key(source, "oidc_authorization_endpoint")
+  || dict.has_key(source, "oidc_token_endpoint")
+  || dict.has_key(source, "oidc_jwks_file")
+  || dict.has_key(source, "oidc_jwks_json")
 }
 
 pub fn resolve(source: Dict(String, String)) -> Result(Config, ConfigError) {
@@ -149,6 +198,10 @@ pub fn resolve(source: Dict(String, String)) -> Result(Config, ConfigError) {
   use blob_backend <- try_result(resolve_blob_backend(source))
   use Nil <- try_result(bounded("oidc_client_id", client_id, 512))
   use Nil <- try_result(bounded("oidc_jwks_json", jwks_json, 1_048_576))
+  use Nil <- try_result(case id_token.validate_signing_jwks(jwks_json) {
+    Ok(Nil) -> Ok(Nil)
+    Error(_) -> Error(InvalidJwks)
+  })
   use Nil <- try_result(bounded("project", project, 256))
   use Nil <- try_result(bounded("environment", environment, 256))
   let data_dir = optional(source, "data_dir", "beamtrace-data")

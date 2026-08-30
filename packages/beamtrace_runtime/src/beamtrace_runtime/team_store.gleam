@@ -2159,6 +2159,6 @@ fn result_try(
   }
 }
 
-fn sql_error(error: sqlight.Error) -> String {
-  string.inspect(error)
+fn sql_error(_error: sqlight.Error) -> String {
+  "database_operation_failed"
 }

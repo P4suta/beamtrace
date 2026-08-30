@@ -79,6 +79,70 @@ pub fn health_is_versioned_json_with_security_headers_test() {
   |> should.equal(Ok("default-src 'none'; frame-ancestors 'none'"))
 }
 
+pub fn openapi_v2_is_served_with_the_typed_error_schema_test() {
+  let result =
+    simulate.request(http.Get, "/api/v2/openapi.json")
+    |> api.handle(api.test_context())
+
+  result.status |> should.equal(200)
+  let body = simulate.read_body(result)
+  body |> string.contains("\"openapi\":\"3.1.0\"") |> should.be_true()
+  body
+  |> string.contains("\"required\":[\"code\",\"message\",\"hint\"]")
+  |> should.be_true()
+  body |> string.contains("\"/sessions/current/cancel\"") |> should.be_true()
+  body |> string.contains("\"/targets/current/mfas\"") |> should.be_true()
+  body |> string.contains("\"/traces/{trace_id}/events\"") |> should.be_true()
+  body |> string.contains("\"/traces/{trace_id}/hold\"") |> should.be_true()
+  body
+  |> string.contains(
+    "\"SessionCookie\":{\"type\":\"apiKey\",\"in\":\"cookie\",\"name\":\"beamtrace_session\"}",
+  )
+  |> should.be_true()
+  body
+  |> string.contains(
+    "\"/compare\":{\"post\":{\"operationId\":\"compare\",\"security\":[{\"SessionCookie\":[]}]",
+  )
+  |> should.be_true()
+  body
+  |> string.contains(
+    "\"/live\":{\"get\":{\"operationId\":\"live\",\"parameters\":[{\"$ref\":\"#/components/parameters/Node\"},{\"$ref\":\"#/components/parameters/EventLimit\"}]",
+  )
+  |> should.be_true()
+  body
+  |> string.contains(
+    "\"/sessions/current/events\":{\"get\":{\"operationId\":\"events\",\"parameters\":[{\"$ref\":\"#/components/parameters/Start\"},{\"$ref\":\"#/components/parameters/EventLimit\"},{\"$ref\":\"#/components/parameters/SearchQuery\"}]",
+  )
+  |> should.be_true()
+}
+
+pub fn v2_errors_have_code_message_and_hint_test() {
+  let result =
+    simulate.request(http.Post, "/api/v2/health")
+    |> api.handle(api.test_context())
+
+  result.status |> should.equal(405)
+  let body = simulate.read_body(result)
+  body |> string.contains("\"error\":{") |> should.be_true()
+  body
+  |> string.contains("\"code\":\"method_not_allowed\"")
+  |> should.be_true()
+  body |> string.contains("\"message\":") |> should.be_true()
+  body |> string.contains("\"hint\":") |> should.be_true()
+}
+
+pub fn v1_responses_announce_v04_removal_test() {
+  let result =
+    simulate.request(http.Get, "/api/v1/health")
+    |> api.handle(api.test_context())
+
+  response.get_header(result, "deprecation") |> should.equal(Ok("true"))
+  response.get_header(result, "link")
+  |> should.equal(Ok("</api/v2>; rel=\"successor-version\""))
+  response.get_header(result, "x-beamtrace-removal-version")
+  |> should.equal(Ok("v0.4"))
+}
+
 pub fn capabilities_explicitly_exclude_mutating_rpc_test() {
   let body =
     simulate.request(http.Get, "/api/v1/capabilities")
@@ -162,6 +226,23 @@ pub fn bootstrap_route_redirects_once_with_strict_httponly_cookie_test() {
   |> api.handle_at(context, 1002)
   |> fn(response) { response.status }
   |> should.equal(403)
+  local_auth.close(store)
+}
+
+pub fn bootstrap_preserves_only_the_bounded_compare_launch_context_test() {
+  let #(store, token) = local_auth.new_at(1000, 60_000)
+  let context =
+    api.Context("0.1.0", api.Local, None, Some(store), None, None, None, None)
+  let response =
+    simulate.request(
+      http.Get,
+      "/bootstrap/" <> token <> "?compare=left.beamtrace%0Aright.beamtrace",
+    )
+    |> api.handle_at(context, 1001)
+
+  response.status |> should.equal(303)
+  response.get_header(response, "location")
+  |> should.equal(Ok("/?compare=left.beamtrace%0Aright.beamtrace"))
   local_auth.close(store)
 }
 
@@ -755,6 +836,31 @@ pub fn team_trace_library_lists_locks_reads_holds_and_audits_test() {
     |> should.be_true()
   })
 
+  let compare_body =
+    "{\"paths\":[\"team:" <> metadata_id <> "\",\"team:" <> raw_id <> "\"]}"
+  let invalid_csrf =
+    team_compare_request(combined, compare_body, "wrong")
+    |> api.handle_at(context, 3003)
+  invalid_csrf.status |> should.equal(403)
+
+  let denied_compare =
+    team_compare_request(viewer, compare_body, viewer.csrf_token)
+    |> api.handle_at(context, 3003)
+  denied_compare.status |> should.equal(403)
+  simulate.read_body(denied_compare)
+  |> string.contains("permission_denied")
+  |> should.be_true()
+
+  let compared =
+    team_compare_request(combined, compare_body, combined.csrf_token)
+    |> api.handle_at(context, 3003)
+  compared.status |> should.equal(200)
+  let compared_body = simulate.read_body(compared)
+  compared_body |> string.contains("\"run_count\":2") |> should.be_true()
+  compared_body
+  |> string.contains("\"baseline\":\"team:" <> metadata_id <> "\"")
+  |> should.be_true()
+
   trace_hold_request(http.Post, raw_id, viewer, viewer.csrf_token)
   |> api.handle_at(context, 3004)
   |> fn(response) { response.status }
@@ -797,6 +903,8 @@ pub fn team_trace_library_lists_locks_reads_holds_and_audits_test() {
     "denied_rbac",
     "denied_rbac",
     "allowed",
+    "allowed",
+    "denied_rbac",
     "allowed",
   ])
   recorded.entries
@@ -1643,6 +1751,25 @@ fn trace_hold_request(
   csrf_token: String,
 ) {
   trace_request(method, "/api/v2/traces/" <> trace_id <> "/hold", session)
+  |> request.set_header("origin", "https://hub.example")
+  |> request.set_header("x-beamtrace-csrf", csrf_token)
+  |> request.set_header(
+    "cookie",
+    "beamtrace_session="
+      <> session.id
+      <> "; beamtrace_csrf="
+      <> session.csrf_token,
+  )
+}
+
+fn team_compare_request(
+  session: team_auth.Session,
+  body: String,
+  csrf_token: String,
+) {
+  trace_request(http.Post, "/api/v2/compare", session)
+  |> simulate.string_body(body)
+  |> request.set_header("content-type", "application/json")
   |> request.set_header("origin", "https://hub.example")
   |> request.set_header("x-beamtrace-csrf", csrf_token)
   |> request.set_header(

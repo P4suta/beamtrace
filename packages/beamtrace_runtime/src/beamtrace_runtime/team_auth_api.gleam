@@ -5,6 +5,7 @@ import beamtrace_runtime/csrf
 import beamtrace_runtime/enrollment_store
 import beamtrace_runtime/id_token
 import beamtrace_runtime/oidc
+import beamtrace_runtime/oidc_discovery
 import beamtrace_runtime/oidc_flow
 import beamtrace_runtime/raw_grant
 import beamtrace_runtime/rbac
@@ -165,13 +166,14 @@ fn exchange_oidc_callback(
     }
     Ok(token) ->
       case
-        id_token.verify(
+        id_token.verify_with_refresh(
           token,
-          provider.jwks_json,
+          oidc_discovery.current_jwks(provider.issuer, provider.jwks_json),
           provider.issuer,
           provider.client_id,
           oidc.nonce(pending.attempt),
           now_ms / 1000,
+          fn() { oidc_discovery.refresh_jwks(provider.issuer) },
         )
       {
         Error(_) -> {

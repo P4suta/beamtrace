@@ -59,31 +59,53 @@ pub fn save_with_clocks(
   events: List(types.TraceEvent),
   clocks: types.ClockCalibration,
 ) -> Result(Nil, StorageError) {
+  save_with_writer(path, manifest, events, clocks, write_container)
+}
+
+/// Save without replacing an existing path. Installation is atomic and the
+/// destination is claimed with an exclusive filesystem operation.
+pub fn save_exclusive_with_clocks(
+  path: String,
+  manifest: codec.Manifest,
+  events: List(types.TraceEvent),
+  clocks: types.ClockCalibration,
+) -> Result(Nil, StorageError) {
+  save_with_writer(path, manifest, events, clocks, write_container_exclusive)
+}
+
+fn save_with_writer(
+  path: String,
+  manifest: codec.Manifest,
+  events: List(types.TraceEvent),
+  clocks: types.ClockCalibration,
+  writer: fn(String, String, List(String), List(String), String) ->
+    Result(Nil, String),
+) -> Result(Nil, StorageError) {
   let manifest =
     codec.Manifest(..manifest, schema_version: codec.schema_version)
   use Nil <- try_result(
     codec.validate_manifest(manifest)
-    |> map_error(fn(error) { CodecError(string.inspect(error)) }),
+    |> map_error(fn(error) { CodecError(codec_error_message(error)) }),
   )
   use Nil <- try_result(validate_typed_events(events))
   use Nil <- try_result(validate_event_nodes(manifest, events))
   use graph <- try_result(
     dag.build(events)
-    |> map_error(fn(error) { InvalidGraph(string.inspect(error)) }),
+    |> map_error(fn(error) { InvalidGraph(dag_error_message(error)) }),
   )
   let chunks = event_chunks(events)
   let graph_segments = make_graph_segments(chunks, graph)
   use Nil <- try_result(validate_typed_graph_segments(graph_segments))
   use Nil <- try_result(
     codec.validate_clocks(clocks)
-    |> map_error(fn(error) { CodecError(string.inspect(error)) }),
+    |> map_error(fn(error) { CodecError(codec_error_message(error)) }),
   )
   use Nil <- try_result(validate_clock_nodes(manifest, clocks))
   let manifest_json = codec.encode_manifest(manifest)
   let event_lines = list.map(events, codec.encode_event)
   let graph_lines = list.map(graph_segments, codec.encode_graph_segment)
   let clocks_json = codec.encode_clocks(clocks)
-  write_container(path, manifest_json, event_lines, graph_lines, clocks_json)
+  writer(path, manifest_json, event_lines, graph_lines, clocks_json)
   |> map_error(classify_error)
 }
 
@@ -94,18 +116,18 @@ pub fn load(path: String) -> Result(Archive, StorageError) {
   let #(manifest_json, event_lines, graph_lines, clocks_json) = payload
   use manifest <- try_result(
     codec.decode_manifest(manifest_json)
-    |> map_error(fn(error) { CodecError(string.inspect(error)) }),
+    |> map_error(fn(error) { CodecError(codec_error_message(error)) }),
   )
   use decoded_events <- try_result(
     decode_events_parallel(event_lines)
-    |> map_error(fn(error) { CodecError(string.inspect(error)) }),
+    |> map_error(fn(error) { CodecError(codec_error_message(error)) }),
   )
   case manifest.schema_version {
     1 -> {
       let events = normalize_legacy_instants(decoded_events)
       use graph <- try_result(
         dag.build(events)
-        |> map_error(fn(error) { InvalidGraph(string.inspect(error)) }),
+        |> map_error(fn(error) { InvalidGraph(dag_error_message(error)) }),
       )
       Ok(Archive(manifest, events, graph, types.empty_calibration()))
     }
@@ -113,14 +135,14 @@ pub fn load(path: String) -> Result(Archive, StorageError) {
       use Nil <- try_result(validate_event_nodes(manifest, decoded_events))
       use clocks <- try_result(
         codec.decode_clocks(clocks_json)
-        |> map_error(fn(error) { CodecError(string.inspect(error)) }),
+        |> map_error(fn(error) { CodecError(codec_error_message(error)) }),
       )
       use graph <- try_result(validate_v2_graph(decoded_events, graph_lines))
       use Nil <- try_result(validate_clock_nodes(manifest, clocks))
       Ok(Archive(manifest, decoded_events, graph, clocks))
     }
     version ->
-      Error(CodecError("UnknownSchemaVersion(" <> int.to_string(version) <> ")"))
+      Error(CodecError("unknown_schema_version:" <> int.to_string(version)))
   }
 }
 
@@ -202,12 +224,12 @@ fn selective_window(
   let #(manifest_json, event_lines, clocks_json, total) = payload
   use manifest <- try_result(
     codec.decode_manifest(manifest_json)
-    |> map_error(fn(error) { CodecError(string.inspect(error)) }),
+    |> map_error(fn(error) { CodecError(codec_error_message(error)) }),
   )
   use events <- try_result(decode_events(event_lines, []))
   use clocks <- try_result(
     codec.decode_clocks(clocks_json)
-    |> map_error(fn(error) { CodecError(string.inspect(error)) }),
+    |> map_error(fn(error) { CodecError(codec_error_message(error)) }),
   )
   use Nil <- try_result(validate_event_nodes(manifest, events))
   use Nil <- try_result(validate_clock_nodes(manifest, clocks))
@@ -340,7 +362,7 @@ fn validate_v2_graph(
 ) -> Result(dag.CausalGraph, StorageError) {
   use graph <- try_result(
     dag.build(events)
-    |> map_error(fn(error) { InvalidGraph(string.inspect(error)) }),
+    |> map_error(fn(error) { InvalidGraph(dag_error_message(error)) }),
   )
   let expected =
     make_graph_segments(event_chunks(events), graph)
@@ -384,7 +406,7 @@ fn validate_event_nodes(
     True -> Ok(Nil)
     False ->
       Error(CodecError(
-        "InvalidField(\"events.node\", \"references a node not declared by the manifest\")",
+        "invalid_field:events.node:references a node not declared by the manifest",
       ))
   }
 }
@@ -445,7 +467,7 @@ fn validate_typed_events(
     [event, ..rest] ->
       case codec.validate_event(event) {
         Ok(Nil) -> validate_typed_events(rest)
-        Error(error) -> Error(CodecError(string.inspect(error)))
+        Error(error) -> Error(CodecError(codec_error_message(error)))
       }
   }
 }
@@ -458,7 +480,7 @@ fn validate_typed_graph_segments(
     [segment, ..rest] ->
       case codec.validate_graph_segment(segment) {
         Ok(Nil) -> validate_typed_graph_segments(rest)
-        Error(error) -> Error(CodecError(string.inspect(error)))
+        Error(error) -> Error(CodecError(codec_error_message(error)))
       }
   }
 }
@@ -472,7 +494,7 @@ fn decode_events(
     [line, ..rest] ->
       case codec.decode_event(line) {
         Ok(event) -> decode_events(rest, [event, ..accumulator])
-        Error(error) -> Error(CodecError(string.inspect(error)))
+        Error(error) -> Error(CodecError(codec_error_message(error)))
       }
   }
 }
@@ -486,8 +508,26 @@ fn decode_graph_segments(
     [line, ..rest] ->
       case codec.decode_graph_segment(line) {
         Ok(segment) -> decode_graph_segments(rest, [segment, ..accumulator])
-        Error(error) -> Error(CodecError(string.inspect(error)))
+        Error(error) -> Error(CodecError(codec_error_message(error)))
       }
+  }
+}
+
+fn codec_error_message(error: codec.CodecError) -> String {
+  case error {
+    codec.InvalidJson(_) -> "invalid_json"
+    codec.UnknownSchemaVersion(version) ->
+      "unknown_schema_version:" <> int.to_string(version)
+    codec.NonCanonicalJson -> "non_canonical_json"
+    codec.InvalidField(field, reason) ->
+      "invalid_field:" <> field <> ":" <> reason
+  }
+}
+
+fn dag_error_message(error: dag.DagError) -> String {
+  case error {
+    dag.DuplicateEventId(id) -> "duplicate_event_id:" <> id
+    dag.CycleDetected -> "cycle_detected"
   }
 }
 
@@ -534,6 +574,15 @@ fn write_container(
   event_lines: List(String),
   graph_segments: List(String),
   clocks_json: String,
+) -> Result(Nil, String)
+
+@external(erlang, "beamtrace_storage_ffi", "write_container_exclusive")
+fn write_container_exclusive(
+  path: String,
+  manifest: String,
+  events: List(String),
+  graph_segments: List(String),
+  clocks: String,
 ) -> Result(Nil, String)
 
 @external(erlang, "beamtrace_storage_ffi", "read_container")

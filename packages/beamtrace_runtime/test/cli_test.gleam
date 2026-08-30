@@ -1,8 +1,56 @@
 import beamtrace/types
 import beamtrace_runtime/cli
+import beamtrace_runtime/cli_spec
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import gleeunit/should
+
+pub fn every_help_form_uses_the_declarative_command_spec_test() {
+  cli.parse([]) |> should.equal(Ok(cli.Guide))
+  cli.parse(["help"]) |> should.equal(Ok(cli.Help))
+  cli.parse(["help", "--help"])
+  |> should.equal(Ok(cli.CommandHelp("help")))
+  cli.parse(["help", "version"])
+  |> should.equal(Ok(cli.CommandHelp("version")))
+  cli.parse(["version", "--help"])
+  |> should.equal(Ok(cli.CommandHelp("version")))
+  cli.parse(["config", "check", "--help"])
+  |> should.equal(Ok(cli.CommandHelp("config")))
+
+  let assert Some(capture_help) = cli_spec.command_help("capture")
+  capture_help
+  |> string.split(on: "--cookie-file PATH")
+  |> list.length
+  |> should.equal(2)
+}
+
+pub fn force_requires_an_explicit_archive_destination_test() {
+  let assert Error(capture_error) =
+    cli.parse([
+      "capture",
+      "app@host",
+      "--trigger",
+      "app:run/0",
+      "--acknowledge-seq-trace-reset",
+      "--force",
+    ])
+  capture_error.message
+  |> should.equal("--force requires an explicit --out path")
+
+  let assert Ok(cli.Force(cli.Record(..))) =
+    cli.parse([
+      "record",
+      "--trigger",
+      "app:run/0",
+      "--out",
+      "explicit.beamtrace",
+      "--force",
+      "--",
+      "gleam",
+      "run",
+    ])
+}
 
 pub fn capture_command_contract_test() {
   cli.parse([
@@ -153,6 +201,77 @@ pub fn demo_parses_ui_output_and_ephemeral_port_test() {
     "0",
   ])
   |> should.equal(Ok(cli.Demo(cli.DemoTui, "custom.beamtrace", 0)))
+}
+
+pub fn no_open_is_an_order_independent_web_modifier_test() {
+  let assert Ok(cli.RecordUi(_, cli.RecordWebNoOpen)) =
+    cli.parse([
+      "record",
+      "--trigger",
+      "app:run/0",
+      "--no-open",
+      "--web",
+      "--",
+      "gleam",
+      "run",
+    ])
+  let assert Ok(cli.RecordUi(_, cli.RecordWebNoOpen)) =
+    cli.parse([
+      "record",
+      "--trigger",
+      "app:run/0",
+      "--web",
+      "--no-open",
+      "--",
+      "gleam",
+      "run",
+    ])
+
+  cli.parse([
+    "attach",
+    "app@host",
+    "--no-open",
+    "--web",
+    "--acknowledge-seq-trace-reset",
+  ])
+  |> should.equal(Ok(cli.Attach("app@host", cli.WebNoOpen, None, 0)))
+  cli.parse(["open", "trace.beamtrace", "--no-open", "--web"])
+  |> should.equal(Ok(cli.Open("trace.beamtrace", cli.WebNoOpen, 0)))
+  cli.parse(["demo", "--no-open", "--web"])
+  |> should.equal(Ok(cli.Demo(cli.DemoWebNoOpen, "", 0)))
+}
+
+pub fn no_open_rejects_later_non_web_display_options_test() {
+  let record =
+    cli.parse([
+      "record",
+      "--trigger",
+      "app:run/0",
+      "--no-open",
+      "--tui",
+      "--",
+      "gleam",
+      "run",
+    ])
+  let assert Error(record_error) = record
+  record_error.message |> string.contains("--no-open") |> should.be_true()
+
+  [
+    cli.parse([
+      "attach",
+      "app@host",
+      "--no-open",
+      "--tui",
+      "--acknowledge-seq-trace-reset",
+    ]),
+    cli.parse(["open", "trace.beamtrace", "--no-open", "--tui"]),
+    cli.parse(["demo", "--no-open", "--tui"]),
+    cli.parse(["demo", "--no-open", "--no-ui"]),
+  ]
+  |> list.each(fn(result) {
+    let assert Error(error) = result
+    error.message |> string.contains("--no-open") |> should.be_true()
+  })
 }
 
 pub fn team_tui_accepts_only_a_session_cookie_file_not_a_cookie_value_test() {
@@ -360,7 +479,7 @@ pub fn attach_requires_explicit_seq_trace_reset_acknowledgement_test() {
     "app@host",
     "--acknowledge-seq-trace-reset",
   ])
-  |> should.equal(Ok(cli.Attach("app@host", cli.Web, None, 4040)))
+  |> should.equal(Ok(cli.Attach("app@host", cli.Web, None, 0)))
 }
 
 pub fn local_web_commands_accept_ephemeral_or_explicit_ports_test() {
@@ -409,4 +528,178 @@ pub fn malformed_where_aql_is_rejected_during_cli_parsing_test() {
     ])
   error.exit_code |> should.equal(2)
   error.message |> should.equal("invalid AQL at offset 14: expected value")
+}
+
+pub fn no_arguments_is_a_successful_short_guide_test() {
+  cli.parse([]) |> should.equal(Ok(cli.Guide))
+  cli_spec.short_guide()
+  |> string.contains("beamtrace demo")
+  |> should.be_true()
+}
+
+pub fn command_help_and_every_help_alias_come_from_the_spec_test() {
+  cli.parse(["help", "capture"])
+  |> should.equal(Ok(cli.CommandHelp("capture")))
+  cli.parse(["capture", "--help"])
+  |> should.equal(Ok(cli.CommandHelp("capture")))
+  let assert Some(help) = cli_spec.command_help("capture")
+  help |> string.contains("Defaults:") |> should.be_true()
+  help |> string.contains("Examples:") |> should.be_true()
+  help |> string.contains("--force") |> should.be_true()
+}
+
+pub fn typo_returns_nearest_command_and_correction_example_test() {
+  let assert Error(error) = cli.parse(["comprae"])
+  error.message
+  |> string.contains("Did you mean 'compare'?")
+  |> should.be_true()
+  error.message
+  |> string.contains("beamtrace compare --help")
+  |> should.be_true()
+}
+
+pub fn completion_is_generated_for_all_supported_shells_test() {
+  ["bash", "zsh", "fish", "powershell"]
+  |> list.each(fn(shell) {
+    cli.parse(["completion", shell])
+    |> should.equal(Ok(cli.Completion(shell)))
+    let assert Some(script) = cli_spec.completion(shell)
+    script |> string.contains("beamtrace") |> should.be_true()
+    script |> string.contains("capture") |> should.be_true()
+  })
+
+  let assert Some(zsh) = cli_spec.completion("zsh")
+  zsh
+  |> string.contains(
+    "compare) _arguments '--web' '--tui' '--json' '--port' '--no-open';;",
+  )
+  |> should.be_true()
+}
+
+pub fn capture_and_record_generate_output_names_when_out_is_omitted_test() {
+  cli.parse([
+    "capture",
+    "app@host",
+    "--trigger",
+    "m:f/0",
+    "--acknowledge-seq-trace-reset",
+  ])
+  |> should.equal(
+    Ok(cli.Capture(
+      "app@host",
+      cli.Mfa("m", "f", 0),
+      None,
+      "",
+      None,
+      1,
+      types.Generic,
+    )),
+  )
+
+  let assert Ok(cli.Record(out: record_out, ..)) =
+    cli.parse(["record", "--trigger", "m:f/0", "--", "gleam", "run"])
+  record_out |> should.equal("")
+}
+
+pub fn force_json_record_modes_and_multi_compare_are_explicit_test() {
+  let assert Ok(cli.Force(cli.Capture(out: "capture.beamtrace", ..))) =
+    cli.parse([
+      "capture",
+      "app@host",
+      "--trigger",
+      "m:f/0",
+      "--out",
+      "capture.beamtrace",
+      "--force",
+      "--acknowledge-seq-trace-reset",
+    ])
+
+  let assert Ok(cli.Json(cli.CompareMany(paths, cli.CompareTerminal, 0))) =
+    cli.parse([
+      "compare",
+      "one.beamtrace",
+      "two.beamtrace",
+      "three.beamtrace",
+      "--json",
+    ])
+  list.length(paths) |> should.equal(3)
+
+  let assert Ok(cli.RecordUi(_, cli.RecordNoUi)) =
+    cli.parse([
+      "record",
+      "--trigger",
+      "m:f/0",
+      "--no-ui",
+      "--",
+      "gleam",
+      "run",
+    ])
+
+  let assert Error(compare_mode_error) =
+    cli.parse([
+      "compare",
+      "one.beamtrace",
+      "two.beamtrace",
+      "--tui",
+      "--json",
+    ])
+  compare_mode_error.message
+  |> should.equal(
+    "--json is not available for interactive or long-running commands",
+  )
+}
+
+pub fn seq_trace_confirmation_is_requested_only_for_unacknowledged_execution_test() {
+  cli.requires_seq_trace_ack(["capture", "app@host", "--trigger", "m:f/0"])
+  |> should.be_true()
+  cli.requires_seq_trace_ack(["capture", "--help"])
+  |> should.be_false()
+  cli.requires_seq_trace_ack([
+    "capture",
+    "app@host",
+    "--acknowledge-seq-trace-reset",
+  ])
+  |> should.be_false()
+  cli.requires_seq_trace_ack([
+    "--force",
+    "capture",
+    "app@host",
+    "--trigger",
+    "m:f/0",
+  ])
+  |> should.be_true()
+  cli.requires_seq_trace_ack([
+    "--json",
+    "relay",
+    "wss://hub.example/relay",
+    "token",
+    "--node",
+    "app@host",
+  ])
+  |> should.be_true()
+}
+
+pub fn compare_rejects_port_and_tui_in_either_order_test() {
+  [
+    [
+      "compare",
+      "one.beamtrace",
+      "two.beamtrace",
+      "--port",
+      "0",
+      "--tui",
+    ],
+    [
+      "compare",
+      "one.beamtrace",
+      "two.beamtrace",
+      "--tui",
+      "--port",
+      "4040",
+    ],
+  ]
+  |> list.each(fn(arguments) {
+    let assert Error(error) = cli.parse(arguments)
+    error.message |> should.equal("--port cannot be used with --tui")
+  })
 }

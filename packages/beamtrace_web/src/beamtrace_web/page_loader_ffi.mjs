@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+import { apiError } from "./api_error_ffi.mjs";
+
 export function pageUrl(start, limit, search) {
   const query = new URLSearchParams({
     start: String(start),
@@ -20,7 +22,7 @@ export function fetchPage(start, limit, search, onSuccess, onError) {
     .then(async (response) => {
       const body = await response.text();
       if (!response.ok) {
-        throw new Error(`event page request failed (${response.status})`);
+        throw new Error(apiError(body, response.status, "event page request failed"));
       }
       return body;
     })

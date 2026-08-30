@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+import { apiError } from "./api_error_ffi.mjs";
+
 export function fetchLive(onSuccess, onError) {
   fetch("/api/v2/live?limit=200", {
     method: "GET",
@@ -9,14 +11,7 @@ export function fetchLive(onSuccess, onError) {
     .then(async (response) => {
       const body = await response.text();
       if (!response.ok) {
-        let reason = `live request failed (${response.status})`;
-        try {
-          const parsed = JSON.parse(body);
-          if (typeof parsed.error === "string") reason = parsed.error;
-        } catch {
-          // Keep the bounded HTTP status message for non-JSON proxy errors.
-        }
-        throw new Error(reason);
+        throw new Error(apiError(body, response.status, "live request failed"));
       }
       return body;
     })

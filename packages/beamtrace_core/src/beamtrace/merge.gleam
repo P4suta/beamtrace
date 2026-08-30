@@ -1,13 +1,22 @@
+//// Merge distributed partial orders and calibrated time intervals.
+////
+//// Merge retains unavailable time, uncertainty intervals, and boundaries;
+//// it never converts offsets into an unqualified global clock. Invalid bounds
+//// return `Error`. Ordering is O((n + e) log n) and deterministic on Erlang
+//// and JavaScript.
+
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace/types
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 
+/// An event paired with exact, estimated, or unavailable display time.
 pub type PositionedEvent {
   PositionedEvent(event: types.TraceEvent, time: types.TimeEstimate)
 }
 
+/// Calibrated events plus integrity issues discovered during merge.
 pub type MergeResult {
   MergeResult(events: List(PositionedEvent), issues: List(types.CaptureIssue))
 }
@@ -31,6 +40,8 @@ pub fn merge(
   MergeResult(positioned, missing_issues)
 }
 
+/// Project one node-local instant through before/after clock samples in
+/// O(nodes). Missing probes yield `TimeUnavailable`; intervals are preserved.
 pub fn calibrated_time(
   event: types.TraceEvent,
   calibration: types.ClockCalibration,
@@ -126,6 +137,8 @@ fn interval_duration(
   }
 }
 
+/// Return inclusive lower/upper bounds in O(1), or the stated reason when time
+/// is unavailable.
 pub fn bounds(time: types.TimeEstimate) -> Result(#(Int, Int), String) {
   case estimate_bounds(time) {
     Ok(#(_, lower, upper)) -> Ok(#(lower, upper))
@@ -133,6 +146,8 @@ pub fn bounds(time: types.TimeEstimate) -> Result(#(Int, Int), String) {
   }
 }
 
+/// Prove strict temporal order only when the two uncertainty intervals do not
+/// overlap. Unavailable or overlapping time returns false in O(1).
 pub fn definitely_before(
   left: PositionedEvent,
   right: PositionedEvent,
@@ -149,7 +164,11 @@ fn estimate_bounds(
 ) -> Result(#(Int, Int, Int), String) {
   case estimate {
     types.ExactTime(value) -> Ok(#(value, value, value))
-    types.EstimatedTime(value, lower, upper) -> Ok(#(value, lower, upper))
+    types.EstimatedTime(value, lower, upper) ->
+      case lower <= upper {
+        True -> Ok(#(value, lower, upper))
+        False -> Error("estimated time lower bound exceeds upper bound")
+      }
     types.TimeUnavailable(reason) -> Error(reason)
   }
 }

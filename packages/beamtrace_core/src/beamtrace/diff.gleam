@@ -1,3 +1,10 @@
+//// PID-independent causal alignment and reusable checked preparation.
+////
+//// `prepare` and `compare_checked` return DAG failures; compatibility
+//// `compare` remains total for existing callers. Preparation is O((n + e)
+//// log n), caches bounded fingerprint rounds, and can be reused by
+//// `compare_prepared`. Results are deterministic on Erlang and JavaScript.
+
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace/dag
 import beamtrace/types
@@ -12,6 +19,7 @@ const maximum_myers_cells = 250_000
 
 const fingerprint_rounds = 4
 
+/// One aligned, added, removed, changed, or explicitly ambiguous region.
 pub type DiffItem {
   Matched(left_id: String, right_id: String, latency_delta: types.TimeEstimate)
   Added(right_id: String)
@@ -24,6 +32,7 @@ pub type DiffItem {
   )
 }
 
+/// The first divergent pair and its available causal predecessor path.
 pub type Divergence {
   Divergence(
     left_id: Option(String),
@@ -32,6 +41,7 @@ pub type Divergence {
   )
 }
 
+/// A complete comparison with aggregate counts and first divergence.
 pub type DiffReport {
   DiffReport(
     items: List(DiffItem),
@@ -108,21 +118,79 @@ pub fn compare(
   left: List(types.TraceEvent),
   right: List(types.TraceEvent),
 ) -> DiffReport {
-  compare_prepared(prepare(left), prepare(right))
+  case compare_checked(left, right) {
+    Ok(report) -> report
+    // `compare` predates checked DAG construction. Keep its permissive
+    // behaviour for compatibility while new integrations use
+    // `compare_checked` (or the top-level `beamtrace` facade).
+    Error(_) ->
+      compare_prepared(prepare_unchecked(left), prepare_unchecked(right))
+  }
 }
 
-/// Analyze a trace once for reuse across multiple comparisons.
-pub fn prepare(events: List(types.TraceEvent)) -> PreparedTrace {
+/// Compare two event lists after validating both causal DAGs.
+///
+/// The first DAG error is returned instead of silently comparing an invalid
+/// trace. Construction is O((n + e) log n); comparison retains the bounded
+/// alignment guarantees of `compare`.
+pub fn compare_checked(
+  left: List(types.TraceEvent),
+  right: List(types.TraceEvent),
+) -> Result(DiffReport, dag.DagError) {
+  case prepare(left) {
+    Error(error) -> Error(error)
+    Ok(left) ->
+      case prepare(right) {
+        Error(error) -> Error(error)
+        Ok(right) -> Ok(compare_prepared(left, right))
+      }
+  }
+}
+
+/// Analyze and validate a trace once for reuse across comparisons.
+///
+/// Duplicate event identifiers and causal cycles are returned as `DagError`.
+/// Successful construction is O((n + e) log n) and the opaque result may be
+/// reused by `compare_prepared` without rebuilding the DAG.
+pub fn prepare(
+  events: List(types.TraceEvent),
+) -> Result(PreparedTrace, dag.DagError) {
+  case prepare_with_graph(events) {
+    Ok(#(_, prepared)) -> Ok(prepared)
+    Error(error) -> Error(error)
+  }
+}
+
+/// Package-internal bridge used by the top-level facade so the public graph
+/// and comparison preparation share one validated DAG construction.
+@internal
+pub fn prepare_with_graph(
+  events: List(types.TraceEvent),
+) -> Result(#(dag.CausalGraph, PreparedTrace), dag.DagError) {
+  case dag.build_analysis(events) {
+    Error(error) -> Error(error)
+    Ok(#(graph, incoming, outgoing)) ->
+      Ok(#(graph, prepare_from_analysis(events, incoming, outgoing)))
+  }
+}
+
+fn prepare_unchecked(events: List(types.TraceEvent)) -> PreparedTrace {
+  case prepare(events) {
+    Ok(prepared) -> prepared
+    Error(_) -> prepare_from_analysis(events, dict.new(), dict.new())
+  }
+}
+
+fn prepare_from_analysis(
+  events: List(types.TraceEvent),
+  incoming: Dict(String, List(String)),
+  outgoing: Dict(String, List(String)),
+) -> PreparedTrace {
   let roots = root_signatures(events)
   let #(base, signatures) = base_analysis(events, roots)
-  let #(fingerprints, causal_incoming) = case dag.build_analysis(events) {
-    Error(_) -> #(base, dict.new())
-    Ok(#(_, incoming, outgoing)) -> {
-      let fingerprints =
-        refine(base, incoming, outgoing, dict.keys(base), fingerprint_rounds)
-      #(fingerprints, compact_predecessors(incoming))
-    }
-  }
+  let fingerprints =
+    refine(base, incoming, outgoing, dict.keys(base), fingerprint_rounds)
+  let causal_incoming = compact_predecessors(incoming)
   let indexed = index_events(events, signatures, fingerprints, 0, [])
   delete_signature_cache(signatures)
   PreparedTrace(
@@ -971,6 +1039,8 @@ fn root_signatures(events: List(types.TraceEvent)) -> Dict(String, String) {
   })
 }
 
+/// Produce the PID- and clock-origin-independent event alignment key in O(event
+/// metadata size). It is deterministic and cannot fail on either target.
 pub fn signature(event: types.TraceEvent) -> String {
   actor_signature(event.process) <> "|" <> kind_signature(event.kind)
 }

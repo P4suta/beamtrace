@@ -19,9 +19,20 @@ function gleam {
         Write-Output 'Gleam compilation failed'
         return
     }
+    if ($script:mode -eq 'application-network-words') {
+        $global:LASTEXITCODE = 3
+        Write-Output 'Application failed: FailedToConnect(Posix("closed"), Posix("nxdomain"))'
+        return
+    }
 
     $global:LASTEXITCODE = 75
-    Write-Output 'A HTTP request failed: error sending request for url'
+    if ($script:attempts -eq 1) {
+        Write-Output 'A HTTP request failed: error sending request for url'
+    }
+    else {
+        Write-Output 'error: Failed to download Bun'
+        Write-Output 'FailedToConnect(Posix("closed"), Posix("nxdomain"))'
+    }
 }
 
 $result = Invoke-GleamWithNetworkRetry `
@@ -44,6 +55,16 @@ $result = Invoke-GleamWithNetworkRetry `
     -RetryDelayMilliseconds 0
 if ($result.ExitCode -ne 2 -or $script:attempts -ne 1) {
     throw 'A non-network Gleam failure was retried or its exit code was lost.'
+}
+
+$script:attempts = 0
+$script:mode = 'application-network-words'
+$result = Invoke-GleamWithNetworkRetry `
+    -Arguments @('run') `
+    -MaximumAttempts 3 `
+    -RetryDelayMilliseconds 0
+if ($result.ExitCode -ne 3 -or $script:attempts -ne 1) {
+    throw 'Application output containing network-like words was retried.'
 }
 
 $script:attempts = 0

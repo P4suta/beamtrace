@@ -42,7 +42,7 @@ try {
         -Destination (Join-Path $consumer 'src/beamtrace_release_consumer.gleam')
     Push-Location $consumer
     try {
-        $expected = 'codec=round-trip dag_boundaries=1 diagnostic_messages=1'
+        $expected = 'facade=checked dag_boundaries=1 diagnostic_messages=1 diff_changed=0 mfa=shop:checkout/1'
         $erlangRun = Invoke-GleamWithNetworkRetry -Arguments @('run', '--target', 'erlang')
         $erlangOutput = $erlangRun.Output.Trim()
         if ($erlangRun.ExitCode -ne 0 -or -not $erlangOutput.EndsWith($expected)) {

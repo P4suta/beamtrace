@@ -1,3 +1,10 @@
+//// Convert raw terms into metadata-safe views under explicit privacy policy.
+////
+//// Shape traversal obeys depth and binary budgets and never
+//// exposes scalar or binary values in metadata mode. Runtime is linear in the
+//// caller-provided finite term shape. Rendering and fingerprints are deterministic
+//// across Erlang and JavaScript.
+
 import beamtrace/types
 import gleam/float
 import gleam/int

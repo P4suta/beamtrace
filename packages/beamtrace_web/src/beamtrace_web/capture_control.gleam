@@ -12,8 +12,14 @@ type StatusPayload {
     event_count: Int,
     outcome: String,
     delivery_verified: Bool,
+    issue_count: Int,
+    issue_summary: String,
     reason: String,
   )
+}
+
+type IssuePayload {
+  IssuePayload(kind: String, node: String)
 }
 
 type MfaCandidatePayload {
@@ -126,7 +132,18 @@ pub fn decode_status(source: String) -> Result(workspace.CapturePhase, String) {
             payload.outcome
               <> case payload.delivery_verified {
               True -> " · delivery verified"
-              False -> " · integrity issues present"
+              False ->
+                case payload.issue_count {
+                  0 -> " · delivery unverified"
+                  count ->
+                    " · integrity issues present ("
+                    <> int.to_string(count)
+                    <> ")"
+                    <> case payload.issue_summary {
+                      "" -> ""
+                      summary -> ": " <> summary
+                    }
+                }
             },
           ))
         "failed" -> Ok(workspace.Failed(payload.reason))
@@ -144,12 +161,24 @@ fn status_decoder() -> decode.Decoder(StatusPayload) {
     False,
     decode.bool,
   )
+  use issue_count <- decode.optional_field(
+    "outcome",
+    0,
+    outcome_issue_count_decoder(),
+  )
+  use issue_summary <- decode.optional_field(
+    "outcome",
+    "",
+    outcome_issue_summary_decoder(),
+  )
   use reason <- decode.optional_field("reason", "", decode.string)
   decode.success(StatusPayload(
     status,
     event_count,
     outcome,
     delivery_verified,
+    issue_count,
+    issue_summary,
     reason,
   ))
 }
@@ -157,6 +186,44 @@ fn status_decoder() -> decode.Decoder(StatusPayload) {
 fn outcome_decoder() -> decode.Decoder(String) {
   use end <- decode.field("end", outcome_end_decoder())
   decode.success(end)
+}
+
+fn outcome_issue_count_decoder() -> decode.Decoder(Int) {
+  use issues <- decode.field("issues", decode.list(decode.dynamic))
+  decode.success(list.length(issues))
+}
+
+fn outcome_issue_summary_decoder() -> decode.Decoder(String) {
+  use issues <- decode.field("issues", decode.list(issue_decoder()))
+  issues
+  |> list.take(3)
+  |> list.map(issue_label)
+  |> list.intersperse("; ")
+  |> list.fold("", fn(summary, part) { summary <> part })
+  |> decode.success
+}
+
+fn issue_decoder() -> decode.Decoder(IssuePayload) {
+  use kind <- decode.field("kind", decode.string)
+  use node <- decode.optional_field("node", "", decode.string)
+  decode.success(IssuePayload(kind, node))
+}
+
+fn issue_label(issue: IssuePayload) -> String {
+  let label = case issue.kind {
+    "dropped_events" -> "dropped events"
+    "missing_node" -> "missing final node receipt"
+    "batch_sequence_gap" -> "batch sequence gap"
+    "duplicate_batch" -> "duplicate batch"
+    "receipt_mismatch" -> "receipt mismatch"
+    "drain_timeout" -> "drain timeout"
+    "legacy_unverified" -> "legacy archive is unverified"
+    _ -> "unrecognized integrity issue"
+  }
+  case issue.node {
+    "" -> label
+    node -> label <> " on " <> node
+  }
 }
 
 fn outcome_end_decoder() -> decode.Decoder(String) {

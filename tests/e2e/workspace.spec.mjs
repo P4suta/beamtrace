@@ -61,7 +61,7 @@ test("million-event workspace stays windowed and supports its keyboard path", as
   await expect(page.getByText("1 visible / 1 total")).toBeVisible();
   await expect(page.locator("tbody tr")).toHaveCount(1);
   await page.getByRole("button", { name: "needle-1" }).click();
-  await expect(page.getByText("Event ID").locator(".." )).toContainText("needle-1");
+  await expect(eventInspector).toContainText("needle-1");
 });
 
 test("Compare aligns multiple traces and renders latency and occurrence statistics", async ({ page }) => {
@@ -105,20 +105,68 @@ test("Compare aligns multiple traces and renders latency and occurrence statisti
   ]);
 });
 
-test("workspace has no serious accessibility violations", async ({ page }) => {
+test("CLI bootstrap compare input renders immediately and leaves no trace paths in history", async ({ page }) => {
+  let submittedPaths = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/v2/compare" && request.method() === "POST") {
+      submittedPaths = request.postDataJSON().paths;
+    }
+  });
+
+  await page.goto("/?compare=baseline.beamtrace%0Acandidate.beamtrace");
+  await expect(page.locator("main")).toHaveAttribute("data-mode", "compare");
+  await expect(page.getByRole("table", { name: "Accessible trace alignment table" }))
+    .toContainText("candidate.beamtrace");
+  expect(submittedPaths).toEqual(["baseline.beamtrace", "candidate.beamtrace"]);
+  expect(new URL(page.url()).searchParams.has("compare")).toBe(false);
+});
+
+test("theme and mobile navigation retain every workspace function", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+
+  const theme = page.getByRole("button", { name: "Change color theme" });
+  await expect(theme).toContainText("System");
+  await theme.click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+  await theme.click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await theme.click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "system");
+
+  const mobileModes = page.getByRole("navigation", { name: "Mobile workspace mode" });
+  await expect(mobileModes).toBeVisible();
+  await mobileModes.getByRole("button", { name: "Compare" }).click();
+  await expect(page.locator("main")).toHaveAttribute("data-mode", "compare");
+
+  await page.getByText("Session navigator", { exact: true }).last().click();
+  await expect(page.locator(".mobile-session-drawer")).toContainText("Attached BEAM session");
+  await page.getByText("Inspector", { exact: true }).last().click();
+  await expect(page.locator(".mobile-inspector-drawer")).toContainText("Compare inspector");
+
+  const results = await new AxeBuilder({ page }).analyze();
+  expect(results.violations).toEqual([]);
+});
+
+test("workspace has no accessibility violations", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "dark" });
   await page.goto("/");
   await expect(page.locator("tbody tr")).toHaveCount(80);
   const results = await new AxeBuilder({ page }).analyze();
-  const serious = results.violations.filter(({ impact }) =>
-    impact === "serious" || impact === "critical"
-  );
-  expect(serious).toEqual([]);
+  expect(results.violations).toEqual([]);
 });
 
 test("Team trace library keeps raw content locked and pages permitted events", async ({ page }) => {
   const eventRequests = [];
   let holdRequest;
+  let submittedPaths = [];
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === "/api/v2/compare" && request.method() === "POST") {
+      submittedPaths = request.postDataJSON().paths;
+    }
+  });
   const teamEvent = {
     observation: {
       schema_version: 2,
@@ -158,6 +206,17 @@ test("Team trace library keeps raw content locked and pages permitted events", a
       received_at_ms: 1_774_000_000_001,
       legal_hold: false,
       locked: true,
+    },
+    {
+      id: "trace-metadata-2",
+      node: "shipping@team",
+      mfa: { module: "shipping", function: "dispatch", arity: 1 },
+      privacy: "metadata",
+      delivery_status: "delivered",
+      event_count: 1,
+      received_at_ms: 1_774_000_000_002,
+      legal_hold: false,
+      locked: false,
     },
   ];
 
@@ -204,23 +263,37 @@ test("Team trace library keeps raw content locked and pages permitted events", a
   await expect(table).toContainText("payments@team · payments:charge/2");
   await expect(table.getByLabel("Content locked")).toBeVisible();
 
-  await page.getByRole("button", { name: "trace-raw-locked" }).click();
+  await page.getByRole("button", { name: "trace-raw-locked", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Trace contents locked" })).toBeVisible();
   expect(eventRequests).toEqual([]);
 
-  await page.getByRole("button", { name: "trace-metadata" }).click();
+  await page.getByRole("button", { name: "trace-metadata", exact: true }).click();
   await expect(page.getByRole("button", { name: "team-event-7" })).toBeVisible();
   expect(eventRequests).toEqual(["/api/v2/traces/trace-metadata/events"]);
 
   await page.getByRole("button", { name: "Place legal hold" }).click();
-  await expect(page.getByText("enabled", { exact: true })).toBeVisible();
+  await expect(
+    page
+      .getByRole("complementary", { name: "Team trace inspector" })
+      .getByText("enabled", { exact: true }),
+  ).toBeVisible();
   expect(holdRequest).toEqual({ accept: "application/json", csrf: "e2e-token" });
 
   const results = await new AxeBuilder({ page }).analyze();
-  const serious = results.violations.filter(({ impact }) =>
-    impact === "serious" || impact === "critical"
-  );
-  expect(serious).toEqual([]);
+  expect(results.violations).toEqual([]);
+
+  await page.getByRole("button", {
+    name: "Select trace-metadata for comparison",
+  }).click();
+  await page.getByRole("button", {
+    name: "Select trace-metadata-2 for comparison",
+  }).click();
+  await expect(page.getByText("2 of 20 selected for comparison")).toBeVisible();
+  await page.getByRole("button", { name: "Compare selected traces" }).click();
+  await expect(page.locator("main")).toHaveAttribute("data-mode", "compare");
+  await expect(page.getByRole("table", { name: "Accessible trace alignment table" }))
+    .toContainText("team:trace-metadata-2");
+  expect(submittedPaths).toEqual(["team:trace-metadata", "team:trace-metadata-2"]);
 });
 
 test("Live polls bounded process metadata and exposes evidence in DOM", async ({ page }) => {
@@ -280,6 +353,7 @@ test("attached workspace arms, polls, loads, and saves a real capture", async ({
     "value",
     "shop:checkout/1",
   );
+  await page.getByText("Advanced", { exact: true }).click();
   await page.getByRole("textbox", { name: "AQL condition" }).fill(
     "arg.0.tag == order",
   );
@@ -287,17 +361,19 @@ test("attached workspace arms, polls, loads, and saves a real capture", async ({
     "gen-server",
   );
   await page.getByRole("spinbutton", { name: "Max roots" }).fill("3");
+  const armed = page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.pathname === "/api/v2/sessions/current/arm"
+      && response.request().method() === "POST";
+  });
   await page.getByRole("button", { name: "Arm capture" }).click();
-
-  await expect(page.getByText("Armed", { exact: true })).toBeVisible();
+  const armedPayload = await (await armed).json();
+  expect(armedPayload).toMatchObject({ status: "armed" });
   await expect(
-    page
-      .getByLabel("Capture controls")
-      .getByText(
-        "Sealed · 1 events · sealed after 250ms quiet period · delivery verified",
-        { exact: true },
-      ),
-  ).toBeVisible();
+    page.getByLabel("Capture controls").locator(".capture-status"),
+  ).toContainText(
+    "Sealed · 1 events · sealed after 250ms quiet period · delivery verified",
+  );
   await expect(page.getByRole("button", { name: "captured-root" })).toBeVisible();
 
   await page.getByRole("textbox", { name: "Save path" }).fill("dogfood.beamtrace");

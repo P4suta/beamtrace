@@ -21,7 +21,8 @@ pub fn tui_driver_arms_polls_and_saves_the_owned_capture_test() {
 
   driver.attach("other@host") |> should.equal(Error("target_not_owned"))
   driver.attach("fixture@host") |> should.equal(Ok(Nil))
-  driver.arm("invalid") |> should.equal(Error("invalid MFA 'invalid'"))
+  driver.arm("invalid")
+  |> should.equal(Error("invalid MFA 'invalid': expected Module:function/arity"))
   driver.arm("shop:checkout/1") |> should.equal(Ok(Nil))
   capture_session.await(store, 1000) |> should.equal(Ok(expected))
 

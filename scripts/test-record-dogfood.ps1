@@ -5,6 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'invoke-gleam-with-network-retry.ps1')
 $repoRoot = [IO.Path]::GetFullPath((Split-Path -Parent $PSScriptRoot))
 $buildRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot '.build'))
 $workRoot = [IO.Path]::GetFullPath((Join-Path $buildRoot "record-dogfood-$PID"))
@@ -167,6 +168,18 @@ try {
             & $gleamCommand clean
             if ($LASTEXITCODE -ne 0) {
                 throw "Could not clean the Gleam wrapper fixture, exit code $LASTEXITCODE."
+            }
+
+            # The packaged launcher test deliberately starts from a clean build,
+            # so resolve and download the locked graph before `record` starts the
+            # application command. This keeps the capture itself single-shot while
+            # bounding transient registry failures at the network boundary.
+            $download = Invoke-GleamWithNetworkRetry -Arguments @('deps', 'download')
+            if ($download.ExitCode -ne 0) {
+                if (-not [string]::IsNullOrWhiteSpace($download.Output)) {
+                    Write-Host $download.Output.TrimEnd()
+                }
+                throw "Could not download the Gleam wrapper fixture dependencies, exit code $($download.ExitCode)."
             }
         }
         finally {

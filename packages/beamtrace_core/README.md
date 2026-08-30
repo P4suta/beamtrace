@@ -75,26 +75,39 @@ gleam run --target erlang
 gleam run --target javascript --runtime nodejs
 ```
 
-Both commands print
-`codec=round-trip dag_boundaries=1 diagnostic_messages=1`.
+Both commands run the same portable analysis. The distribution consumer gate
+also exercises the high-level façade, checked comparison, and MFA parser on
+both targets.
 
-## Reusing comparison analysis
+## Validated façade and reusable comparison
 
-`diff.compare(left, right)` remains the convenient compatibility API. When
-one baseline is compared with several runs, prepare each trace once and reuse
-the opaque analysis value:
+Use the high-level `beamtrace` module when events enter your application. It
+validates each event, builds the DAG once, and retains checked comparison
+preparation behind one opaque `Trace` value:
+
+```gleam
+import beamtrace
+
+let assert Ok(baseline) = beamtrace.from_events(baseline_events)
+let assert Ok(first_run) = beamtrace.from_events(first_run_events)
+let report = beamtrace.compare(baseline, first_run)
+```
+
+`beamtrace.decode_events` reports a one-based event number with its codec error,
+while duplicate identifiers and cycles are typed graph errors. The façade works
+unchanged on Erlang and JavaScript.
+
+`diff.compare(left, right)` remains the convenient compatibility API. Strict
+callers can use `diff.compare_checked`. `diff.prepare` now returns
+`Result(PreparedTrace, DagError)`; compare a reusable baseline like this:
 
 ```gleam
 import beamtrace/diff
 
-let baseline = diff.prepare(baseline_events)
-let first = diff.compare_prepared(baseline, diff.prepare(first_run_events))
-let second = diff.compare_prepared(baseline, diff.prepare(second_run_events))
+let assert Ok(baseline) = diff.prepare(baseline_events)
+let assert Ok(candidate) = diff.prepare(candidate_events)
+let report = diff.compare_prepared(baseline, candidate)
 ```
-
-Preparation computes logical signatures, root origins, the causal graph and
-four-round neighborhood fingerprints. `compare` and `compare_prepared` return
-the same `DiffReport`; preparation changes only how that analysis is reused.
 
 Typed producers can call `codec.validate_manifest`, `codec.validate_event`,
 `codec.validate_graph_segment`, and `codec.validate_clocks` before encoding.
@@ -104,6 +117,8 @@ without allocating JSON and parsing it back into the same value.
 ## Modules
 
 - `beamtrace/types` — capture specifications, node-relative events, structured outcomes, evidence, interval time, and privacy-safe term views
+- `beamtrace` — validated high-level trace façade with one-time DAG construction
+- `beamtrace/mfa` — validated `Module:function/arity` parsing and rendering
 - `beamtrace/aql` — parsing, evaluation, and safe agent-side planning for BeamTrace Query Language
 - `beamtrace/dag` and `beamtrace/merge` — causal graph validation and distributed partial-order merging
 - `beamtrace/identity` — physical process and logical actor identity evidence

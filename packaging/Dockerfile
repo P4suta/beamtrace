@@ -43,8 +43,8 @@ VOLUME ["/var/lib/beamtrace"]
 EXPOSE 4040
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=3 \
-    CMD ["/usr/bin/wget", "-q", "--spider", "-T", "2", "http://127.0.0.1:4040/api/v1/ready"]
+    CMD ["/usr/bin/wget", "-q", "--spider", "-T", "2", "http://127.0.0.1:4040/api/v2/ready"]
 USER 10001:10001
 WORKDIR /var/lib/beamtrace
 ENTRYPOINT ["/bin/sh", "/opt/beamtrace/runtime/entrypoint.sh", "run"]
-CMD ["serve"]
+CMD ["serve", "--port", "4040", "--no-open"]

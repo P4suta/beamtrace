@@ -316,7 +316,8 @@ try {
 
         $teamData = Join-Path $resolvedTestRoot 'team-data'
         $jwksPath = Join-Path $resolvedTestRoot 'jwks.json'
-        '{"keys":[]}' | Set-Content -LiteralPath $jwksPath -Encoding utf8NoBOM
+        '{"keys":[{"kty":"RSA","kid":"package-test","use":"sig","alg":"RS256","n":"AQ","e":"Aw"}]}' |
+            Set-Content -LiteralPath $jwksPath -Encoding utf8NoBOM
         $portProbe = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
         $portProbe.Start()
         $teamPort = ([Net.IPEndPoint]$portProbe.LocalEndpoint).Port

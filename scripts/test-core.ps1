@@ -11,8 +11,11 @@ $env:REBAR_CACHE_DIR = Join-Path $repoRoot '.cache\rebar3'
 Push-Location (Join-Path $repoRoot 'packages\beamtrace_core')
 try {
     & gleam test
-    exit $LASTEXITCODE
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 finally {
     Pop-Location
 }
+
+& (Join-Path $PSScriptRoot 'test-core-interface.ps1')
+exit $LASTEXITCODE

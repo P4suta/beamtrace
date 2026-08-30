@@ -6,6 +6,7 @@
 
 -export([
     write_container/5,
+    write_container_exclusive/5,
     read_container/1,
     read_window/3,
     search_container/4,
@@ -24,13 +25,26 @@ write_container(PathBinary, Manifest, EventLines, GraphSegments, Clocks)
              is_list(GraphSegments), is_binary(Clocks) ->
     Path = unicode:characters_to_list(PathBinary),
     case filelib:ensure_dir(Path) of
-        ok -> write_container_file(Path, Manifest, EventLines, GraphSegments, Clocks);
+        ok -> write_container_file(Path, Manifest, EventLines, GraphSegments, Clocks, replace);
         {error, Reason} -> {error, error_binary({ensure_directory, Reason})}
     end;
 write_container(_Path, _Manifest, _Events, _Graphs, _Clocks) ->
     {error, <<"invalid_container">>}.
 
-write_container_file(Path, Manifest, EventLines, GraphSegments, Clocks) ->
+write_container_exclusive(PathBinary, Manifest, EventLines, GraphSegments, Clocks)
+        when is_binary(PathBinary), is_binary(Manifest), is_list(EventLines),
+             is_list(GraphSegments), is_binary(Clocks) ->
+    Path = unicode:characters_to_list(PathBinary),
+    case filelib:ensure_dir(Path) of
+        ok -> write_container_file(
+            Path, Manifest, EventLines, GraphSegments, Clocks, exclusive
+        );
+        {error, Reason} -> {error, error_binary({ensure_directory, Reason})}
+    end;
+write_container_exclusive(_Path, _Manifest, _Events, _Graphs, _Clocks) ->
+    {error, <<"invalid_container">>}.
+
+write_container_file(Path, Manifest, EventLines, GraphSegments, Clocks, Mode) ->
     EventEntries = event_entries(EventLines),
     case graph_entries(GraphSegments, length(EventEntries)) of
         {error, Reason} -> {error, Reason};
@@ -52,16 +66,39 @@ write_container_file(Path, Manifest, EventLines, GraphSegments, Clocks) ->
                 erlang:unique_integer([positive, monotonic])
             ),
             case zip:create(Temporary, Entries, []) of
-                {ok, _} -> atomic_replace(Temporary, Path);
+                {ok, _} -> install_archive(Temporary, Path, Mode);
                 {error, ZipReason} ->
                     _ = file:delete(Temporary),
                     {error, error_binary({zip_create, ZipReason})}
             end
     end.
 
-%% `file:rename/2` is an atomic replacement on the supported Unix targets. We
+install_archive(Temporary, Path, replace) -> atomic_replace(Temporary, Path);
+install_archive(Temporary, Path, exclusive) -> atomic_install(Temporary, Path).
+
+%% A hard-link claims the final name without a check-then-write race. The
+%% temporary ZIP lives beside the destination, so both names share a volume.
+atomic_install(Temporary, Path) ->
+    _ = sync_file(Temporary),
+    case file:make_link(Temporary, Path) of
+        ok ->
+            _ = file:delete(Temporary),
+            {ok, nil};
+        {error, eexist} ->
+            _ = file:delete(Temporary),
+            {error, <<"destination_exists">>};
+        {error, Reason} ->
+            _ = file:delete(Temporary),
+            case file:read_link_info(Path) of
+                {ok, _Existing} -> {error, <<"destination_exists">>};
+                {error, _} -> {error, error_binary({atomic_install, Reason})}
+            end
+    end.
+
+%% Use the OTP file server's replace operation on every supported target. We
 %% deliberately do not unlink the destination first: any failure leaves the
-%% previous archive intact.
+%% previous archive intact. Other OS processes can observe an intermediate
+%% rename step on Windows, as documented by OTP, but BeamTrace readers cannot.
 atomic_replace(Temporary, Path) ->
     _ = sync_file(Temporary),
     case file:rename(Temporary, Path) of

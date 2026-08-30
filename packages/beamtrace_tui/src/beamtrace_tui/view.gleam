@@ -67,10 +67,11 @@ fn render_header(
   let active = case state.screen {
     model.LiveScreen | model.AnomalyScreen -> 1
     model.TraceLibraryScreen -> 2
+    model.CompareScreen -> 3
     _ -> 0
   }
   let tabs =
-    tabs.tabs_new(["CAPTURE", "LIVE", "TEAM TRACES", "COMPARE → Web"])
+    tabs.tabs_new(["CAPTURE", "LIVE", "TEAM TRACES", "COMPARE"])
     |> tabs.with_active(active)
     |> tabs.with_active_style(style.new(background, amber, style.bold()))
     |> tabs.with_colors(muted, background)
@@ -131,6 +132,7 @@ fn render_timeline(
     model.LiveScreen -> " LIVE · RUNTIME SIGNALS "
     model.AnomalyScreen -> " LIVE · ANOMALIES "
     model.TraceLibraryScreen -> " TEAM · TRACE LIBRARY "
+    model.CompareScreen -> " COMPARE · MULTI-TRACE ALIGNMENT "
   }
   let frame = panel(title, amber)
   let content_width = block.inner(area, frame).size.width
@@ -140,6 +142,7 @@ fn render_timeline(
     model.LiveScreen -> live_content(state, content_width)
     model.CaptureScreen -> causal_content(state, content_width)
     model.TraceLibraryScreen -> team_trace_content(state, content_width)
+    model.CompareScreen -> compare_content(state, content_width)
   }
 
   target
@@ -164,15 +167,18 @@ fn render_inspector(
     model.SaveFocus -> "save> " <> state.save_input <> "▌"
     model.NormalFocus -> "Press a command key"
   }
-  let content =
-    "SESSION\n"
-    <> capture_phase(state.capture_phase)
-    <> "\n\nEVENT EVIDENCE\nSelect an event from the causal chain\n\n"
-    <> input
-    <> "\n\n"
-    <> state.notice
-    <> "\n\nACTIONS\n"
-    <> "a attach\nr arm MFA\nx cancel\n! anomalies\n/ search\ns save\nw open Web"
+  let content = case state.screen {
+    model.CompareScreen -> compare_inspector_content(state)
+    _ ->
+      "SESSION\n"
+      <> capture_phase(state.capture_phase)
+      <> "\n\nEVENT EVIDENCE\nSelect an event from the causal chain\n\n"
+      <> input
+      <> "\n\n"
+      <> state.notice
+      <> "\n\nACTIONS\n"
+      <> "a attach\nr arm MFA\nx cancel\n! anomalies\n/ search\ns save\nt traces\nd compare\nw open Web"
+  }
 
   target
   |> block.render(area, frame)
@@ -199,14 +205,15 @@ fn render_footer(
   }
   let shortcuts =
     help.help_new([
+      help.binding(["q"], "quit"),
       help.binding(["a"], "attach"),
       help.binding(["r"], "arm"),
       help.binding(["t"], "traces"),
+      help.binding(["d"], "compare"),
       help.binding(["!"], "anomalies"),
       help.binding(["/"], "search"),
       help.binding(["s"], "save"),
       help.binding(["w"], "Web"),
-      help.binding(["q"], "quit"),
     ])
     |> help.with_key_color(amber)
     |> help.with_description_color(muted)
@@ -357,6 +364,45 @@ fn team_trace_content(state: model.Model, width: Int) -> String {
       }
       <> "\n\n↑/↓ select · Enter inspect"
   }
+}
+
+fn compare_content(state: model.Model, width: Int) -> String {
+  case state.compare_runs {
+    [] ->
+      "No comparison is loaded.\n\nRun beamtrace compare <2–20 archives> --tui."
+    runs ->
+      "CANDIDATE · ADDED · REMOVED · CHANGED · AMBIGUOUS\n"
+      <> {
+        runs
+        |> list.map(fn(run) {
+          text.truncate(run.path, int.max(width, 1), "…")
+          <> "\n  +"
+          <> int.to_string(run.added)
+          <> "  -"
+          <> int.to_string(run.removed)
+          <> "  ~"
+          <> int.to_string(run.changed)
+          <> "  ?"
+          <> int.to_string(run.ambiguity_count)
+          <> "\n  first divergence: "
+          <> case run.first_divergence {
+            "" -> "none established"
+            path -> text.truncate(path, int.max(width - 20, 1), "…")
+          }
+        })
+        |> string.join("\n\n")
+      }
+  }
+}
+
+fn compare_inspector_content(state: model.Model) -> String {
+  "COMPARE SUMMARY\n"
+  <> int.to_string(state.compare_run_count)
+  <> " traces\n\nbaseline\n"
+  <> state.compare_baseline
+  <> "\n\nSTATISTICS\n"
+  <> int.to_string(state.compare_statistics_count)
+  <> " branch signatures\n\nALIGNMENT\nlogical actor · term shape · root-relative time\n\nFirst divergence is reported only when established."
 }
 
 fn pad_offset(value: Int) -> String {

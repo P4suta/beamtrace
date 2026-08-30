@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
+import { apiError } from "./api_error_ffi.mjs";
+
 export function requestCompare(body, onSuccess, onError) {
   fetch("/api/v2/compare", {
     method: "POST",
@@ -13,14 +15,7 @@ export function requestCompare(body, onSuccess, onError) {
     .then(async (response) => {
       const payload = await response.text();
       if (!response.ok) {
-        let reason = `compare request failed (${response.status})`;
-        try {
-          const parsed = JSON.parse(payload);
-          if (typeof parsed.error === "string") reason = parsed.error;
-        } catch {
-          // Retain the bounded status message for non-JSON proxy responses.
-        }
-        throw new Error(reason);
+        throw new Error(apiError(payload, response.status, "compare request failed"));
       }
       return payload;
     })

@@ -1,3 +1,9 @@
+//// Multi-run branch occurrence and interval-aware latency statistics.
+////
+//// Missing samples remain explicit and percentile summaries never collapse
+//// uncertainty to a point estimate. Empty inputs return empty summaries.
+//// Grouping and sorting are O(n log n), with deterministic cross-target output.
+
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace/diff
 import beamtrace/types
@@ -7,10 +13,12 @@ import gleam/list
 import gleam/result
 import gleam/string
 
+/// One causal signature and its uncertainty-preserving duration sample.
 pub type BranchSample {
   BranchSample(signature: String, duration: types.TimeEstimate)
 }
 
+/// Occurrence count and p50/p95 summaries for one branch across runs.
 pub type BranchStats {
   BranchStats(
     signature: String,
@@ -38,6 +46,8 @@ pub fn from_traces(runs: List(List(types.TraceEvent))) -> List(BranchStats) {
   |> summarize
 }
 
+/// Group samples by signature and calculate deterministic p50/p95 intervals.
+/// Missing values stay counted; work is O(n log n) and empty input is valid.
 pub fn summarize(runs: List(List(BranchSample))) -> List(BranchStats) {
   let total_runs = list.length(runs)
   let aggregate =

@@ -5,6 +5,8 @@ import beamtrace/types
 import beamtrace_runtime/capture
 import beamtrace_runtime/storage
 
+pub const public_jwks = "{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"key-1\",\"use\":\"sig\",\"alg\":\"RS256\",\"n\":\"AQ\",\"e\":\"Aw\"}]}"
+
 pub fn instant(value: Int) -> types.LocalInstant {
   types.LocalInstant(value, value)
 }

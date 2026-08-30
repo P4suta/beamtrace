@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
+import beamtrace_web/appearance
 import beamtrace_web/workspace
 import gleam/int
 import gleam/list
@@ -22,11 +23,13 @@ pub fn workspace(model: workspace.Model) -> Element(workspace.Msg) {
     [
       workspace_header(model),
       capture_controls(model),
+      mobile_mode_navigation(model),
       html.div([attribute.class("workspace-grid")], [
         session_navigator(model),
         causal_workspace(model),
         inspector(model),
       ]),
+      mobile_drawers(model),
       minimap(model),
       palette(model),
     ],
@@ -59,45 +62,6 @@ fn capture_controls(model: workspace.Model) -> Element(workspace.Msg) {
               }),
             ),
           ]),
-          html.label([], [
-            html.span([], [html.text("AQL condition")]),
-            html.input([
-              attribute.type_("text"),
-              attribute.aria_label("AQL condition"),
-              attribute.placeholder("arg.0.tag == order"),
-              attribute.value(model.capture_where),
-              event.on_input(workspace.UserChangedCaptureWhere),
-            ]),
-          ]),
-          html.label([], [
-            html.span([], [html.text("Framework preset")]),
-            html.select(
-              [
-                attribute.aria_label("Framework preset"),
-                attribute.value(model.capture_preset),
-                event.on_input(workspace.UserChangedCapturePreset),
-              ],
-              [
-                preset_option("generic", "Generic"),
-                preset_option("gleam-actor", "Gleam actor"),
-                preset_option("wisp-mist", "Wisp / Mist"),
-                preset_option("gen-server", "GenServer"),
-                preset_option("phoenix", "Phoenix"),
-                preset_option("erlang-supervisor", "Erlang supervisor"),
-              ],
-            ),
-          ]),
-          html.label([], [
-            html.span([], [html.text("Max roots")]),
-            html.input([
-              attribute.type_("number"),
-              attribute.aria_label("Max roots"),
-              attribute.attribute("min", "1"),
-              attribute.attribute("max", "1000"),
-              attribute.value(model.capture_max_roots),
-              event.on_input(workspace.UserChangedMaxRoots),
-            ]),
-          ]),
           html.button(
             [
               attribute.disabled(capture_arm_disabled(model.capture_phase)),
@@ -112,22 +76,8 @@ fn capture_controls(model: workspace.Model) -> Element(workspace.Msg) {
             ],
             [html.text("Cancel capture")],
           ),
-          html.label([], [
-            html.span([], [html.text("Save path")]),
-            html.input([
-              attribute.type_("text"),
-              attribute.aria_label("Save path"),
-              attribute.value(model.save_path),
-              event.on_input(workspace.UserChangedSavePath),
-            ]),
-          ]),
-          html.button(
-            [
-              attribute.disabled(!capture_ready(model.capture_phase)),
-              event.on_click(workspace.UserRequestedSave),
-            ],
-            [html.text("Save capture")],
-          ),
+          capture_advanced(model),
+          capture_save_controls(model),
           html.output(
             [
               attribute.class("capture-status"),
@@ -135,13 +85,104 @@ fn capture_controls(model: workspace.Model) -> Element(workspace.Msg) {
             ],
             [
               html.text(capture_phase_label(model.capture_phase)),
-              html.span([], [html.text(model.capture_notice)]),
+              html.span([], [html.text(capture_recovery(model))]),
             ],
           ),
         ],
       )
     workspace.Compare -> compare_controls(model)
     _ -> html.div([], [])
+  }
+}
+
+fn capture_advanced(model: workspace.Model) -> Element(workspace.Msg) {
+  html.details([attribute.class("capture-advanced")], [
+    html.summary([], [html.text("Advanced")]),
+    html.div([attribute.class("capture-advanced-grid")], [
+      html.label([], [
+        html.span([], [html.text("AQL condition")]),
+        html.input([
+          attribute.type_("text"),
+          attribute.aria_label("AQL condition"),
+          attribute.placeholder("arg.0.tag == order"),
+          attribute.value(model.capture_where),
+          event.on_input(workspace.UserChangedCaptureWhere),
+        ]),
+      ]),
+      html.label([], [
+        html.span([], [html.text("Framework preset")]),
+        html.select(
+          [
+            attribute.aria_label("Framework preset"),
+            attribute.value(model.capture_preset),
+            event.on_input(workspace.UserChangedCapturePreset),
+          ],
+          [
+            preset_option("generic", "Generic"),
+            preset_option("gleam-actor", "Gleam actor"),
+            preset_option("wisp-mist", "Wisp / Mist"),
+            preset_option("gen-server", "GenServer"),
+            preset_option("phoenix", "Phoenix"),
+            preset_option("erlang-supervisor", "Erlang supervisor"),
+          ],
+        ),
+      ]),
+      html.label([], [
+        html.span([], [html.text("Max roots")]),
+        html.input([
+          attribute.type_("number"),
+          attribute.aria_label("Max roots"),
+          attribute.attribute("min", "1"),
+          attribute.attribute("max", "1000"),
+          attribute.value(model.capture_max_roots),
+          event.on_input(workspace.UserChangedMaxRoots),
+        ]),
+      ]),
+    ]),
+  ])
+}
+
+fn capture_save_controls(model: workspace.Model) -> Element(workspace.Msg) {
+  case capture_ready(model.capture_phase) {
+    False -> html.div([attribute.class("capture-save pending")], [])
+    True ->
+      html.div([attribute.class("capture-save")], [
+        html.label([], [
+          html.span([], [html.text("Save path")]),
+          html.input([
+            attribute.type_("text"),
+            attribute.aria_label("Save path"),
+            attribute.value(model.save_path),
+            event.on_input(workspace.UserChangedSavePath),
+          ]),
+        ]),
+        html.button([event.on_click(workspace.UserRequestedSave)], [
+          html.text("Save capture"),
+        ]),
+      ])
+  }
+}
+
+fn capture_recovery(model: workspace.Model) -> String {
+  case model.capture_phase {
+    workspace.Unavailable ->
+      "Attach a node with beamtrace attach, then search for an MFA."
+    workspace.Idle if model.capture_notice == "" ->
+      "Search for the operation's MFA, then arm one bounded capture."
+    workspace.Failed("system_tracer_occupied") ->
+      "Another tracer owns the VM. Stop that tracer or switch to Live sampling."
+    workspace.Failed("trigger_required") ->
+      "Enter Module:function/arity or choose an MFA search result."
+    workspace.Failed(_) ->
+      model.capture_notice <> " Check the target connection, then arm again."
+    workspace.Ready(_, outcome) if model.capture_notice == "" ->
+      case string.contains(outcome, "integrity issues present") {
+        True ->
+          outcome
+          <> ". Validate the archive and retry capture after correcting the named node or delivery problem."
+        False -> outcome <> ". Choose a save path to retain this archive."
+      }
+    _ -> model.capture_notice
   }
 }
 
@@ -239,7 +280,7 @@ fn workspace_header(model: workspace.Model) -> Element(workspace.Msg) {
   html.header([attribute.class("topbar")], [
     html.div([attribute.class("brand")], [
       html.span([attribute.class("brand-mark"), attribute.aria_hidden(True)], [
-        html.text("AG"),
+        html.text("BT"),
       ]),
       html.div([], [
         html.h1([], [html.text("BeamTrace")]),
@@ -267,11 +308,55 @@ fn workspace_header(model: workspace.Model) -> Element(workspace.Msg) {
       html.button(
         [
           attribute.class("quiet-button"),
-          attribute.aria_keyshortcuts("Control+K"),
+          attribute.aria_keyshortcuts("Control+K Meta+K"),
           event.on_click(workspace.UserOpenedPalette),
         ],
-        [html.text("Commands  ⌘K")],
+        [html.text("Commands  " <> appearance.modifier_label() <> "K")],
       ),
+      html.button(
+        [
+          attribute.class("quiet-button theme-button"),
+          attribute.aria_label("Change color theme"),
+          event.on_click(workspace.UserCycledTheme),
+        ],
+        [html.text("Theme · " <> theme_label(model.theme))],
+      ),
+    ]),
+  ])
+}
+
+fn theme_label(theme: workspace.Theme) -> String {
+  case theme {
+    workspace.SystemTheme -> "System"
+    workspace.LightTheme -> "Light"
+    workspace.DarkTheme -> "Dark"
+  }
+}
+
+fn mobile_mode_navigation(model: workspace.Model) -> Element(workspace.Msg) {
+  html.nav(
+    [
+      attribute.class("mobile-mode-navigation"),
+      attribute.aria_label("Mobile workspace mode"),
+    ],
+    [
+      mode_button(model.mode, workspace.Capture, "Capture", "1"),
+      mode_button(model.mode, workspace.Live, "Live", "2"),
+      mode_button(model.mode, workspace.Compare, "Compare", "3"),
+      mode_button(model.mode, workspace.Team, "Team", "4"),
+    ],
+  )
+}
+
+fn mobile_drawers(model: workspace.Model) -> Element(workspace.Msg) {
+  html.div([attribute.class("mobile-drawers")], [
+    html.details([attribute.class("mobile-session-drawer")], [
+      html.summary([], [html.text("Session navigator")]),
+      session_navigator(model),
+    ]),
+    html.details([attribute.class("mobile-inspector-drawer")], [
+      html.summary([], [html.text("Inspector")]),
+      inspector(model),
     ]),
   ])
 }
@@ -409,6 +494,7 @@ fn team_workspace(model: workspace.Model) -> Element(workspace.Msg) {
           ])
         None -> html.div([], [])
       },
+      team_compare_bar(model),
       team_trace_table(model),
       case model.team_next_cursor {
         Some(_) ->
@@ -425,6 +511,23 @@ fn team_workspace(model: workspace.Model) -> Element(workspace.Msg) {
       team_event_section(model),
     ],
   )
+}
+
+fn team_compare_bar(model: workspace.Model) -> Element(workspace.Msg) {
+  let count = list.length(model.selected_team_trace_ids)
+  html.div([attribute.class("team-compare-bar")], [
+    html.span([attribute.aria_live("polite")], [
+      html.text(int.to_string(count) <> " of 20 selected for comparison"),
+    ]),
+    html.button(
+      [
+        attribute.class("quiet-button"),
+        attribute.disabled(count < 2 || count > 20),
+        event.on_click(workspace.UserRequestedTeamCompare),
+      ],
+      [html.text("Compare selected traces")],
+    ),
+  ])
 }
 
 fn team_status(model: workspace.Model) -> String {
@@ -445,6 +548,7 @@ fn team_trace_table(model: workspace.Model) -> Element(workspace.Msg) {
         html.table([attribute.aria_label("Team traces")], [
           html.thead([], [
             html.tr([], [
+              html.th([], [html.text("Compare")]),
               html.th([], [html.text("Trace")]),
               html.th([], [html.text("Status")]),
               html.th([], [html.text("Node / MFA")]),
@@ -453,24 +557,58 @@ fn team_trace_table(model: workspace.Model) -> Element(workspace.Msg) {
               html.th([], [html.text("Received")]),
             ]),
           ]),
-          html.tbody([], list.map(traces, team_trace_row)),
+          html.tbody(
+            [],
+            list.map(traces, fn(trace) { team_trace_row(model, trace) }),
+          ),
         ]),
       ])
   }
 }
 
-fn team_trace_row(trace: workspace.TeamTrace) -> Element(workspace.Msg) {
+fn team_trace_row(
+  model: workspace.Model,
+  trace: workspace.TeamTrace,
+) -> Element(workspace.Msg) {
   html.tr(
     [
       attribute.class(case trace.locked {
         True -> "locked"
         False -> ""
       }),
-      event.on_click(workspace.UserSelectedTeamTrace(trace.id)),
     ],
     [
       html.td([], [
-        html.button([attribute.class("event-link")], [html.text(trace.id)]),
+        html.button(
+          [
+            attribute.class("compare-selector"),
+            attribute.aria_pressed(
+              case list.contains(model.selected_team_trace_ids, trace.id) {
+                True -> "true"
+                False -> "false"
+              },
+            ),
+            attribute.aria_label("Select " <> trace.id <> " for comparison"),
+            event.on_click(workspace.UserToggledTeamCompare(trace.id)),
+          ],
+          [
+            html.text(
+              case list.contains(model.selected_team_trace_ids, trace.id) {
+                True -> "Selected"
+                False -> "Select"
+              },
+            ),
+          ],
+        ),
+      ]),
+      html.td([], [
+        html.button(
+          [
+            attribute.class("event-link"),
+            event.on_click(workspace.UserSelectedTeamTrace(trace.id)),
+          ],
+          [html.text(trace.id)],
+        ),
       ]),
       html.td([], [
         html.span([attribute.class("kind-pill")], [
@@ -803,6 +941,7 @@ fn event_workspace(model: workspace.Model) -> Element(workspace.Msg) {
           ),
         ]),
       ]),
+      evidence_overview(model),
       html.div([attribute.class("canvas-frame")], [
         html.canvas([
           attribute.id("causal-canvas"),
@@ -812,6 +951,84 @@ fn event_workspace(model: workspace.Model) -> Element(workspace.Msg) {
         ]),
       ]),
       event_table(visible),
+    ],
+  )
+}
+
+fn evidence_overview(model: workspace.Model) -> Element(workspace.Msg) {
+  let #(exact, inferred) =
+    list.fold(workspace.visible_events(model), #(0, 0), fn(counts, row) {
+      case row.evidence {
+        workspace.Exact -> #(counts.0 + 1, counts.1)
+        workspace.Inferred(_, _) -> #(counts.0, counts.1 + 1)
+      }
+    })
+  let outcome = case model.capture_phase {
+    workspace.Ready(_, summary) -> summary
+    workspace.Armed | workspace.Arming | workspace.Cancelling ->
+      "Observation has not ended"
+    workspace.Failed(reason) -> "Capture failed · " <> reason
+    _ -> "No sealed observation outcome is available"
+  }
+  let delivery = case string.contains(outcome, "delivery verified") {
+    True -> "Verified by final node receipts"
+    False -> "Not verified; inspect integrity issues before drawing conclusions"
+  }
+  let inference_basis =
+    model.events
+    |> list.find_map(fn(row) {
+      case row.evidence {
+        workspace.Exact -> Error(Nil)
+        workspace.Inferred(method, reason) -> Ok(method <> " · " <> reason)
+      }
+    })
+  html.section(
+    [
+      attribute.class("evidence-overview"),
+      attribute.aria_label("What this trace establishes and does not establish"),
+    ],
+    [
+      html.div([], [
+        html.span([], [html.text("Observation end")]),
+        html.strong([], [html.text(outcome)]),
+      ]),
+      html.div([], [
+        html.span([], [html.text("Delivery verification")]),
+        html.strong([], [html.text(delivery)]),
+      ]),
+      html.div([], [
+        html.span([], [html.text("Integrity / boundaries")]),
+        html.strong([], [
+          html.text(
+            int.to_string(list.length(model.graph_boundaries))
+            <> " causal boundaries · "
+            <> case model.graph_error {
+              Some(_) -> "graph issue; reload or validate the archive"
+              None -> "no graph loader issue"
+            },
+          ),
+        ]),
+      ]),
+      html.div([], [
+        html.span([], [html.text("Evidence basis")]),
+        html.strong([], [
+          html.text(
+            int.to_string(exact)
+            <> " visible Exact · "
+            <> int.to_string(inferred)
+            <> " visible Inferred"
+            <> case inference_basis {
+              Ok(value) -> " · first basis: " <> value
+              Error(_) -> ""
+            },
+          ),
+        ]),
+      ]),
+      html.p([], [
+        html.text(
+          "Known: recorded ordering and stated inference inputs. Unknown: work outside the observation end, missing delivery, and every marked boundary.",
+        ),
+      ]),
     ],
   )
 }

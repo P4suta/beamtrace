@@ -8,18 +8,24 @@ import beamtrace_runtime/local_api
 import beamtrace_runtime/local_auth
 import beamtrace_runtime/oidc_client
 import beamtrace_runtime/oidc_flow
+import beamtrace_runtime/openapi
 import beamtrace_runtime/rbac
 import beamtrace_runtime/relay_inbox
 import beamtrace_runtime/team_auth
 import beamtrace_runtime/team_auth_api
 import beamtrace_runtime/team_store
 import beamtrace_runtime/team_traces_api
+import gleam/dynamic/decode
 import gleam/http
 import gleam/http/cookie
 import gleam/http/request
 import gleam/http/response
+import gleam/int
+import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/string
+import gleam/uri
 import wisp
 
 pub type ServerMode {
@@ -133,6 +139,9 @@ pub fn handle_at(
 ) -> wisp.Response {
   let segments = request.path_segments(incoming)
   let routed = case segments, incoming.method {
+    ["api", "v2", "openapi.json"], http.Get ->
+      wisp.json_response(openapi.document, 200)
+    ["api", "v2", "openapi.json"], _ -> wisp.method_not_allowed([http.Get])
     ["api", "v2", "health"], http.Get ->
       wisp.json_response(
         "{\"status\":\"ok\",\"api_version\":\"v2\",\"mode\":\""
@@ -161,11 +170,7 @@ pub fn handle_at(
       )
     ["api", "v2", "live"], _ -> wisp.method_not_allowed([http.Get])
     ["api", "v2", "compare"], http.Post ->
-      local_api.compare_response(
-        incoming,
-        local_api_context(incoming, context, now_ms),
-        now_ms,
-      )
+      compare_v2_response(incoming, context, now_ms)
     ["api", "v2", "compare"], _ -> wisp.method_not_allowed([http.Post])
     ["api", "v2", "sessions", "current"], http.Get ->
       local_api.capture_status_v2_response(
@@ -447,7 +452,8 @@ pub fn handle_at(
     ["auth", "oidc", "callback"], http.Get ->
       team_auth_api.oidc_callback(incoming, team_auth_context(context), now_ms)
     ["auth", "oidc", "callback"], _ -> wisp.method_not_allowed([http.Get])
-    ["bootstrap", token], http.Get -> bootstrap_exchange(context, token, now_ms)
+    ["bootstrap", token], http.Get ->
+      bootstrap_exchange(incoming, context, token, now_ms)
     ["bootstrap", _], _ -> wisp.method_not_allowed([http.Get])
     [], http.Get ->
       authenticated_asset(
@@ -479,8 +485,30 @@ pub fn handle_at(
   }
   case segments {
     ["api", "v1", ..] -> routed |> deprecated_v1 |> secure_api
+    ["api", "v2", ..] -> routed |> v2_error_contract |> secure_api
     ["api", ..] -> secure_api(routed)
     _ -> secure_workspace(routed)
+  }
+}
+
+fn compare_v2_response(
+  incoming: wisp.Request,
+  context: Context,
+  now_ms: Int,
+) -> wisp.Response {
+  case context.mode {
+    Local ->
+      local_api.compare_response(
+        incoming,
+        local_api_context(incoming, context, now_ms),
+        now_ms,
+      )
+    Team ->
+      team_traces_api.compare_response(
+        incoming,
+        team_traces_context(context),
+        now_ms,
+      )
   }
 }
 
@@ -492,6 +520,96 @@ fn deprecated_v1(response_: wisp.Response) -> wisp.Response {
     "warning",
     "299 BeamTrace \"API v1 is removed in v0.4\"",
   )
+  |> response.set_header("x-beamtrace-removal-version", "v0.4")
+}
+
+fn v2_error_contract(response_: wisp.Response) -> wisp.Response {
+  case response_.status < 400 {
+    True -> response_
+    False -> {
+      let code = case response_.body {
+        wisp.Text(body) -> legacy_error_code(body, response_.status)
+        _ -> status_error_code(response_.status)
+      }
+      let body =
+        json.object([
+          #(
+            "error",
+            json.object([
+              #("code", json.string(code)),
+              #("message", json.string(error_message(code, response_.status))),
+              #("hint", json.string(error_hint(response_.status))),
+            ]),
+          ),
+        ])
+        |> json.to_string
+      response_
+      |> wisp.set_body(wisp.Text(body))
+      |> response.set_header("content-type", "application/json; charset=utf-8")
+    }
+  }
+}
+
+fn legacy_error_code(body: String, status: Int) -> String {
+  case json.parse(body, legacy_error_decoder()) {
+    Ok(code) if code != "" -> code
+    _ -> status_error_code(status)
+  }
+}
+
+fn legacy_error_decoder() -> decode.Decoder(String) {
+  use code <- decode.field("error", decode.string)
+  decode.success(code)
+}
+
+fn status_error_code(status: Int) -> String {
+  case status {
+    400 -> "invalid_request"
+    401 -> "authentication_required"
+    403 -> "permission_denied"
+    404 -> "not_found"
+    405 -> "method_not_allowed"
+    409 -> "conflict"
+    410 -> "removed"
+    413 -> "response_too_large"
+    422 -> "invalid_trace"
+    429 -> "rate_limited"
+    503 -> "unavailable"
+    _ if status >= 500 -> "internal_error"
+    _ -> "request_failed"
+  }
+}
+
+fn error_message(code: String, status: Int) -> String {
+  case code {
+    "authentication_required" -> "Authentication is required."
+    "permission_denied" -> "This session does not have permission."
+    "not_found" -> "The requested API resource was not found."
+    "method_not_allowed" -> "This HTTP method is not allowed for the resource."
+    "response_too_large" -> "The request or response exceeds its safe limit."
+    "internal_error" -> "BeamTrace could not complete the request."
+    _ ->
+      "The request failed ("
+      <> string.replace(code, "_", " ")
+      <> ", HTTP "
+      <> int.to_string(status)
+      <> ")."
+  }
+}
+
+fn error_hint(status: Int) -> String {
+  case status {
+    400 -> "Check parameters and JSON fields against /api/v2/openapi.json."
+    401 -> "Authenticate again, then retry the request."
+    403 ->
+      "Request the required BeamTrace role; raw capture needs both permissions."
+    404 -> "Check the /api/v2 path and trace identifier."
+    405 -> "Use the method listed in the Allow response header."
+    409 -> "Refresh current state before retrying."
+    413 -> "Reduce the bounded page, query, or payload size."
+    422 -> "Validate the source archive and inspect its integrity issues."
+    _ -> "Retry only after correcting the reported condition."
+  }
 }
 
 fn team_traces_context(context: Context) -> team_traces_api.Context {
@@ -668,6 +786,7 @@ fn authenticated_asset(
 }
 
 fn bootstrap_exchange(
+  incoming: wisp.Request,
   context: Context,
   token: String,
   now_ms: Int,
@@ -687,11 +806,26 @@ fn bootstrap_exchange(
               http_only: True,
               same_site: Some(cookie.Strict),
             )
-          wisp.redirect(to: "/")
+          wisp.redirect(to: bootstrap_destination(incoming))
           |> response.set_cookie("beamtrace_session", session.id, attributes)
           |> response.set_header("clear-site-data", "\"cache\"")
         }
       }
+  }
+}
+
+fn bootstrap_destination(incoming: wisp.Request) -> String {
+  case request.get_query(incoming) {
+    Ok(query) ->
+      case list.find(query, fn(pair) { pair.0 == "compare" }) {
+        Ok(#(_, paths)) ->
+          case string.byte_size(paths) <= 8192 {
+            True -> "/?compare=" <> uri.percent_encode(paths)
+            False -> "/"
+          }
+        _ -> "/"
+      }
+    Error(_) -> "/"
   }
 }
 

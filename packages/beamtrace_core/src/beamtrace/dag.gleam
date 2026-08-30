@@ -1,3 +1,10 @@
+//// Build and query validated causal directed acyclic graphs.
+////
+//// `build` rejects duplicate event identifiers and cycles and retains every
+//// external or missing causal boundary. Construction is O((n + e) log n), and
+//// `edge_between` is linear in stored edges. Results match on Erlang and
+//// JavaScript.
+
 import beamtrace/types
 import gleam/dict.{type Dict}
 import gleam/int
@@ -7,6 +14,7 @@ import gleam/order
 import gleam/result
 import gleam/string
 
+/// A validated event graph containing causal edges and explicit boundaries.
 pub type CausalGraph {
   CausalGraph(
     events: List(types.TraceEvent),
@@ -15,6 +23,7 @@ pub type CausalGraph {
   )
 }
 
+/// Construction failure caused by an ambiguous identifier or impossible cycle.
 pub type DagError {
   DuplicateEventId(id: String)
   CycleDetected
@@ -74,6 +83,8 @@ pub fn build_analysis(
   }
 }
 
+/// Find a stored direct edge in O(edges), returning `None` when no such
+/// observation or inference exists.
 pub fn edge_between(
   graph: CausalGraph,
   from: String,
@@ -321,6 +332,8 @@ fn spawn_edges(
   |> list.reverse
 }
 
+/// Check identifiers and topological order in O((v + e) log v). Duplicate
+/// identifiers and cycles both return `False`.
 pub fn is_acyclic(graph: CausalGraph) -> Bool {
   case index_events(graph.events, dict.new()) {
     Error(_) -> False

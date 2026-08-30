@@ -49,6 +49,20 @@ pub fn run_remote_with_traces(
   )
 }
 
+/// Open the terminal-native multi-trace comparison screen. Runtime callers
+/// provide only bounded summaries, keeping archive I/O outside the TUI.
+pub fn run_compare(
+  baseline: String,
+  run_count: Int,
+  runs: List(model.CompareRunSummary),
+  statistics_count: Int,
+) {
+  run_model(
+    session.unavailable(),
+    model.compare(baseline, run_count, runs, statistics_count),
+  )
+}
+
 fn run_model(driver: session.Driver, initial: model.Model) {
   let _ =
     app.run_buffered(
