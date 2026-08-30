@@ -90,6 +90,7 @@ pub fn commands() -> List(CommandSpec) {
           "Archive path; omitted means a safe generated name.",
         ),
         OptionSpec("--force", "Replace an explicitly named existing archive."),
+        OptionSpec("--profile NAME", "Project capture profile."),
         OptionSpec("--web", "Use the Web progress workspace."),
         OptionSpec("--tui", "Use terminal progress UI."),
         OptionSpec("--no-ui", "Disable interactive UI."),
@@ -211,6 +212,9 @@ pub fn commands() -> List(CommandSpec) {
         OptionSpec("--enroll TOKEN", "One-time enrollment token."),
         OptionSpec("--node NODE", "Optional producer target."),
         OptionSpec("--trigger MFA", "Producer root MFA."),
+        OptionSpec("--where AQL", "Optional root predicate."),
+        OptionSpec("--max-roots N", "Capture between 1 and 1000 roots."),
+        OptionSpec("--preset PRESET", "Capture preset; default generic."),
         OptionSpec("--raw-grant-file PATH", "Separately authorized raw grant."),
         ..capture_safety_options()
       ],
@@ -311,24 +315,128 @@ pub fn names() -> List(String) {
   list.map(commands(), fn(spec) { spec.name })
 }
 
-/// Return the nearest command within two single-character edits.
+/// Return the command a prefix uniquely names, else the nearest command
+/// within two single-character edits.
 pub fn suggest(input: String) -> Option(String) {
-  let left = string.to_graphemes(input)
-  case
-    list.find(names(), fn(name) {
-      within_edits(left, string.to_graphemes(name), 1)
-    })
-  {
-    Ok(name) -> Some(name)
-    Error(_) ->
+  suggest_among(names(), input)
+}
+
+fn suggest_among(candidates: List(String), input: String) -> Option(String) {
+  let prefixed = case string.length(input) >= 2 {
+    True -> list.filter(candidates, string.starts_with(_, input))
+    False -> []
+  }
+  case prefixed {
+    [only] -> Some(only)
+    [_, _, ..] -> None
+    [] -> {
+      let left = string.to_graphemes(input)
       case
-        list.find(names(), fn(name) {
-          within_edits(left, string.to_graphemes(name), 2)
+        list.find(candidates, fn(name) {
+          within_edits(left, string.to_graphemes(name), 1)
         })
       {
         Ok(name) -> Some(name)
+        Error(_) ->
+          case
+            list.find(candidates, fn(name) {
+              within_edits(left, string.to_graphemes(name), 2)
+            })
+          {
+            Ok(name) -> Some(name)
+            Error(_) -> None
+          }
+      }
+    }
+  }
+}
+
+/// Return the nearest option of one command.
+pub fn suggest_option(command: String, option: String) -> Option(String) {
+  suggest_among(option_names(command), option)
+}
+
+/// The option specification one command declares for a flag.
+pub fn option_spec(command: String, option: String) -> Option(OptionSpec) {
+  case list.find(commands(), fn(spec) { spec.name == command }) {
+    Error(_) -> None
+    Ok(spec) ->
+      case
+        list.find(spec.options, fn(candidate) {
+          option_name(candidate.flag) == option
+        })
+      {
+        Ok(found) -> Some(found)
         Error(_) -> None
       }
+  }
+}
+
+pub fn option_names(command: String) -> List(String) {
+  case list.find(commands(), fn(spec) { spec.name == command }) {
+    Error(_) -> []
+    Ok(spec) -> list.map(spec.options, fn(option) { option_name(option.flag) })
+  }
+}
+
+/// The value placeholder of a flag such as `--out PATH`, if it takes one.
+pub fn option_placeholder(flag: String) -> Option(String) {
+  case string.split(flag, on: " ") {
+    [_, placeholder, ..] -> Some(placeholder)
+    _ -> None
+  }
+}
+
+pub fn option_takes_value(command: String, option: String) -> Option(String) {
+  case option_spec(command, option) {
+    Some(spec) -> option_placeholder(spec.flag)
+    None -> None
+  }
+}
+
+pub fn preset_names() -> List(String) {
+  [
+    "generic", "gleam-actor", "wisp-mist", "gen-server", "phoenix",
+    "erlang-supervisor",
+  ]
+}
+
+pub fn export_formats() -> List(String) {
+  ["html", "jsonl", "mermaid", "otlp"]
+}
+
+pub fn shells() -> List(String) {
+  ["bash", "zsh", "fish", "powershell"]
+}
+
+/// Enumerated values of a flag, used by completion.
+pub fn option_choices(option: String) -> List(String) {
+  case option {
+    "--format" -> export_formats()
+    "--preset" -> preset_names()
+    _ -> []
+  }
+}
+
+/// Enumerated first positional arguments of a command, used by completion.
+pub fn positional_choices(command: String) -> List(String) {
+  case command {
+    "completion" -> shells()
+    "config" -> ["check"]
+    "help" -> names()
+    _ -> []
+  }
+}
+
+/// Whether a flag or positional expects a `.beamtrace` path.
+pub fn takes_archive_path(command: String, option: Option(String)) -> Bool {
+  case option {
+    Some(flag) -> option_takes_value(command, flag) == Some("PATH")
+    None ->
+      list.contains(
+        ["open", "compare", "export", "validate", "migrate"],
+        command,
+      )
   }
 }
 
@@ -537,7 +645,7 @@ fn zsh_completion_cases() -> String {
   |> fn(value) { value <> "\n" }
 }
 
-fn option_name(flag: String) -> String {
+pub fn option_name(flag: String) -> String {
   case string.split(flag, on: " ") {
     [name, ..] -> name
     [] -> flag
