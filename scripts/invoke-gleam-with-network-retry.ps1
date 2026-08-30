@@ -18,7 +18,7 @@ function Invoke-GleamWithNetworkRetry {
             }
         }
 
-        $transientNetworkFailure = $output -match '(?is)(A HTTP request failed|error sending request for url|temporary failure in name resolution|failed to lookup address information|name or service not known|connection (reset|refused|closed)|operation timed out|request timed out|timeout was reached|unexpected end of file|HTTP[/ ][^\r\n]*(408|425|429|500|502|503|504))'
+        $transientNetworkFailure = $output -match '(?is)(A HTTP request failed|error sending request for url|FailedToConnect|Posix\("nxdomain"\)|temporary failure in name resolution|failed to lookup address information|name or service not known|connection (reset|refused|closed)|operation timed out|request timed out|timeout was reached|unexpected end of file|HTTP[/ ][^\r\n]*(408|425|429|500|502|503|504))'
         if (-not $transientNetworkFailure -or $attempt -eq $MaximumAttempts) {
             return [pscustomobject]@{
                 ExitCode = $exitCode

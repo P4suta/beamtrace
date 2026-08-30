@@ -21,7 +21,12 @@ function gleam {
     }
 
     $global:LASTEXITCODE = 75
-    Write-Output 'A HTTP request failed: error sending request for url'
+    if ($script:attempts -eq 1) {
+        Write-Output 'A HTTP request failed: error sending request for url'
+    }
+    else {
+        Write-Output 'FailedToConnect(Posix("closed"), Posix("nxdomain"))'
+    }
 }
 
 $result = Invoke-GleamWithNetworkRetry `
