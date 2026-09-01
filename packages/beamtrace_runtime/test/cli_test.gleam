@@ -881,3 +881,7 @@ pub fn every_help_example_parses_test() {
     }
   })
 }
+
+pub fn help_aql_routes_to_the_aql_topic_test() {
+  cli.parse(["help", "aql"]) |> should.equal(Ok(cli.CommandHelp("aql")))
+}

@@ -27,9 +27,9 @@ pub fn commands() -> List(CommandSpec) {
     CommandSpec(
       "help",
       "Show the command guide or detailed help for one command.",
-      "beamtrace help [<command>|errors]",
+      "beamtrace help [<command>|errors|aql]",
       [],
-      ["beamtrace help capture", "beamtrace help errors"],
+      ["beamtrace help capture", "beamtrace help errors", "beamtrace help aql"],
       [],
     ),
     CommandSpec(
@@ -56,7 +56,10 @@ pub fn commands() -> List(CommandSpec) {
       [
         OptionSpec("--node NODE", "Target node or comma-separated nodes."),
         OptionSpec("--trigger MFA", "Root Module:function/arity to arm."),
-        OptionSpec("--where AQL", "Optional root predicate."),
+        OptionSpec(
+          "--where AQL",
+          "Optional root predicate; see 'beamtrace help aql'.",
+        ),
         OptionSpec(
           "--out PATH",
           "Archive path; omitted means a safe generated name.",
@@ -88,7 +91,10 @@ pub fn commands() -> List(CommandSpec) {
       [
         OptionSpec("--node NODE", "Override the generated target node."),
         OptionSpec("--trigger MFA", "Root Module:function/arity to arm."),
-        OptionSpec("--where AQL", "Optional root predicate."),
+        OptionSpec(
+          "--where AQL",
+          "Optional root predicate; see 'beamtrace help aql'.",
+        ),
         OptionSpec(
           "--out PATH",
           "Archive path; omitted means a safe generated name.",
@@ -220,7 +226,10 @@ pub fn commands() -> List(CommandSpec) {
         OptionSpec("--enroll TOKEN", "One-time enrollment token."),
         OptionSpec("--node NODE", "Optional producer target."),
         OptionSpec("--trigger MFA", "Producer root MFA."),
-        OptionSpec("--where AQL", "Optional root predicate."),
+        OptionSpec(
+          "--where AQL",
+          "Optional root predicate; see 'beamtrace help aql'.",
+        ),
         OptionSpec("--max-roots N", "Capture between 1 and 1000 roots."),
         OptionSpec("--preset PRESET", "Capture preset; default generic."),
         OptionSpec("--raw-grant-file PATH", "Separately authorized raw grant."),
@@ -431,7 +440,7 @@ pub fn positional_choices(command: String) -> List(String) {
   case command {
     "completion" -> shells()
     "config" -> ["check"]
-    "help" -> list.append(names(), ["errors"])
+    "help" -> list.append(names(), ["aql", "errors"])
     _ -> []
   }
 }

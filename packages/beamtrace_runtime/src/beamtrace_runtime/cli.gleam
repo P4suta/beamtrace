@@ -346,6 +346,7 @@ fn parse_command(arguments: List(String)) -> Result(Command, ParseError) {
     [] -> Ok(Guide)
     ["help"] | ["--help"] | ["-h"] -> Ok(Help)
     ["help", "errors"] -> Ok(CommandHelp("errors"))
+    ["help", "aql"] -> Ok(CommandHelp("aql"))
     ["help", command] -> command_help(command)
     ["version"] | ["--version"] | ["-V"] -> Ok(Version)
     ["completion", shell] -> parse_completion(shell)

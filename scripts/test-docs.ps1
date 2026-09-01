@@ -58,6 +58,12 @@ $expectations = [ordered]@{
         'schemas/beamtrace-cli-v1/envelope.schema.json',
         '--capture-window'
     )
+    'docs/aql-reference.md' = @(
+        '## Grammar',
+        '## Fields',
+        '## Evaluation rules',
+        'ns/us/ms/s'
+    )
     'docs/getting-started.md' = @(
         'beamtrace demo --no-ui --json',
         'mise run beamtrace'
