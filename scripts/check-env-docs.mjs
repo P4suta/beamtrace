@@ -77,11 +77,16 @@ const internal = (name) =>
     (prefix) => name.startsWith(prefix) || `${name}_` === prefix,
   );
 
+const prefixStem = (name) =>
+  internalPrefixes.some((prefix) => `${name}_` === prefix);
+
 const undocumented = [...sourceVariables]
   .filter((name) => !internal(name) && !documented.has(name))
   .sort();
+// Exact documented rows go stale even under an internal prefix; only the
+// wildcard rows themselves (their stems) are exempt.
 const stale = [...documented]
-  .filter((name) => !internal(name) && !sourceVariables.has(name))
+  .filter((name) => !prefixStem(name) && !sourceVariables.has(name))
   .sort();
 
 if (internalPrefixes.length === 0) {
