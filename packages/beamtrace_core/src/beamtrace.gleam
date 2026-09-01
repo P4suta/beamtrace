@@ -101,8 +101,8 @@ pub fn event_count(trace: Trace) -> Int {
 }
 
 /// Run the offline diagnostics with `diagnostics.default_thresholds` — hot
-/// senders and fan-in from 100 messages, queue waits above 100 ms, restart
-/// chains with gaps of at most 1 s. Dangling calls need the capture outcome
+/// senders from 100 messages, fan-in from 100 distinct senders, queue waits
+/// above 100 ms, restart chains with gaps of at most 1 s. Dangling calls need the capture outcome
 /// and a reference time, so they appear only in `capture_findings`. Each
 /// finding carries its evidence events; none carries a confidence number.
 pub fn findings(trace: Trace) -> List(diagnostics.Finding) {
