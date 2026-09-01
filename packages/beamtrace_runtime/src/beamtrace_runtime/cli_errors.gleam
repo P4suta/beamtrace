@@ -91,7 +91,7 @@ pub fn render_human(error: CliError) -> List(String) {
   let detail = case error.detail {
     None -> []
     Some(text) -> [
-      "Child output (tail):",
+      "Details:",
       ..list.map(string.split(string.trim(text), on: "\n"), fn(line) {
         "  " <> line
       })
@@ -421,10 +421,11 @@ pub fn trace_load_failed(path: String) -> CliError {
   CliError(
     "trace_load_failed",
     CommandFailed,
-    "The archive '" <> path <> "' could not be loaded.",
-    "Run 'beamtrace validate " <> path <> "' for details.",
+    "The archive could not be loaded.",
+    "Run 'beamtrace validate' on the archive for the precise failure.",
     None,
   )
+  |> with_detail(path)
 }
 
 pub fn target_node_unavailable(detail: String) -> CliError {

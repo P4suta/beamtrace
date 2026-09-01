@@ -141,7 +141,8 @@
                 "unsupported_json_command",
                 "web_assets_unavailable",
                 "zip_bomb"
-              ]
+              ],
+              "description": "The catalogue of codes this BeamTrace version emits. The list grows additively within schema_version 1; consumers must treat an unknown code as a generic failure of the reported exit class instead of rejecting the envelope, so do not enum-validate this field against a pinned copy of this schema."
             },
             "message": {
               "type": "string",

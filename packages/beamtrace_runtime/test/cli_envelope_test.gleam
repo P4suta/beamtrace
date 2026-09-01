@@ -102,8 +102,7 @@ pub fn cli_reference_documents_every_error_and_exit_code_test() {
 }
 
 pub fn lifecycle_constructs_failures_only_through_the_catalogue_test() {
-  let assert Ok(source) =
-    read_file("src/beamtrace_runtime/cli_lifecycle.gleam")
+  let assert Ok(source) = read_file("src/beamtrace_runtime/cli_lifecycle.gleam")
   source |> string.contains("emit_json_error(") |> should.be_false()
   source |> string.contains("cli_errors.CliError(") |> should.be_false()
 }

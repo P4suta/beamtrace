@@ -39,6 +39,7 @@ import gleam/io
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import gleam/string
 
 pub const version = runtime_version.current
@@ -488,8 +489,8 @@ fn run_capture_json(
   use Nil <- json_output_or_exit("capture", output, force)
   use Nil <- json_error_or_exit("capture", preflight_agent())
   case read_cookie(cookie_file) {
-    Error(_) -> {
-      emit_json_failure("capture", cli_errors.cookie_unavailable(""))
+    Error(reason) -> {
+      emit_json_failure("capture", cli_errors.cookie_unavailable(reason))
       2
     }
     Ok(cookie) -> {
@@ -591,16 +592,21 @@ fn run_export_json(
           export.otlp(archive, include_raw: False, anchor_now: anchor_now)
       }
       case content {
-        Error(_) -> {
-          emit_json_failure("export", cli_errors.export_conversion_failed())
+        Error(reason) -> {
+          emit_json_failure(
+            "export",
+            cli_errors.export_conversion_failed()
+              |> cli_errors.with_detail(reason),
+          )
           2
         }
         Ok(content) ->
           case write_text(output, content) {
-            Error(_) -> {
+            Error(reason) -> {
               emit_json_failure(
                 "export",
-                cli_errors.export_write_failed(output),
+                cli_errors.export_write_failed(output)
+                  |> cli_errors.with_detail(reason),
               )
               2
             }
@@ -784,16 +790,16 @@ fn execute_record_machine(
     cli_errors.output_exists(output),
   )
   use Nil <- machine_result_error(preflight_agent())
-  use cookie <- machine_result(
-    read_record_cookie(cookie_file),
-    cli_errors.cookie_unavailable(""),
+  use cookie <- machine_result_error(
+    read_record_cookie(cookie_file)
+    |> result.map_error(cli_errors.cookie_unavailable),
   )
-  use node <- machine_result(
+  use node <- machine_result_error(
     case requested_node {
       Some(node) -> Ok(node)
       None -> record_process.auto_node()
-    },
-    cli_errors.target_node_unavailable(""),
+    }
+    |> result.map_error(cli_errors.target_node_unavailable),
   )
   let nodes = string.split(node, on: ",") |> list.map(string.trim)
   case nodes {

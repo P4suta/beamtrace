@@ -52,7 +52,7 @@ pub fn detail_is_rendered_as_an_indented_tail_test() {
   cli_errors.render_human(error)
   |> should.equal([
     "beamtrace[E_CHILD_CRASHED]: The application VM exited during boot with status 1.",
-    "Child output (tail):",
+    "Details:",
     "  line one",
     "  line two",
     "Next: Read the child output tail; fix the boot error and record again.",

@@ -11,9 +11,9 @@ ADR 0003 centralized CLI failures in `cli_errors`, but `cli_lifecycle` still emi
 
 - Every CLI failure is constructed by a `cli_errors` catalogue function. `emit_json_error` is deleted; direct `CliError(...)` construction outside `cli_errors` is forbidden and a test rejects both patterns in `cli_lifecycle`.
 - The fourteen codes join the catalogue (31 → 45): `unsupported_json_command`, `configuration_create_failed`, `invalid_configuration`, `cookie_unavailable`, `export_conversion_failed`, `export_write_failed`, `demo_fixture_unavailable`, `invalid_paths`, `trace_load_failed`, `target_node_unavailable`, `capture_arm_failed`, `child_release_failed`, `child_shutdown_failed`, `child_wait_failed`. Variable context (paths, config reasons) travels in `detail`, keeping messages stable.
-- Adding a code to the `error.code` enum is an additive schema_version 1 change (ADR 0005). Consumers must treat unknown codes as a generic failure of the reported exit class rather than rejecting the envelope.
+- Adding a code to the `error.code` enum is an additive schema_version 1 change (ADR 0005). The enum is BeamTrace's producer gate — our own tests and smoke suite validate emitted output against it. Consumers must not enum-validate `error.code` against a pinned schema copy: the schema's `error.code` description states that the list grows within schema_version 1 and that unknown codes are a generic failure of the reported exit class.
 - Human and JSON channels report the same code for the same failure; `init`, `config check`, and `doctor` now go through the catalogue on both.
 
 ## Consequences
 
-`beamtrace help errors`, the reference table, and the schema enum stay complete automatically — existing tests compare all three against `cli_errors.codes()`, and the smoke suite exercises negative `--json` paths against the schema.
+`beamtrace help errors`, the reference table, and the schema enum stay complete automatically — existing tests compare all three against `cli_errors.codes()`, and the smoke suite exercises negative `--json` paths against the schema. The human detail heading is the generic `Details:` because detail now carries configuration and export diagnostics, not only child output.
