@@ -20,13 +20,24 @@ if ($LASTEXITCODE -ne 0) {
 $env:BEAMTRACE_AGENT_BEAM = $agentBeam
 $env:BEAMTRACE_WEB_ROOT = Join-Path $repoRoot 'packages/beamtrace_web/dist'
 
-Push-Location (Join-Path $repoRoot 'packages\beamtrace_runtime')
+# Build in the package directory, but run from the caller's directory so
+# relative paths and beamtrace.toml discovery behave like the shipped CLI.
+$runtimeRoot = Join-Path $repoRoot 'packages\beamtrace_runtime'
 try {
-    & gleam run -- @BeamTraceArguments
-    $exitCode = $LASTEXITCODE
+    Push-Location $runtimeRoot
+    try {
+        & gleam export escript
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+    }
+    if ($exitCode -eq 0) {
+        & escript (Join-Path $runtimeRoot 'beamtrace_runtime') @BeamTraceArguments
+        $exitCode = $LASTEXITCODE
+    }
 }
 finally {
-    Pop-Location
     $env:BEAMTRACE_AGENT_BEAM = $previousAgentBeam
     $env:BEAMTRACE_WEB_ROOT = $previousWebRoot
 }

@@ -144,6 +144,7 @@ fn run(command_: cli.Command) -> Int {
       case project_config.init() {
         Ok(path) -> {
           io.println("Created " <> path)
+          io.println("Edit it to fit your project — see docs/project-config.md")
           0
         }
         Error(error) -> fail_with(cli_errors.configuration_create_failed(error))
