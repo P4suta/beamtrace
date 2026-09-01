@@ -16,4 +16,4 @@ Constructing one `types.TraceEvent` by hand takes ~20 lines of nested records (`
 
 ## Consequences
 
-The README façade example drops from ~20 lines to 6. Callers who need identity evidence still construct `ProcessIdentity` directly; the builder does not wrap every field of every record.
+The README facade example drops from ~20 lines to 6. Callers who need identity evidence still construct `ProcessIdentity` directly; the builder does not wrap every field of every record.
