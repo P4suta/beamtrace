@@ -15,6 +15,7 @@ $steps = @(
     'test-format-conformance.ps1',
     'test-performance.ps1',
     'test-core-consumer.ps1',
+    'test-core-snippets.ps1',
     'test-runtime.ps1',
     'test-mcp.ps1',
     'test-agent.ps1',
