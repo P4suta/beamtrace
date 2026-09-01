@@ -130,7 +130,10 @@ pub fn commands() -> List(CommandSpec) {
       "compare",
       "Compare 2 to 20 trace archives.",
       "beamtrace compare <trace.beamtrace> <trace.beamtrace> [more traces] [--web|--tui|--json]",
-      ["Two paths with no mode retain the classic terminal comparison."],
+      [
+        "Interactive terminal: the Web comparison workspace opens.",
+        "Non-interactive (pipe or CI): two paths keep the classic terminal comparison; more print the multi-run summary.",
+      ],
       [
         "beamtrace compare before.beamtrace after.beamtrace",
         "beamtrace compare run-1.beamtrace run-2.beamtrace run-3.beamtrace --web",

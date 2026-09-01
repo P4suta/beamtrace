@@ -32,10 +32,25 @@ pub type DemoMode {
 }
 
 pub type CompareDisplay {
+  CompareAuto
   CompareTerminal
   CompareWeb
   CompareWebNoOpen
   CompareTui
+}
+
+/// Resolve the implicit compare display the way record does: an interactive
+/// terminal opens the Web comparison workspace, a pipe or CI keeps the
+/// classic terminal output. Explicit modes pass through unchanged.
+pub fn resolve_compare_display(
+  display: CompareDisplay,
+  interactive interactive: Bool,
+) -> CompareDisplay {
+  case display, interactive {
+    CompareAuto, True -> CompareWeb
+    CompareAuto, False -> CompareTerminal
+    explicit, _ -> explicit
+  }
 }
 
 pub type RecordDisplay {
@@ -81,7 +96,6 @@ pub type Command {
     window_s: Int,
   )
   Open(path: String, mode: UiMode, port: Int)
-  Compare(left: String, right: String)
   CompareMany(paths: List(String), display: CompareDisplay, port: Int)
   Export(path: String, format: ExportFormat, otlp_anchor_now: Bool)
   Validate(path: String, json: Bool)
@@ -416,17 +430,13 @@ fn parse_tui(
 fn parse_compare(options: List(String)) -> Result(Command, ParseError) {
   use parsed <- try_result(parse_compare_options(
     options,
-    ParsedCompare([], CompareTerminal, False, 0, False),
+    ParsedCompare([], CompareAuto, False, 0, False),
   ))
   let paths = list.reverse(parsed.paths)
   let count = list.length(paths)
   case count >= 2 && count <= 20 {
     False -> Error(usage("compare requires between 2 and 20 .beamtrace files"))
-    True ->
-      case paths, parsed.display, parsed.explicit_display, parsed.port {
-        [left, right], CompareTerminal, False, 0 -> Ok(Compare(left, right))
-        _, display, _, port -> Ok(CompareMany(paths, display, port))
-      }
+    True -> Ok(CompareMany(paths, parsed.display, parsed.port))
   }
 }
 
@@ -451,7 +461,7 @@ fn parse_compare_options(
     ["--port", value, ..rest] -> {
       use port <- try_result(parse_port(value))
       let display = case parsed.display {
-        CompareTerminal -> CompareWeb
+        CompareAuto -> CompareWeb
         current -> current
       }
       case display == CompareTui {
@@ -1176,7 +1186,6 @@ fn json_allowed(command: Command) -> Bool {
   case command {
     Capture(..)
     | Record(..)
-    | Compare(..)
     | Export(..)
     | Validate(..)
     | Migrate(..)
@@ -1184,7 +1193,7 @@ fn json_allowed(command: Command) -> Bool {
     | ConfigCheck
     | Doctor(..)
     | Version -> True
-    CompareMany(_, CompareTerminal, _) -> True
+    CompareMany(_, CompareAuto, _) | CompareMany(_, CompareTerminal, _) -> True
     Demo(DemoNoUi, _, _) -> True
     RecordUi(_, RecordNoUi) -> True
     _ -> False

@@ -9,6 +9,8 @@
 
 ### Features
 
+* **cli:** `compare` now follows the interactive-default rule of every other viewer — an interactive terminal opens the Web comparison workspace, while pipes, CI, and `--json` keep the byte-compatible classic output and exit codes; the dev launcher also stops swallowing `--out` and friends
+
 * **cli:** add `beamtrace help aql` and `docs/aql-reference.md` — grammar, operators, duration literals, the full field vocabulary rendered from `aql.event_fields`, evaluation rules, and examples; `--where` help links to it
 
 * **core:** replace `aql.AqlError` with typed variants rendered by `error_message` and the caret-annotated `error_report`; add `aql.parse_for` field validation with did-you-mean suggestions and the `aql.event_fields` vocabulary — `--where` and `beamtrace.toml` typos now fail at parse time on every path

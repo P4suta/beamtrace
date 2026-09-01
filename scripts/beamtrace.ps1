@@ -1,9 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
-[CmdletBinding(PositionalBinding = $false)]
-param(
-    [Parameter(ValueFromRemainingArguments = $true)]
-    [string[]] $BeamTraceArguments
-)
+# No param()/CmdletBinding: PowerShell would otherwise claim arguments such
+# as --out (ambiguous with -OutVariable) instead of passing them through.
+$BeamTraceArguments = @($args)
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot

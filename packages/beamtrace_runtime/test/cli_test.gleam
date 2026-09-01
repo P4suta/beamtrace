@@ -622,7 +622,7 @@ pub fn force_json_record_modes_and_multi_compare_are_explicit_test() {
       "--acknowledge-seq-trace-reset",
     ])
 
-  let assert Ok(cli.Json(cli.CompareMany(paths, cli.CompareTerminal, 0))) =
+  let assert Ok(cli.Json(cli.CompareMany(paths, cli.CompareAuto, 0))) =
     cli.parse([
       "compare",
       "one.beamtrace",
@@ -884,4 +884,18 @@ pub fn every_help_example_parses_test() {
 
 pub fn help_aql_routes_to_the_aql_topic_test() {
   cli.parse(["help", "aql"]) |> should.equal(Ok(cli.CommandHelp("aql")))
+}
+
+pub fn compare_without_a_mode_resolves_by_terminal_interactivity_test() {
+  let assert Ok(cli.CompareMany(_, cli.CompareAuto, 0)) =
+    cli.parse(["compare", "a.beamtrace", "b.beamtrace"])
+
+  cli.resolve_compare_display(cli.CompareAuto, interactive: True)
+  |> should.equal(cli.CompareWeb)
+  cli.resolve_compare_display(cli.CompareAuto, interactive: False)
+  |> should.equal(cli.CompareTerminal)
+  cli.resolve_compare_display(cli.CompareTui, interactive: True)
+  |> should.equal(cli.CompareTui)
+  cli.resolve_compare_display(cli.CompareWebNoOpen, interactive: False)
+  |> should.equal(cli.CompareWebNoOpen)
 }
