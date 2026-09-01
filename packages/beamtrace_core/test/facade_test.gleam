@@ -1,6 +1,7 @@
 import beamtrace
 import beamtrace/codec
 import beamtrace/dag
+import beamtrace/diagnostics
 import beamtrace/mfa
 import beamtrace/types
 import gleam/list
@@ -109,4 +110,61 @@ pub fn facade_counts_events_and_runs_default_diagnostics_test() {
   let assert Ok(trace) = beamtrace.from_events([event("one"), event("two")])
   beamtrace.event_count(trace) |> should.equal(2)
   beamtrace.findings(trace) |> should.equal([])
+}
+
+fn call_event(id: String, at: Int) -> types.TraceEvent {
+  types.TraceEvent(
+    ..event(id),
+    local_instant: types.LocalInstant(at, at),
+    kind: types.Send(
+      types.ProcessRef("app@host", "<0.2.0>"),
+      types.TagOnly("call"),
+      types.SequenceSerial(0, 1),
+    ),
+  )
+}
+
+pub fn findings_delegates_to_the_default_thresholds_test() {
+  let assert Ok(trace) =
+    beamtrace.from_events([call_event("a", 1), call_event("b", 2)])
+  beamtrace.findings(trace)
+  |> should.equal(beamtrace.findings_with(
+    trace,
+    thresholds: diagnostics.default_thresholds(),
+  ))
+}
+
+pub fn findings_with_lowered_thresholds_surfaces_more_test() {
+  let assert Ok(trace) =
+    beamtrace.from_events([call_event("a", 1), call_event("b", 2)])
+  beamtrace.findings(trace) |> should.equal([])
+  beamtrace.findings_with(
+    trace,
+    thresholds: diagnostics.Thresholds(
+      ..diagnostics.default_thresholds(),
+      hot_sender_messages: 2,
+    ),
+  )
+  |> list.map(fn(finding) { finding.kind })
+  |> should.equal([diagnostics.HotSender])
+}
+
+pub fn capture_findings_includes_dangling_calls_test() {
+  let assert Ok(trace) = beamtrace.from_events([call_event("call", 100)])
+  let outcome =
+    types.CaptureOutcome(types.QuietPeriod(250), [], [
+      types.NodeReceipt("app@host", 1, 1, 1),
+    ])
+  beamtrace.capture_findings(
+    trace,
+    thresholds: diagnostics.Thresholds(
+      ..diagnostics.default_thresholds(),
+      dangling_call_timeout_ns: 500,
+    ),
+    outcome: outcome,
+    now_ns: 1000,
+  )
+  |> list.map(fn(finding) { finding.kind })
+  |> list.contains(diagnostics.DanglingCall)
+  |> should.be_true()
 }

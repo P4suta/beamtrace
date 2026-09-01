@@ -247,3 +247,62 @@ pub fn repeated_calls_are_left_unmatched_instead_of_fabricating_a_dangling_pair_
   )
   |> should.equal([])
 }
+
+pub fn default_thresholds_are_the_documented_values_test() {
+  diagnostics.default_thresholds()
+  |> should.equal(diagnostics.Thresholds(
+    hot_sender_messages: 100,
+    fan_in_senders: 100,
+    queue_wait_ns: 100_000_000,
+    restart_gap_ns: 1_000_000_000,
+    dangling_call_timeout_ns: 5_000_000_000,
+  ))
+}
+
+pub fn analyze_composes_the_four_capture_independent_analyses_test() {
+  let events = [
+    send("s1", "<0.1.0>", "<0.2.0>", "work", 1, 100),
+    send("s2", "<0.1.0>", "<0.2.0>", "work", 2, 200),
+  ]
+  let thresholds =
+    diagnostics.Thresholds(
+      ..diagnostics.default_thresholds(),
+      hot_sender_messages: 2,
+      fan_in_senders: 1,
+    )
+  diagnostics.analyze(events, thresholds: thresholds)
+  |> should.equal(
+    list.flatten([
+      diagnostics.hot_senders(events, minimum_messages: 2),
+      diagnostics.fan_in(events, minimum_senders: 1),
+      diagnostics.queue_waits(events, minimum_ns: 100_000_000),
+      diagnostics.restart_chains(events, maximum_gap_ns: 1_000_000_000),
+    ]),
+  )
+  diagnostics.analyze(events, thresholds: thresholds)
+  |> list.map(fn(finding) { finding.kind })
+  |> should.equal([diagnostics.HotSender])
+}
+
+pub fn analyze_capture_additionally_reports_dangling_calls_test() {
+  let call = send("call", "<0.1.0>", "<0.2.0>", "call", 10, 100)
+  let thresholds =
+    diagnostics.Thresholds(
+      ..diagnostics.default_thresholds(),
+      dangling_call_timeout_ns: 500,
+    )
+  diagnostics.analyze_capture(
+    [call],
+    thresholds: thresholds,
+    outcome: verified_outcome(),
+    now_ns: 1000,
+  )
+  |> list.map(fn(finding) { finding.kind })
+  |> list.contains(diagnostics.DanglingCall)
+  |> should.be_true()
+
+  diagnostics.analyze([call], thresholds: thresholds)
+  |> list.map(fn(finding) { finding.kind })
+  |> list.contains(diagnostics.DanglingCall)
+  |> should.be_false()
+}
