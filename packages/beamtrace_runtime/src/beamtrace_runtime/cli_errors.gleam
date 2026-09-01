@@ -91,7 +91,7 @@ pub fn render_human(error: CliError) -> List(String) {
   let detail = case error.detail {
     None -> []
     Some(text) -> [
-      "Child output (tail):",
+      "Details:",
       ..list.map(string.split(string.trim(text), on: "\n"), fn(line) {
         "  " <> line
       })
@@ -331,6 +331,154 @@ pub fn capture_failed(reason: String) -> CliError {
   |> with_detail(reason)
 }
 
+pub fn unsupported_json_command() -> CliError {
+  CliError(
+    "unsupported_json_command",
+    CommandFailed,
+    "This command cannot produce a finite JSON result.",
+    "Use --no-ui where available or omit --json.",
+    None,
+  )
+}
+
+pub fn configuration_create_failed(reason: String) -> CliError {
+  CliError(
+    "configuration_create_failed",
+    CommandFailed,
+    "The project configuration file could not be created.",
+    "Check directory permissions and whether beamtrace.toml already exists.",
+    None,
+  )
+  |> with_detail(reason)
+}
+
+pub fn invalid_configuration(reason: String) -> CliError {
+  CliError(
+    "invalid_configuration",
+    CommandFailed,
+    "The beamtrace.toml project configuration is invalid.",
+    "Fix the reported field, then run 'beamtrace config check'.",
+    None,
+  )
+  |> with_detail(reason)
+}
+
+pub fn cookie_unavailable(reason: String) -> CliError {
+  CliError(
+    "cookie_unavailable",
+    CommandFailed,
+    "The distribution cookie could not be prepared.",
+    "Pass --cookie-file with a private readable file or set BEAMTRACE_COOKIE.",
+    None,
+  )
+  |> with_detail(reason)
+}
+
+pub fn export_conversion_failed() -> CliError {
+  CliError(
+    "export_conversion_failed",
+    CommandFailed,
+    "The archive could not be represented in the requested format.",
+    "For OTLP, pass --otlp-anchor-now only when an explicit wall-clock anchor is acceptable.",
+    None,
+  )
+}
+
+pub fn export_write_failed(path: String) -> CliError {
+  CliError(
+    "export_write_failed",
+    CommandFailed,
+    "The exported artifact could not be written to '" <> path <> "'.",
+    "Check the destination directory permissions and free space.",
+    None,
+  )
+}
+
+pub fn demo_fixture_unavailable(bundled: Bool) -> CliError {
+  CliError(
+    "demo_fixture_unavailable",
+    CommandFailed,
+    "The bundled demo fixture could not be prepared.",
+    case bundled {
+      True -> incomplete_archive_hint()
+      False -> "Run 'beamtrace doctor' to verify the demo runtime assets."
+    },
+    None,
+  )
+}
+
+pub fn invalid_paths() -> CliError {
+  CliError(
+    "invalid_paths",
+    CommandFailed,
+    "Compare requires 2 to 20 distinct .beamtrace files.",
+    "Pass each archive path once; see 'beamtrace help compare'.",
+    None,
+  )
+}
+
+pub fn trace_load_failed(path: String) -> CliError {
+  CliError(
+    "trace_load_failed",
+    CommandFailed,
+    "The archive could not be loaded.",
+    "Run 'beamtrace validate' on the archive for the precise failure.",
+    None,
+  )
+  |> with_detail(path)
+}
+
+pub fn target_node_unavailable(detail: String) -> CliError {
+  CliError(
+    "target_node_unavailable",
+    CommandFailed,
+    "A target node could not be selected.",
+    "Pass --node explicitly or check the local hostname configuration.",
+    None,
+  )
+  |> with_detail(detail)
+}
+
+pub fn capture_arm_failed() -> CliError {
+  CliError(
+    "capture_arm_failed",
+    CommandFailed,
+    "The capture could not be armed.",
+    "Verify that no capture is active and that the MFA exists on the target.",
+    None,
+  )
+}
+
+pub fn child_release_failed() -> CliError {
+  CliError(
+    "child_release_failed",
+    CommandFailed,
+    "The application command could not be released after arming.",
+    "Retry after confirming the child command can start normally.",
+    None,
+  )
+}
+
+pub fn child_shutdown_failed() -> CliError {
+  CliError(
+    "child_shutdown_failed",
+    CommandFailed,
+    "The application command could not leave the capture shutdown gate.",
+    "Run the command directly and check its shutdown behavior.",
+    None,
+  )
+}
+
+pub fn child_wait_failed() -> CliError {
+  CliError(
+    "child_wait_failed",
+    CommandFailed,
+    "The application command did not finish cleanly.",
+    "Inspect the application command separately, then retry record.",
+    None,
+  )
+}
+
 /// Translate a capture or record reason into a catalogue entry.
 pub fn from_capture_reason(reason: String) -> CliError {
   let not_found = "executable_not_found: "
@@ -492,6 +640,20 @@ pub fn all() -> List(CliError) {
     trigger_timeout(),
     target_unreachable("nodedown"),
     capture_failed("reason"),
+    unsupported_json_command(),
+    configuration_create_failed("eacces"),
+    invalid_configuration("invalid value"),
+    cookie_unavailable("enoent"),
+    export_conversion_failed(),
+    export_write_failed("trace.html"),
+    demo_fixture_unavailable(True),
+    invalid_paths(),
+    trace_load_failed("trace.beamtrace"),
+    target_node_unavailable("no hostname"),
+    capture_arm_failed(),
+    child_release_failed(),
+    child_shutdown_failed(),
+    child_wait_failed(),
     from_storage(storage.InvalidContainer, "x"),
     from_storage(storage.UnsafeEntry("x"), "x"),
     from_storage(storage.DuplicateEntry("x"), "x"),

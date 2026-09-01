@@ -39,6 +39,7 @@ import gleam/io
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import gleam/string
 
 pub const version = runtime_version.current
@@ -140,7 +141,7 @@ fn run(command_: cli.Command) -> Int {
           io.println("Created " <> path)
           0
         }
-        Error(error) -> fail(error, 2)
+        Error(error) -> fail_with(cli_errors.configuration_create_failed(error))
       }
     cli.ConfigCheck ->
       case project_config.check() {
@@ -148,11 +149,11 @@ fn run(command_: cli.Command) -> Int {
           io.println(summary)
           0
         }
-        Error(error) -> fail("configuration invalid: " <> error, 2)
+        Error(error) -> fail_with(cli_errors.invalid_configuration(error))
       }
     cli.Doctor(json) -> {
       case project_config.validate_current() {
-        Error(error) -> fail("configuration invalid: " <> error, 2)
+        Error(error) -> fail_with(cli_errors.invalid_configuration(error))
         Ok(configuration) -> {
           let #(profile_status, cookie_files) = case configuration {
             Some(configuration) -> #(
@@ -434,13 +435,7 @@ fn run_json_with_force(command_: cli.Command, force: Bool) -> Int {
     cli.Doctor(_) -> run_doctor_json()
     // The parser rejects JSON for interactive and long-running commands.
     command -> {
-      emit_json_error(
-        "unknown",
-        2,
-        "unsupported_json_command",
-        "This command cannot produce a finite JSON result.",
-        "Use --no-ui where available or omit --json.",
-      )
+      emit_json_failure("unknown", cli_errors.unsupported_json_command())
       let _ = command
       2
     }
@@ -453,14 +448,8 @@ fn run_init_json() -> Int {
       emit_json_success("init", json.object(path_artifact(path)))
       0
     }
-    Error(_) -> {
-      emit_json_error(
-        "init",
-        2,
-        "configuration_create_failed",
-        "BeamTrace could not create the project configuration.",
-        "Check directory permissions and whether beamtrace.toml already exists.",
-      )
+    Error(reason) -> {
+      emit_json_failure("init", cli_errors.configuration_create_failed(reason))
       2
     }
   }
@@ -475,14 +464,8 @@ fn run_config_check_json() -> Int {
       )
       0
     }
-    Error(_) -> {
-      emit_json_error(
-        "config",
-        2,
-        "invalid_configuration",
-        "BeamTrace project configuration is invalid.",
-        "Run 'beamtrace config check' without --json for the field-level diagnostic.",
-      )
+    Error(reason) -> {
+      emit_json_failure("config", cli_errors.invalid_configuration(reason))
       2
     }
   }
@@ -506,14 +489,8 @@ fn run_capture_json(
   use Nil <- json_output_or_exit("capture", output, force)
   use Nil <- json_error_or_exit("capture", preflight_agent())
   case read_cookie(cookie_file) {
-    Error(_) -> {
-      emit_json_error(
-        "capture",
-        2,
-        "cookie_unavailable",
-        "The distribution cookie could not be read.",
-        "Pass --cookie-file with a private readable file or configure BEAMTRACE_COOKIE.",
-      )
+    Error(reason) -> {
+      emit_json_failure("capture", cli_errors.cookie_unavailable(reason))
       2
     }
     Ok(cookie) -> {
@@ -615,25 +592,21 @@ fn run_export_json(
           export.otlp(archive, include_raw: False, anchor_now: anchor_now)
       }
       case content {
-        Error(_) -> {
-          emit_json_error(
+        Error(reason) -> {
+          emit_json_failure(
             "export",
-            2,
-            "export_conversion_failed",
-            "The archive could not be represented in the requested format.",
-            "For OTLP, pass --otlp-anchor-now only when an explicit wall-clock anchor is acceptable.",
+            cli_errors.export_conversion_failed()
+              |> cli_errors.with_detail(reason),
           )
           2
         }
         Ok(content) ->
           case write_text(output, content) {
-            Error(_) -> {
-              emit_json_error(
+            Error(reason) -> {
+              emit_json_failure(
                 "export",
-                2,
-                "export_write_failed",
-                "The exported artifact could not be written.",
-                "Check the destination directory permissions and free space.",
+                cli_errors.export_write_failed(output)
+                  |> cli_errors.with_detail(reason),
               )
               2
             }
@@ -700,12 +673,9 @@ const demo_staged_modules = ["beamtrace_demo_fixture"]
 fn run_demo_json(out: String) -> Int {
   case record_process.demo_command() {
     Error(_) -> {
-      emit_json_error(
+      emit_json_failure(
         "demo",
-        2,
-        "demo_fixture_unavailable",
-        "The bundled demo command could not be prepared.",
-        "Run 'beamtrace doctor' to verify the native distribution assets.",
+        cli_errors.demo_fixture_unavailable(capture.bundled_runtime()),
       )
       2
     }
@@ -820,38 +790,22 @@ fn execute_record_machine(
     cli_errors.output_exists(output),
   )
   use Nil <- machine_result_error(preflight_agent())
-  use cookie <- machine_result(
-    read_record_cookie(cookie_file),
-    cli_errors.CliError(
-      "cookie_unavailable",
-      cli_errors.CommandFailed,
-      "The record distribution cookie could not be prepared.",
-      "Pass a private --cookie-file or allow BeamTrace to create an ephemeral cookie.",
-      None,
-    ),
+  use cookie <- machine_result_error(
+    read_record_cookie(cookie_file)
+    |> result.map_error(cli_errors.cookie_unavailable),
   )
-  use node <- machine_result(
+  use node <- machine_result_error(
     case requested_node {
       Some(node) -> Ok(node)
       None -> record_process.auto_node()
-    },
-    cli_errors.CliError(
-      "target_node_unavailable",
-      cli_errors.CommandFailed,
-      "A target node name could not be selected.",
-      "Pass --node explicitly or check the local hostname configuration.",
-      None,
-    ),
+    }
+    |> result.map_error(cli_errors.target_node_unavailable),
   )
   let nodes = string.split(node, on: ",") |> list.map(string.trim)
   case nodes {
     [] ->
-      Error(cli_errors.CliError(
-        "target_node_unavailable",
-        cli_errors.CommandFailed,
-        "Record requires at least one target node.",
-        "Pass a non-empty --node value.",
-        None,
+      Error(cli_errors.target_node_unavailable(
+        "record requires at least one non-empty --node value",
       ))
     [root, ..] -> {
       let cli.Mfa(trigger_module, _, _) = trigger
@@ -920,13 +874,7 @@ fn execute_record_machine_session(
   case capture_session.arm(store, spec), nodes {
     Error(_), _ | _, [] -> {
       record_process.stop(handle)
-      Error(cli_errors.CliError(
-        "capture_arm_failed",
-        cli_errors.CommandFailed,
-        "The capture could not be armed.",
-        "Verify that no capture is active and that the MFA exists on the target.",
-        None,
-      ))
+      Error(cli_errors.capture_arm_failed())
     }
     Ok(Nil), [root, ..] ->
       case capture.wait_until_armed(root, cookie, 5000) {
@@ -941,13 +889,7 @@ fn execute_record_machine_session(
             Error(_) -> {
               let _ = capture_session.cancel(store)
               record_process.stop(handle)
-              Error(cli_errors.CliError(
-                "child_release_failed",
-                cli_errors.CommandFailed,
-                "The application command could not be released after arming.",
-                "Retry after confirming the child command can start normally.",
-                None,
-              ))
+              Error(cli_errors.child_release_failed())
             }
             Ok(Nil) ->
               execute_record_machine_child(
@@ -976,36 +918,17 @@ fn execute_record_machine_child(
       let _ = capture_session.cancel(store)
       let _ = record_process.release_finish(handle)
       record_process.stop(handle)
-      Error(cli_errors.CliError(
-        "capture_incomplete",
-        cli_errors.CommandFailed,
-        "The armed operation did not produce a complete capture.",
-        "Confirm the selected MFA is invoked once before the capture window ends.",
-        None,
-      ))
+      Error(cli_errors.capture_incomplete())
     }
     Ok(result) ->
       case record_process.release_finish(handle) {
         Error(_) -> {
           record_process.stop(handle)
-          Error(cli_errors.CliError(
-            "child_shutdown_failed",
-            cli_errors.CommandFailed,
-            "The application command could not leave the capture shutdown gate.",
-            "Run the command directly and check its shutdown behavior.",
-            None,
-          ))
+          Error(cli_errors.child_shutdown_failed())
         }
         Ok(Nil) ->
           case record_process.await(handle, 86_400_000) {
-            Error(_) ->
-              Error(cli_errors.CliError(
-                "child_wait_failed",
-                cli_errors.CommandFailed,
-                "The application command did not finish cleanly.",
-                "Inspect the application command separately, then retry record.",
-                None,
-              ))
+            Error(_) -> Error(cli_errors.child_wait_failed())
             Ok(#(child_status, _)) ->
               case save_result(output, nodes, result, types.Metadata, force) {
                 Error(error) -> Error(error)
@@ -1059,13 +982,7 @@ fn json_output_or_exit(
   case output_available(path, force) {
     Ok(Nil) -> next(Nil)
     Error(_) -> {
-      emit_json_error(
-        command,
-        2,
-        "output_exists",
-        "The requested output path already exists.",
-        "Choose another path or pass --force with an explicit --out path.",
-      )
+      emit_json_failure(command, cli_errors.output_exists(path))
       2
     }
   }
@@ -1073,14 +990,8 @@ fn json_output_or_exit(
 
 fn run_doctor_json() -> Int {
   case project_config.validate_current() {
-    Error(_) -> {
-      emit_json_error(
-        "doctor",
-        2,
-        "invalid_configuration",
-        "BeamTrace project configuration is invalid.",
-        "Run 'beamtrace config check' for the exact field to fix.",
-      )
+    Error(reason) -> {
+      emit_json_failure("doctor", cli_errors.invalid_configuration(reason))
       2
     }
     Ok(configuration) -> {
@@ -1154,32 +1065,19 @@ fn doctor_checks(report: String) -> json.Json {
 fn run_compare_json(paths: List(String)) -> Int {
   case compare_workspace.compare(paths) {
     Error(compare_workspace.InvalidPaths) -> {
-      emit_json_error(
-        "compare",
-        2,
-        "invalid_paths",
-        "Compare requires 2 to 20 distinct .beamtrace files.",
-        "Pass archive paths before --json.",
-      )
+      emit_json_failure("compare", cli_errors.invalid_paths())
       2
     }
     Error(compare_workspace.LoadFailed(path, _)) -> {
-      emit_json_error(
-        "compare",
-        2,
-        "trace_load_failed",
-        "Could not load '" <> path <> "'.",
-        "Run 'beamtrace validate " <> path <> "' first.",
-      )
+      emit_json_failure("compare", cli_errors.trace_load_failed(path))
       2
     }
     Error(compare_workspace.InvalidTrace(path, _)) -> {
-      emit_json_error(
+      emit_json_failure(
         "compare",
-        2,
-        "invalid_trace_graph",
-        "The causal graph in '" <> path <> "' is invalid.",
-        "Run 'beamtrace validate " <> path <> "' for details.",
+        cli_errors.invalid_trace_graph(
+          "invalid causal graph in '" <> path <> "'",
+        ),
       )
       2
     }
@@ -1401,28 +1299,6 @@ fn emit_json_failure(command: String, error: cli_errors.CliError) -> Nil {
     cli_errors.exit_code(error),
     None,
     Some(error_json(error)),
-  )
-}
-
-fn emit_json_error(
-  command: String,
-  exit_code: Int,
-  code: String,
-  message: String,
-  hint: String,
-) -> Nil {
-  emit_json_result(
-    command,
-    False,
-    exit_code,
-    None,
-    Some(
-      json.object([
-        #("code", json.string(code)),
-        #("message", json.string(message)),
-        #("hint", json.string(hint)),
-      ]),
-    ),
   )
 }
 

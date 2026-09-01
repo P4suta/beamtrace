@@ -14,3 +14,4 @@
 - [0011](0011-core-vocabulary-finalized-before-first-stable-release.md) — Core vocabulary is finalized before the first stable release
 - [0012](0012-aql-errors-are-typed-and-field-checked.md) — AQL errors are typed, caret-rendered, and field-checked
 - [0014](0014-diagnostic-thresholds-are-explicit-records.md) — Diagnostic thresholds are explicit records
+- [0016](0016-cli-error-catalogue-is-closed.md) — The CLI error catalogue is closed

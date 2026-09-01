@@ -22,6 +22,23 @@ builds the agent and sets `BEAMTRACE_AGENT_BEAM`.
 runtime only runs BeamTrace and `beamtrace demo`. Install Erlang/OTP 27–29 (and
 Gleam, Mix, or Rebar3 as needed) or add them to `PATH`.
 
+## `E_COOKIE_UNAVAILABLE`
+
+The Erlang distribution cookie could not be prepared. Pass `--cookie-file`
+pointing at a private, readable file, or set `BEAMTRACE_COOKIE`. For `record`,
+BeamTrace can also create an ephemeral cookie when neither is given.
+
+## `E_INVALID_CONFIGURATION`
+
+`beamtrace.toml` failed validation; the offending field is named in the
+detail. Fix it, then confirm with `beamtrace config check`.
+
+## `E_TRACE_LOAD_FAILED`
+
+An archive passed to `compare` could not be loaded. Run
+`beamtrace validate <path>` on it — validation reports the precise integrity
+or schema failure.
+
 ## `E_SYSTEM_TRACER_OCCUPIED`
 
 Another tracer owns the VM-global facility. Stop that tracer and retry, or use
