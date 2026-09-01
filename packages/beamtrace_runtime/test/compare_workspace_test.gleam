@@ -58,7 +58,7 @@ fn save_run(path: String, pid: String, root_at: Int, send_at: Option(Int)) {
         at,
         types.Send(
           types.ProcessRef("fixture@host", "<0.7.0>"),
-          types.Tag("work"),
+          types.TagOnly("work"),
           v2_fixture.serial(1),
         ),
       ),

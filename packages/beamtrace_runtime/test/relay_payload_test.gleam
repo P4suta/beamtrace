@@ -92,7 +92,7 @@ pub fn authorized_raw_batch_is_strictly_validated_and_token_is_not_canonicalized
   let fingerprint = string.repeat("c", 64)
   let raw_event =
     event(
-      types.MapView(2, [
+      types.BoundedMap(2, [
         #(types.Atom("token"), types.Redacted("key policy")),
         #(
           types.Atom("answer"),
@@ -122,7 +122,7 @@ pub fn authorized_raw_batch_rejects_redaction_and_depth_policy_violations_test()
   let fingerprint = string.repeat("d", 64)
   let leaked =
     event(
-      types.MapView(1, [
+      types.BoundedMap(1, [
         #(
           types.Atom("password"),
           types.Scalar("string", Some(sentinel), Some(fingerprint)),

@@ -48,7 +48,7 @@ pub fn sequential_serial_creates_exact_causal_edge_test() {
       client,
       types.Send(
         worker.physical,
-        types.Tag("work"),
+        types.TagOnly("work"),
         types.SequenceSerial(40, 41),
       ),
     ),
@@ -58,7 +58,7 @@ pub fn sequential_serial_creates_exact_causal_edge_test() {
       worker,
       types.Received(
         client.physical,
-        types.Tag("work"),
+        types.TagOnly("work"),
         types.SequenceSerial(40, 41),
       ),
     ),
@@ -90,7 +90,7 @@ pub fn distributed_clock_skew_does_not_break_serial_causality_test() {
       worker,
       types.Received(
         client.physical,
-        types.Tag("work"),
+        types.TagOnly("work"),
         types.SequenceSerial(76, 77),
       ),
     ),
@@ -100,7 +100,7 @@ pub fn distributed_clock_skew_does_not_break_serial_causality_test() {
       client,
       types.Send(
         worker.physical,
-        types.Tag("work"),
+        types.TagOnly("work"),
         types.SequenceSerial(76, 77),
       ),
     ),
@@ -137,7 +137,7 @@ pub fn trace_timestamp_precedes_mailbox_delivery_order_test() {
         "parent-receive",
         5,
         parent,
-        types.Received(child.physical, types.Tag("ready"), serial),
+        types.Received(child.physical, types.TagOnly("ready"), serial),
       ),
       local_instant: types.LocalInstant(5, 1),
     ),
@@ -159,7 +159,7 @@ pub fn trace_timestamp_precedes_mailbox_delivery_order_test() {
         "child-send",
         4,
         child,
-        types.Send(parent.physical, types.Tag("ready"), serial),
+        types.Send(parent.physical, types.TagOnly("ready"), serial),
       ),
       local_instant: types.LocalInstant(4, 3),
     ),
@@ -181,7 +181,7 @@ pub fn missing_receive_becomes_boundary_not_invented_edge_test() {
       "send",
       2,
       client,
-      types.Send(absent, types.Tag("work"), types.SequenceSerial(98, 99)),
+      types.Send(absent, types.TagOnly("work"), types.SequenceSerial(98, 99)),
     ),
   ]
 

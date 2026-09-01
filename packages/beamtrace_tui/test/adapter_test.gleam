@@ -29,7 +29,7 @@ pub fn canonical_trace_events_become_vertical_tui_rows_test() {
       "app@host",
       process,
       types.LocalInstant(2500, 1),
-      types.Exit(types.Tag("badmatch")),
+      types.Exit(types.TagOnly("badmatch")),
       types.inferred("restart_proximity", "restart proximity", [
         types.EvidenceEvent("root"),
       ]),

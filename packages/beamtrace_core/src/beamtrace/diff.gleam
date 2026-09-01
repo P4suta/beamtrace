@@ -1,9 +1,9 @@
 //// PID-independent causal alignment and reusable checked preparation.
 ////
-//// `prepare` and `compare_checked` return DAG failures; compatibility
-//// `compare` remains total for existing callers. Preparation is O((n + e)
-//// log n), caches bounded fingerprint rounds, and can be reused by
-//// `compare_prepared`. Results are deterministic on Erlang and JavaScript.
+//// `prepare` and `compare` return the first DAG failure instead of
+//// comparing an invalid trace. Preparation is O((n + e) log n), caches
+//// bounded fingerprint rounds, and can be reused by `compare_prepared`.
+//// Results are deterministic on Erlang and JavaScript.
 
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace/dag
@@ -111,30 +111,14 @@ type SnakeSearch {
   SnakeLimit
 }
 
-/// Compare roots and logical actors by a four-round causal-neighborhood
-/// fingerprint. Unique anchors are patience/LIS aligned; gaps use a bounded
-/// edit search and remain explicit when no unique answer is defensible.
-@deprecated("Use compare_checked or the beamtrace facade; compare silently falls back to an unchecked comparison when a DAG error occurs")
-pub fn compare(
-  left: List(types.TraceEvent),
-  right: List(types.TraceEvent),
-) -> DiffReport {
-  case compare_checked(left, right) {
-    Ok(report) -> report
-    // `compare` predates checked DAG construction. Keep its permissive
-    // behaviour for compatibility while new integrations use
-    // `compare_checked` (or the top-level `beamtrace` facade).
-    Error(_) ->
-      compare_prepared(prepare_unchecked(left), prepare_unchecked(right))
-  }
-}
-
 /// Compare two event lists after validating both causal DAGs.
 ///
-/// The first DAG error is returned instead of silently comparing an invalid
-/// trace. Construction is O((n + e) log n); comparison retains the bounded
-/// alignment guarantees of `compare`.
-pub fn compare_checked(
+/// Roots and logical actors are matched by a four-round causal-neighborhood
+/// fingerprint: unique anchors are patience/LIS aligned and gaps use a
+/// bounded edit search that stays explicit when no unique answer is
+/// defensible. The first DAG error is returned instead of silently comparing
+/// an invalid trace. Construction is O((n + e) log n).
+pub fn compare(
   left: List(types.TraceEvent),
   right: List(types.TraceEvent),
 ) -> Result(DiffReport, dag.DagError) {
@@ -153,7 +137,7 @@ pub fn compare_checked(
 /// Duplicate event identifiers and causal cycles are returned as `DagError`.
 /// Successful construction is O((n + e) log n) and the opaque result may be
 /// reused by `compare_prepared` without rebuilding the DAG. The facade's
-/// `beamtrace.prepare` is the O(1) accessor of an already validated trace.
+/// `beamtrace.prepared` is the O(1) accessor of an already validated trace.
 pub fn prepare(
   events: List(types.TraceEvent),
 ) -> Result(PreparedTrace, dag.DagError) {
@@ -173,13 +157,6 @@ pub fn prepare_with_graph(
     Error(error) -> Error(error)
     Ok(#(graph, incoming, outgoing)) ->
       Ok(#(graph, prepare_from_analysis(events, incoming, outgoing)))
-  }
-}
-
-fn prepare_unchecked(events: List(types.TraceEvent)) -> PreparedTrace {
-  case prepare(events) {
-    Ok(prepared) -> prepared
-    Error(_) -> prepare_from_analysis(events, dict.new(), dict.new())
   }
 }
 
@@ -1066,19 +1043,19 @@ fn evidence_actor(evidence: List(types.IdentityEvidence)) -> String {
 
 fn kind_signature(kind: types.TraceEventKind) -> String {
   case kind {
-    types.Root(types.Mfa(module_, function_, arity), arguments) ->
+    types.Root(types.Mfa(module, function, arity), arguments) ->
       "root:"
-      <> module_
+      <> module
       <> ":"
-      <> function_
+      <> function
       <> "/"
       <> int.to_string(arity)
       <> ":"
       <> views_signature(arguments)
     types.Send(_, message, _) -> "send:" <> view_signature(message)
     types.Received(_, message, _) -> "receive:" <> view_signature(message)
-    types.Spawn(_, types.Mfa(module_, function_, arity)) ->
-      "spawn:" <> module_ <> ":" <> function_ <> "/" <> int.to_string(arity)
+    types.Spawn(_, types.Mfa(module, function, arity)) ->
+      "spawn:" <> module <> ":" <> function <> "/" <> int.to_string(arity)
     types.Exit(reason) -> "exit:" <> view_signature(reason)
     types.Register(name) -> "register:" <> name
     types.Link(_) -> "link"
@@ -1097,13 +1074,13 @@ fn view_signature(view: types.TermView) -> String {
   case view {
     types.Hidden -> "hidden"
     types.Atom(name) -> "atom:" <> name
-    types.Tag(name) -> "tag:" <> name
+    types.TagOnly(name) -> "tag:" <> name
     types.Tuple(items) -> "tuple(" <> views_signature(items) <> ")"
     types.Constructor(name, fields) ->
       "constructor:" <> name <> "(" <> views_signature(fields) <> ")"
-    types.ListView(length, items) ->
+    types.BoundedList(length, items) ->
       "list:" <> int.to_string(length) <> "(" <> views_signature(items) <> ")"
-    types.MapView(size, entries) ->
+    types.BoundedMap(size, entries) ->
       "map:" <> int.to_string(size) <> "(" <> entries_signature(entries) <> ")"
     types.BinaryMetadata(bytes, _, _) -> "binary:" <> int.to_string(bytes)
     types.Scalar(kind, _, _) -> "scalar:" <> kind

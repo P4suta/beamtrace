@@ -27,8 +27,8 @@ pub type Start {
     session_id: String,
     relay_id: String,
     node: String,
-    module_: String,
-    function_: String,
+    module: String,
+    function: String,
     arity: Int,
     mode: Mode,
     privacy: Privacy,
@@ -62,8 +62,8 @@ type StartWire {
     session_id: String,
     relay_id: String,
     node: String,
-    module_: String,
-    function_: String,
+    module: String,
+    function: String,
     arity: Int,
     mode: String,
     privacy: String,
@@ -96,8 +96,8 @@ pub fn encode_start(start: Start) -> String {
     #("session_id", json.string(start.session_id)),
     #("relay_id", json.string(start.relay_id)),
     #("node", json.string(start.node)),
-    #("module", json.string(start.module_)),
-    #("function", json.string(start.function_)),
+    #("module", json.string(start.module)),
+    #("function", json.string(start.function)),
     #("arity", json.int(start.arity)),
     #("mode", json.string(mode_name(start.mode))),
     #("privacy", json.string(privacy_name(start.privacy))),
@@ -151,8 +151,8 @@ fn decode_start(source: String) -> Result(Message, String) {
         valid_session_id(wire.session_id),
         valid_relay_id(wire.relay_id),
         valid_text(wire.node, 255),
-        valid_text(wire.module_, 255),
-        valid_text(wire.function_, 255),
+        valid_text(wire.module, 255),
+        valid_text(wire.function, 255),
         wire.arity >= 0 && wire.arity <= 255,
         parse_mode(wire.mode),
         parse_privacy(wire.privacy),
@@ -177,8 +177,8 @@ fn decode_start(source: String) -> Result(Message, String) {
               wire.session_id,
               wire.relay_id,
               wire.node,
-              wire.module_,
-              wire.function_,
+              wire.module,
+              wire.function,
               wire.arity,
               mode,
               privacy,
@@ -315,8 +315,8 @@ fn start_decoder() -> decode.Decoder(StartWire) {
   use session_id <- decode.field("session_id", decode.string)
   use relay_id <- decode.field("relay_id", decode.string)
   use node <- decode.field("node", decode.string)
-  use module_ <- decode.field("module", decode.string)
-  use function_ <- decode.field("function", decode.string)
+  use module <- decode.field("module", decode.string)
+  use function <- decode.field("function", decode.string)
   use arity <- decode.field("arity", decode.int)
   use mode <- decode.field("mode", decode.string)
   use privacy <- decode.field("privacy", decode.string)
@@ -327,8 +327,8 @@ fn start_decoder() -> decode.Decoder(StartWire) {
     session_id,
     relay_id,
     node,
-    module_,
-    function_,
+    module,
+    function,
     arity,
     mode,
     privacy,

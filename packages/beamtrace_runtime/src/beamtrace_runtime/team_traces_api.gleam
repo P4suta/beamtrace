@@ -718,8 +718,8 @@ fn trace_session_json(
     #(
       "mfa",
       json.object([
-        #("module", json.string(trace.module_)),
-        #("function", json.string(trace.function_)),
+        #("module", json.string(trace.module)),
+        #("function", json.string(trace.function)),
         #("arity", json.int(trace.arity)),
       ]),
     ),

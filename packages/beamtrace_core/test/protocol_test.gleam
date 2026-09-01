@@ -8,7 +8,7 @@ pub fn otp_message_protocols_are_classified_semantically_test() {
     types.Tuple([
       types.Atom("$gen_call"),
       types.Hidden,
-      types.Tag("get"),
+      types.TagOnly("get"),
     ]),
   )
   |> should.equal(protocol.Call)
@@ -16,7 +16,7 @@ pub fn otp_message_protocols_are_classified_semantically_test() {
   protocol.classify(
     types.Tuple([
       types.Atom("$gen_cast"),
-      types.Tag("refresh"),
+      types.TagOnly("refresh"),
     ]),
   )
   |> should.equal(protocol.Cast)
@@ -36,7 +36,7 @@ pub fn otp_message_protocols_are_classified_semantically_test() {
 }
 
 pub fn unknown_shape_remains_ordinary_instead_of_inventing_semantics_test() {
-  protocol.classify(types.Tuple([types.Tag("domain_event"), types.Hidden]))
+  protocol.classify(types.Tuple([types.TagOnly("domain_event"), types.Hidden]))
   |> should.equal(protocol.Ordinary)
 }
 
@@ -59,5 +59,5 @@ pub fn labels_are_stable_display_strings_test() {
   protocol.label(types.Atom("timeout")) |> should.equal("timeout")
   protocol.label(types.Constructor("spawn_request", []))
   |> should.equal("spawn")
-  protocol.label(types.Tag("domain_event")) |> should.equal("message")
+  protocol.label(types.TagOnly("domain_event")) |> should.equal("message")
 }

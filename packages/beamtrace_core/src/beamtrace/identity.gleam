@@ -58,8 +58,8 @@ fn logical_label(metadata: types.ProcessMetadata) -> Option(String) {
     Some(value), _, _, _ -> Some(value)
     _, Some(value), _, _ -> Some(value)
     _, _, Some(value), _ -> Some(value)
-    _, _, _, Some(types.Mfa(module_, function_, arity)) ->
-      Some(module_ <> ":" <> function_ <> "/" <> int.to_string(arity))
+    _, _, _, Some(types.Mfa(module, function, arity)) ->
+      Some(module <> ":" <> function <> "/" <> int.to_string(arity))
     _, _, _, _ -> None
   }
 }

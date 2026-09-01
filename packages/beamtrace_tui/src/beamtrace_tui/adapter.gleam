@@ -64,5 +64,5 @@ fn anomalous(kind: types.TraceEventKind) -> Bool {
 }
 
 fn mfa_name(mfa: types.Mfa) -> String {
-  mfa.module_ <> ":" <> mfa.function_ <> "/" <> int.to_string(mfa.arity)
+  mfa.module <> ":" <> mfa.function <> "/" <> int.to_string(mfa.arity)
 }

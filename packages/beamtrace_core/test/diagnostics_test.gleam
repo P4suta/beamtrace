@@ -39,7 +39,7 @@ fn send(
     types.LocalInstant(at, at),
     types.Send(
       types.ProcessRef("app@host", to),
-      types.Tag(tag),
+      types.TagOnly(tag),
       types.SequenceSerial(serial - 1, serial),
     ),
     types.Exact,
@@ -62,7 +62,7 @@ fn received(
     types.LocalInstant(at, at),
     types.Received(
       types.ProcessRef("app@host", from),
-      types.Tag(tag),
+      types.TagOnly(tag),
       types.SequenceSerial(serial - 1, serial),
     ),
     types.Exact,
@@ -162,7 +162,7 @@ pub fn restart_chain_links_exit_spawn_and_new_pid_by_logical_actor_evidence_test
       "app@host",
       logical_identity("<0.2.0>", "checkout-worker"),
       types.LocalInstant(100, 100),
-      types.Exit(types.Tag("badmatch")),
+      types.Exit(types.TagOnly("badmatch")),
       types.Exact,
     )
   let spawned =

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-const interfacePath = `${root}/packages/beamtrace_core/test/package-interface-v0.3.json`;
+const interfacePath = `${root}/packages/beamtrace_core/test/package-interface-v0.4.json`;
 const packageInterface = JSON.parse(readFileSync(interfacePath, "utf8"));
 const missing = [];
 

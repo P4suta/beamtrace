@@ -517,12 +517,12 @@ fn run_capture_json(
       2
     }
     Ok(cookie) -> {
-      let cli.Mfa(module_, function_, arity) = trigger
+      let cli.Mfa(module, function, arity) = trigger
       let nodes = string.split(node, on: ",") |> list.map(string.trim)
       let spec =
         types.CaptureSpec(
           nodes: nodes,
-          trigger: types.Mfa(module_, function_, arity),
+          trigger: types.Mfa(module, function, arity),
           where_aql: where_aql,
           privacy: types.Metadata,
           budget: types.TraceBudget(
@@ -906,10 +906,10 @@ fn execute_record_machine_session(
   window_s: Int,
   force: Bool,
 ) -> Result(MachineRecord, MachineRecordError) {
-  let cli.Mfa(module_, function_, arity) = trigger
+  let cli.Mfa(module, function, arity) = trigger
   let spec =
     capture_session.ArmSpec(
-      trigger: types.Mfa(module_, function_, arity),
+      trigger: types.Mfa(module, function, arity),
       where_aql: where_aql,
       capture_window_ms: window_s * 1000,
       drain_timeout_ms: 10_000,
@@ -1539,13 +1539,13 @@ fn run_relay_capture(
   use Nil <- error_or_exit(preflight_agent())
   use cookie <- result_or_exit(read_cookie(target.cookie_file))
   use grant <- raw_grant_or_exit(load_raw_grant(receipt, target.raw_grant_file))
-  let cli.Mfa(module_, function_, arity) = target.trigger
+  let cli.Mfa(module, function, arity) = target.trigger
   let nodes = target.node |> string.split(on: ",") |> list.map(string.trim)
   io.println(
     "Relay capture armed for "
-    <> module_
+    <> module
     <> ":"
-    <> function_
+    <> function
     <> "/"
     <> int.to_string(arity)
     <> "; perform one operation.",
@@ -1573,7 +1573,7 @@ fn run_relay_capture(
   let spec =
     types.CaptureSpec(
       nodes: nodes,
-      trigger: types.Mfa(module_, function_, arity),
+      trigger: types.Mfa(module, function, arity),
       where_aql: target.where_aql,
       privacy: privacy,
       budget: budget,
@@ -1583,8 +1583,8 @@ fn run_relay_capture(
   let transfer =
     relay_client.TransferMetadata(
       node: target.node,
-      module_: module_,
-      function_: function_,
+      module: module,
+      function: function,
       arity: arity,
       delivery_status: case types.delivery_verified(captured.outcome) {
         True -> relay_session.Delivered
@@ -1704,8 +1704,8 @@ fn run_capture(
   use Nil <- output_or_exit(output, force)
   use Nil <- error_or_exit(preflight_agent())
   use cookie <- result_or_exit(read_cookie(cookie_file))
-  let cli.Mfa(module_, function_, arity) = trigger
-  let core_trigger = types.Mfa(module_, function_, arity)
+  let cli.Mfa(module, function, arity) = trigger
+  let core_trigger = types.Mfa(module, function, arity)
   let nodes = string.split(node, on: ",") |> list.map(string.trim)
   use result <- capture_result_or_exit(capture.execute(
     types.CaptureSpec(
@@ -1845,7 +1845,7 @@ fn run_open(path: String, mode: cli.UiMode, port: Int) -> Int {
 fn run_compare(left: String, right: String) -> Int {
   case storage.load(left), storage.load(right) {
     Ok(left_archive), Ok(right_archive) ->
-      case diff.compare_checked(left_archive.events, right_archive.events) {
+      case diff.compare(left_archive.events, right_archive.events) {
         Error(error) ->
           fail_with(cli_errors.invalid_trace_graph(dag.error_message(error)))
         Ok(report) -> {
@@ -2134,8 +2134,8 @@ fn run_record_session(
   window_s: Int,
   force: Bool,
 ) -> Int {
-  let cli.Mfa(module_, function_, arity) = trigger
-  let core_trigger = types.Mfa(module_, function_, arity)
+  let cli.Mfa(module, function, arity) = trigger
+  let core_trigger = types.Mfa(module, function, arity)
   let spec =
     capture_session.ArmSpec(
       trigger: core_trigger,

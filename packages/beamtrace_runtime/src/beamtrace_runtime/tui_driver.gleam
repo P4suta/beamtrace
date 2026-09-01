@@ -115,11 +115,11 @@ fn attach(store: capture_session.Store, node: String) -> Result(Nil, String) {
 fn arm(store: capture_session.Store, source: String) -> Result(Nil, String) {
   case cli.parse_mfa(source) {
     Error(cli.ParseError(message, _)) -> Error(message)
-    Ok(cli.Mfa(module_, function_, arity)) ->
+    Ok(cli.Mfa(module, function, arity)) ->
       capture_session.arm(
         store,
         capture_session.ArmSpec(
-          trigger: types.Mfa(module_, function_, arity),
+          trigger: types.Mfa(module, function, arity),
           where_aql: None,
           capture_window_ms: 30_000,
           drain_timeout_ms: 10_000,

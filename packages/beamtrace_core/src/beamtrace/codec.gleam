@@ -201,8 +201,8 @@ pub fn event_v1_adapter_json(
 
 fn mfa_json(mfa: types.Mfa) -> json.Json {
   json.object([
-    #("module", json.string(mfa.module_)),
-    #("function", json.string(mfa.function_)),
+    #("module", json.string(mfa.module)),
+    #("function", json.string(mfa.function)),
     #("arity", json.int(mfa.arity)),
   ])
 }
@@ -412,7 +412,7 @@ fn term_json(term: types.TermView) -> json.Json {
   case term {
     types.Hidden -> json.object([#("kind", json.string("hidden"))])
     types.Atom(name) -> tagged_string("atom", name)
-    types.Tag(name) -> tagged_string("tag", name)
+    types.TagOnly(name) -> tagged_string("tag", name)
     types.Tuple(items) ->
       json.object([
         #("kind", json.string("tuple")),
@@ -424,13 +424,13 @@ fn term_json(term: types.TermView) -> json.Json {
         #("name", json.string(name)),
         #("fields", json.array(fields, term_json)),
       ])
-    types.ListView(length, items) ->
+    types.BoundedList(length, items) ->
       json.object([
         #("kind", json.string("list")),
         #("length", json.int(length)),
         #("items", json.array(items, term_json)),
       ])
-    types.MapView(size, entries) ->
+    types.BoundedMap(size, entries) ->
       json.object([
         #("kind", json.string("map")),
         #("size", json.int(size)),
@@ -820,10 +820,10 @@ fn local_instant_decoder() -> decode.Decoder(types.LocalInstant) {
 }
 
 fn mfa_decoder() -> decode.Decoder(types.Mfa) {
-  use module_ <- decode.field("module", decode.string)
-  use function_ <- decode.field("function", decode.string)
+  use module <- decode.field("module", decode.string)
+  use function <- decode.field("function", decode.string)
   use arity <- decode.field("arity", decode.int)
-  decode.success(types.Mfa(module_, function_, arity))
+  decode.success(types.Mfa(module, function, arity))
 }
 
 fn process_ref_decoder() -> decode.Decoder(types.ProcessRef) {
@@ -1032,7 +1032,7 @@ fn term_decoder() -> decode.Decoder(types.TermView) {
     }
     "tag" -> {
       use value <- decode.field("value", decode.string)
-      decode.success(types.Tag(value))
+      decode.success(types.TagOnly(value))
     }
     "tuple" -> {
       use items <- decode.field("items", decode.list(term_decoder()))
@@ -1046,12 +1046,12 @@ fn term_decoder() -> decode.Decoder(types.TermView) {
     "list" -> {
       use length <- decode.field("length", decode.int)
       use items <- decode.field("items", decode.list(term_decoder()))
-      decode.success(types.ListView(length, items))
+      decode.success(types.BoundedList(length, items))
     }
     "map" -> {
       use size <- decode.field("size", decode.int)
       use entries <- decode.field("entries", decode.list(entry_decoder()))
-      decode.success(types.MapView(size, entries))
+      decode.success(types.BoundedMap(size, entries))
     }
     "binary" -> {
       use bytes <- decode.field("bytes", decode.int)
@@ -1576,8 +1576,8 @@ fn validate_serial(serial: types.SequenceSerial) -> Result(Nil, CodecError) {
 
 fn validate_mfa(mfa: types.Mfa) -> Result(Nil, CodecError) {
   ensure(
-    valid_text(mfa.module_, 255)
-      && valid_text(mfa.function_, 255)
+    valid_text(mfa.module, 255)
+      && valid_text(mfa.function, 255)
       && mfa.arity >= 0
       && mfa.arity <= 255,
     "mfa",
@@ -1612,7 +1612,7 @@ fn validate_term(term: types.TermView, depth: Int) -> Result(Nil, CodecError) {
     False ->
       case term {
         types.Hidden -> Ok(Nil)
-        types.Atom(name) | types.Tag(name) | types.Redacted(name) ->
+        types.Atom(name) | types.TagOnly(name) | types.Redacted(name) ->
           ensure(valid_text(name, 1024), "term", "invalid text")
         types.Tuple(items) | types.Constructor(_, items) -> {
           use Nil <- result_try(ensure(
@@ -1622,7 +1622,7 @@ fn validate_term(term: types.TermView, depth: Int) -> Result(Nil, CodecError) {
           ))
           validate_terms(items, depth + 1)
         }
-        types.ListView(length, items) -> {
+        types.BoundedList(length, items) -> {
           use Nil <- result_try(ensure(
             length >= list.length(items)
               && length <= 1_000_000
@@ -1632,7 +1632,7 @@ fn validate_term(term: types.TermView, depth: Int) -> Result(Nil, CodecError) {
           ))
           validate_terms(items, depth + 1)
         }
-        types.MapView(size, entries) -> {
+        types.BoundedMap(size, entries) -> {
           use Nil <- result_try(ensure(
             size >= list.length(entries)
               && size <= 1_000_000

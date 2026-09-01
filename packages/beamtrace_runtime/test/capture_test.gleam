@@ -389,7 +389,7 @@ pub fn process_trace_events_preserve_spawn_exit_register_and_link_semantics_test
     types.Spawn(child, types.Mfa("shop_worker", "start", 1)),
     types.Link(child),
     types.Register("shop_worker"),
-    types.Exit(types.Tag("spawn_done")),
+    types.Exit(types.TagOnly("spawn_done")),
   ])
 }
 

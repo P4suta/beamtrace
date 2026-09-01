@@ -568,10 +568,10 @@ fn scrub_term(term: types.TermView) -> types.TermView {
     types.Tuple(items) -> types.Tuple(list.map(items, scrub_term))
     types.Constructor(name, fields) ->
       types.Constructor(name, list.map(fields, scrub_term))
-    types.ListView(length, items) ->
-      types.ListView(length, list.map(items, scrub_term))
-    types.MapView(size, entries) ->
-      types.MapView(
+    types.BoundedList(length, items) ->
+      types.BoundedList(length, list.map(items, scrub_term))
+    types.BoundedMap(size, entries) ->
+      types.BoundedMap(
         size,
         list.map(entries, fn(entry) {
           let #(key, value) = entry

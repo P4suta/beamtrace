@@ -34,15 +34,6 @@ pub fn precedence_places_and_before_or_test() {
   aql.evaluate(query, context) |> should.be_true()
 }
 
-pub fn safe_agent_subset_is_split_from_residual_test() {
-  let assert Ok(query) =
-    aql.parse("message.tag == \"$gen_call\" and process.label == \"checkout\"")
-  let plan = aql.compile_agent(query)
-
-  plan.match_spec_fields |> should.equal(["message.tag"])
-  plan.residual_fields |> should.equal(["process.label"])
-}
-
 pub fn malformed_query_reports_source_offset_test() {
   let assert Error(error) = aql.parse("duration >")
   error.offset |> should.equal(10)

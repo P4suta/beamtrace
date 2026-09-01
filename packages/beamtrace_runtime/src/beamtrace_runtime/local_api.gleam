@@ -642,15 +642,15 @@ fn mfa_search_parameters(
 fn mfa_candidate_json(candidate: capture.MfaCandidate) -> json.Json {
   json.object([
     #("node", json.string(candidate.node)),
-    #("module", json.string(candidate.module_)),
-    #("function", json.string(candidate.function_)),
+    #("module", json.string(candidate.module)),
+    #("function", json.string(candidate.function)),
     #("arity", json.int(candidate.arity)),
     #(
       "mfa",
       json.string(
-        candidate.module_
+        candidate.module
         <> ":"
-        <> candidate.function_
+        <> candidate.function
         <> "/"
         <> int.to_string(candidate.arity),
       ),

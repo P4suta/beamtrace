@@ -36,7 +36,7 @@ pub fn facade_builds_and_reuses_validated_trace_test() {
   beamtrace.events(trace) |> should.equal([source])
   beamtrace.graph(trace).events |> should.equal([source])
   beamtrace.compare(trace, trace).added |> should.equal(0)
-  let _prepared = beamtrace.prepare(trace)
+  let _prepared = beamtrace.prepared(trace)
 }
 
 pub fn facade_reports_event_number_and_dag_error_test() {

@@ -22,8 +22,8 @@ pub type TeamTrace {
   TeamTrace(
     id: String,
     node: String,
-    module_: String,
-    function_: String,
+    module: String,
+    function: String,
     arity: Int,
     privacy: String,
     delivery_status: String,

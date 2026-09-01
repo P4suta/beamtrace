@@ -32,7 +32,7 @@ pub fn mailbox_alert_uses_baseline_and_hysteresis_test() {
 }
 
 pub fn system_signals_are_exact_test() {
-  anomaly.from_system_signal(anomaly.LongGc, 42_000)
+  anomaly.from_vm_signal(anomaly.LongGc, 42_000)
   |> should.equal(anomaly.Alert(
     kind: anomaly.LongGarbageCollection,
     summary: "long GC: 42000us",

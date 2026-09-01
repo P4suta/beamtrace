@@ -127,10 +127,10 @@ fn trace_decoder() -> decode.Decoder(workspace.TeamTrace) {
 }
 
 fn mfa_decoder() -> decode.Decoder(#(String, String, Int)) {
-  use module_ <- decode.field("module", decode.string)
-  use function_ <- decode.field("function", decode.string)
+  use module <- decode.field("module", decode.string)
+  use function <- decode.field("function", decode.string)
   use arity <- decode.field("arity", decode.int)
-  decode.success(#(module_, function_, arity))
+  decode.success(#(module, function, arity))
 }
 
 @external(javascript, "./team_control_ffi.mjs", "fetchTraces")
