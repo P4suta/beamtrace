@@ -67,6 +67,64 @@ type RestartCandidate {
   )
 }
 
+/// Explicit thresholds for every offline analysis. Adjust one field with the
+/// record-update syntax on `default_thresholds`.
+pub type Thresholds {
+  Thresholds(
+    hot_sender_messages: Int,
+    fan_in_senders: Int,
+    queue_wait_ns: Int,
+    restart_gap_ns: Int,
+    dangling_call_timeout_ns: Int,
+  )
+}
+
+/// The documented defaults: 100 messages, 100 senders, 100 ms queue waits,
+/// 1 s restart gaps, and a 5 s dangling-call timeout.
+pub fn default_thresholds() -> Thresholds {
+  Thresholds(
+    hot_sender_messages: 100,
+    fan_in_senders: 100,
+    queue_wait_ns: 100_000_000,
+    restart_gap_ns: 1_000_000_000,
+    dangling_call_timeout_ns: 5_000_000_000,
+  )
+}
+
+/// Run the four capture-independent analyses — hot senders, fan-in, queue
+/// waits, and restart chains — with explicit thresholds. Dangling calls need
+/// the capture outcome and a reference time; use `analyze_capture`.
+pub fn analyze(
+  events: List(types.TraceEvent),
+  thresholds thresholds: Thresholds,
+) -> List(Finding) {
+  list.flatten([
+    hot_senders(events, minimum_messages: thresholds.hot_sender_messages),
+    fan_in(events, minimum_senders: thresholds.fan_in_senders),
+    queue_waits(events, minimum_ns: thresholds.queue_wait_ns),
+    restart_chains(events, maximum_gap_ns: thresholds.restart_gap_ns),
+  ])
+}
+
+/// Run `analyze` plus `dangling_calls`, which only asserts findings when the
+/// outcome verifies delivery and needs `now_ns` to age unanswered calls.
+pub fn analyze_capture(
+  events: List(types.TraceEvent),
+  thresholds thresholds: Thresholds,
+  outcome outcome: types.CaptureOutcome,
+  now_ns now_ns: Int,
+) -> List(Finding) {
+  list.append(
+    analyze(events, thresholds: thresholds),
+    dangling_calls(
+      events,
+      outcome: outcome,
+      now_ns: now_ns,
+      timeout_ns: thresholds.dangling_call_timeout_ns,
+    ),
+  )
+}
+
 /// Count observed sends with one indexed scan. The diagnostic conclusion is
 /// inferred from an exact count and an explicit threshold; it is not a
 /// probability statement.

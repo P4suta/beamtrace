@@ -100,20 +100,46 @@ pub fn event_count(trace: Trace) -> Int {
   trace.validated_event_count
 }
 
-/// Run the offline diagnostics with their documented default thresholds: hot
-/// senders and fan-in from 100 messages, queue waits above 100 ms, and
-/// restart chains with gaps of at most 1 s. Dangling calls need the capture
-/// outcome and a reference time, so call `diagnostics.dangling_calls`
-/// directly. Each finding carries its evidence events; none carries a
-/// confidence number.
+/// Run the offline diagnostics with `diagnostics.default_thresholds` — hot
+/// senders from 100 messages, fan-in from 100 distinct senders, queue waits
+/// above 100 ms, restart chains with gaps of at most 1 s. Dangling calls need the capture outcome
+/// and a reference time, so they appear only in `capture_findings`. Each
+/// finding carries its evidence events; none carries a confidence number.
 pub fn findings(trace: Trace) -> List(diagnostics.Finding) {
-  let events = trace.trace_events
-  list.flatten([
-    diagnostics.hot_senders(events, minimum_messages: 100),
-    diagnostics.fan_in(events, minimum_senders: 100),
-    diagnostics.queue_waits(events, minimum_ns: 100_000_000),
-    diagnostics.restart_chains(events, maximum_gap_ns: 1_000_000_000),
-  ])
+  findings_with(trace, thresholds: diagnostics.default_thresholds())
+}
+
+/// Run the offline diagnostics with explicit thresholds. Adjust one field
+/// with record-update syntax:
+///
+/// ```gleam
+/// beamtrace.findings_with(trace, thresholds: diagnostics.Thresholds(
+///   ..diagnostics.default_thresholds(),
+///   queue_wait_ns: 50_000_000,
+/// ))
+/// ```
+pub fn findings_with(
+  trace: Trace,
+  thresholds thresholds: diagnostics.Thresholds,
+) -> List(diagnostics.Finding) {
+  diagnostics.analyze(trace.trace_events, thresholds: thresholds)
+}
+
+/// Run every offline diagnostic including dangling calls, which require the
+/// capture outcome (delivery must be verified) and a reference time to age
+/// unanswered calls against `dangling_call_timeout_ns`.
+pub fn capture_findings(
+  trace: Trace,
+  thresholds thresholds: diagnostics.Thresholds,
+  outcome outcome: types.CaptureOutcome,
+  now_ns now_ns: Int,
+) -> List(diagnostics.Finding) {
+  diagnostics.analyze_capture(
+    trace.trace_events,
+    thresholds: thresholds,
+    outcome: outcome,
+    now_ns: now_ns,
+  )
 }
 
 fn validate_events(
