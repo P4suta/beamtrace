@@ -227,11 +227,16 @@ fn matches_pattern(field: String, pattern: String) -> Bool {
 fn segments_match(field: List(String), pattern: List(String)) -> Bool {
   case field, pattern {
     [], [] -> True
-    [segment, ..field_rest], [expected, ..pattern_rest] ->
-      case segment == expected || { expected == "*" && is_index(segment) } {
+    [segment, ..field_rest], [expected, ..pattern_rest] -> {
+      let matches = case expected {
+        "*" -> is_index(segment)
+        _ -> segment == expected
+      }
+      case matches {
         True -> segments_match(field_rest, pattern_rest)
         False -> False
       }
+    }
     _, _ -> False
   }
 }
@@ -248,7 +253,7 @@ fn suggest(field: String, patterns: List(String)) -> Option(String) {
     |> list.sort(string.compare)
   list.fold(candidates, None, fn(best, candidate) {
     let distance = edit_distance(field, candidate)
-    case distance <= 2 {
+    case candidate != field && distance <= 2 {
       False -> best
       True ->
         case best {

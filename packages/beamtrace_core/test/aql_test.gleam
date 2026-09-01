@@ -183,3 +183,8 @@ pub fn mixed_safe_and_residual_or_is_not_unsafely_pushed_down_test() {
   plan.predicate |> should.equal(aql.AgentAlways)
   plan.residual |> should.equal(Some(query))
 }
+
+pub fn parse_for_rejects_a_literal_star_segment_test() {
+  aql.parse_for("arg.*.tag == \"x\"", fields: aql.event_fields())
+  |> should.equal(Error(aql.UnknownField(0, "arg.*.tag", None)))
+}
