@@ -96,7 +96,36 @@ try {
     }
     $validateJson = (& $launcher validate nope.beamtrace --json | Out-String)
     $versionJson = (& $launcher version --json | Out-String)
-    foreach ($sample in @($demo, $doctorJson, $validateJson, $versionJson)) {
+
+    $brokenConfigDir = Join-Path ([IO.Path]::GetTempPath()) ("beamtrace-smoke-{0}" -f [Guid]::NewGuid())
+    New-Item -ItemType Directory -Path $brokenConfigDir | Out-Null
+    try {
+        Set-Content -Path (Join-Path $brokenConfigDir 'beamtrace.toml') -Value "[profiles.bad]`nmax_roots = 0"
+        Push-Location $brokenConfigDir
+        try {
+            $configJson = (& $launcher config check --json | Out-String)
+            if ($LASTEXITCODE -ne 2 -or ($configJson | ConvertFrom-Json).error.code -ne 'invalid_configuration') {
+                throw "config check --json must report invalid_configuration: $configJson"
+            }
+        }
+        finally {
+            Pop-Location
+        }
+    }
+    finally {
+        Remove-Item -Recurse -Force $brokenConfigDir -ErrorAction SilentlyContinue
+    }
+
+    $compareJson = (& $launcher compare nope.beamtrace nope.beamtrace --json | Out-String)
+    if ($LASTEXITCODE -ne 2 -or ($compareJson | ConvertFrom-Json).error.code -ne 'invalid_paths') {
+        throw "compare --json with duplicate paths must report invalid_paths: $compareJson"
+    }
+    $exportJson = (& $launcher export nope.beamtrace --format html --json | Out-String)
+    if ($LASTEXITCODE -ne 2 -or ($exportJson | ConvertFrom-Json).error.code -ne 'archive_not_found') {
+        throw "export --json with a missing archive must report archive_not_found: $exportJson"
+    }
+
+    foreach ($sample in @($demo, $doctorJson, $validateJson, $versionJson, $configJson, $compareJson, $exportJson)) {
         $sample | node $envelopeCheck
         if ($LASTEXITCODE -ne 0) {
             throw "a --json result does not satisfy schemas/beamtrace-cli-v1/envelope.schema.json: $sample"

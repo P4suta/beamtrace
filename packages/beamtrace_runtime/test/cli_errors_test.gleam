@@ -106,3 +106,25 @@ pub fn child_output_is_classified_test() {
   |> should.equal(Some("child_crashed"))
   cli_errors.classify_child_output("child-ran") |> should.equal(None)
 }
+
+pub fn every_lifecycle_failure_code_is_catalogued_test() {
+  let codes = cli_errors.codes()
+  [
+    "unsupported_json_command", "configuration_create_failed",
+    "invalid_configuration", "cookie_unavailable", "export_conversion_failed",
+    "export_write_failed", "demo_fixture_unavailable", "invalid_paths",
+    "trace_load_failed", "target_node_unavailable", "capture_arm_failed",
+    "child_release_failed", "child_shutdown_failed", "child_wait_failed",
+  ]
+  |> list.each(fn(code) { list.contains(codes, code) |> should.be_true() })
+}
+
+pub fn reason_bearing_constructors_carry_the_reason_as_detail_test() {
+  cli_errors.invalid_configuration("invalid value for 'trigger'").detail
+  |> should.equal(Some("invalid value for 'trigger'"))
+  cli_errors.configuration_create_failed("eacces").detail
+  |> should.equal(Some("eacces"))
+  cli_errors.cookie_unavailable("enoent").detail
+  |> should.equal(Some("enoent"))
+  cli_errors.target_node_unavailable("").detail |> should.equal(None)
+}
