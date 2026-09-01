@@ -12,3 +12,4 @@
 - [0009](0009-palette-focus-without-showmodal.md) — Keyboard focus is managed with effects, not showModal()
 - [0010](0010-checked-in-web-dist-gate.md) — The checked-in Web distribution must reproduce from source
 - [0011](0011-core-vocabulary-finalized-before-first-stable-release.md) — Core vocabulary is finalized before the first stable release
+- [0012](0012-aql-errors-are-typed-and-field-checked.md) — AQL errors are typed, caret-rendered, and field-checked

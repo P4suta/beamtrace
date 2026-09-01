@@ -20,6 +20,7 @@ JSON envelope) is unchanged unless a row says otherwise.
 | `anomaly.Metric` | `anomaly.MetricKind` | No longer collides with `types.Metric`. |
 | `anomaly.SystemSignal` | `anomaly.VmSignal` | No longer collides with `types.SystemSignal`. |
 | `anomaly.from_system_signal` | `anomaly.from_vm_signal` | Rename only. |
+| `aql.AqlError(offset, message)` | ten typed variants | All carry `offset` first, so `error.offset` still works; `message` is replaced by `aql.error_message`. See ADR 0012. |
 
 ## Behavioural notes
 

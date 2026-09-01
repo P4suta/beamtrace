@@ -153,14 +153,8 @@ pub fn prepare(spec: types.CaptureSpec) -> Result(PreparedCapture, String) {
   case spec.where_aql {
     None -> Ok(PreparedCapture(spec, aql.AgentAlways, None))
     Some(source) ->
-      case aql.parse(source) {
-        Error(error) ->
-          Error(
-            "invalid_aql_at_"
-            <> int.to_string(error.offset)
-            <> ":"
-            <> error.message,
-          )
+      case aql.parse_for(source, fields: aql.event_fields()) {
+        Error(error) -> Error("invalid AQL: " <> aql.error_message(error))
         Ok(query) -> {
           let plan = aql.compile_trigger(query, spec.trigger)
           case plan.predicate {
@@ -997,7 +991,9 @@ pub fn filter_roots(
   )
 }
 
-fn event_context(event: types.TraceEvent, trigger: types.Mfa) {
+/// The AQL evaluation context of one capture event. Every key must be
+/// accepted by `aql.event_fields` — a test enforces the pairing.
+pub fn event_context(event: types.TraceEvent, trigger: types.Mfa) {
   let common = [
     #("node", aql.StringValue(event.node)),
     #("process.pid", aql.StringValue(event.process.physical.pid)),

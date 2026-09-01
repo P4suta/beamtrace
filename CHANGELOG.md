@@ -4,10 +4,12 @@
 
 ### ⚠ BREAKING CHANGES
 
+* **core:** `aql.AqlError` is now a ten-variant type; the `.message` accessor is replaced by `aql.error_message(error)` (`.offset` keeps working on every variant)
 * **core:** finalize the public vocabulary before the first stable release (see `docs/migration-v0.4.md`): the unchecked `diff.compare` is removed and `diff.compare_checked` takes its name; `aql.compile_agent`/`AgentPlan` are removed in favour of `compile_trigger`; `beamtrace.prepare` becomes `prepared`; `types.Mfa` labels drop their trailing underscores; `TermView.Tag`/`ListView`/`MapView` become `TagOnly`/`BoundedList`/`BoundedMap`; `anomaly.Metric`/`SystemSignal` become `MetricKind`/`VmSignal`
 
 ### Features
 
+* **core:** replace `aql.AqlError` with typed variants rendered by `error_message` and the caret-annotated `error_report`; add `aql.parse_for` field validation with did-you-mean suggestions and the `aql.event_fields` vocabulary — `--where` and `beamtrace.toml` typos now fail at parse time on every path
 * **core:** add opaque prepared traces and reusable multi-run comparison APIs
 * **codec:** add direct typed validators and single-parse versioned decoding
 
