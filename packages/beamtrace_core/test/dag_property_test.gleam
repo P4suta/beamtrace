@@ -53,7 +53,7 @@ pub fn distributed_clock_offsets_preserve_causal_acyclicity_property_test() {
       client,
       types.Send(
         worker.physical,
-        types.Tag("work"),
+        types.TagOnly("work"),
         types.SequenceSerial(40, 41),
       ),
     ),
@@ -63,7 +63,7 @@ pub fn distributed_clock_offsets_preserve_causal_acyclicity_property_test() {
       worker,
       types.Received(
         client.physical,
-        types.Tag("work"),
+        types.TagOnly("work"),
         types.SequenceSerial(40, 41),
       ),
     ),
@@ -71,7 +71,11 @@ pub fn distributed_clock_offsets_preserve_causal_acyclicity_property_test() {
       "send-leaf",
       worker_at + 1,
       worker,
-      types.Send(leaf.physical, types.Tag("work"), types.SequenceSerial(41, 42)),
+      types.Send(
+        leaf.physical,
+        types.TagOnly("work"),
+        types.SequenceSerial(41, 42),
+      ),
     ),
     event(
       "receive-leaf",
@@ -79,7 +83,7 @@ pub fn distributed_clock_offsets_preserve_causal_acyclicity_property_test() {
       leaf,
       types.Received(
         worker.physical,
-        types.Tag("work"),
+        types.TagOnly("work"),
         types.SequenceSerial(41, 42),
       ),
     ),

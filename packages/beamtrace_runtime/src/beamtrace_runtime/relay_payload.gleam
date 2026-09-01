@@ -281,9 +281,10 @@ fn validate_metadata_term(term: types.TermView) -> Result(Nil, String) {
       validate_fingerprint(fingerprint, "invalid_metadata_fingerprint")
     types.Tuple(items)
     | types.Constructor(_, items)
-    | types.ListView(_, items) -> validate_metadata_terms(items)
-    types.MapView(_, entries) -> validate_metadata_entries(entries)
-    types.Hidden | types.Atom(_) | types.Tag(_) | types.Redacted(_) -> Ok(Nil)
+    | types.BoundedList(_, items) -> validate_metadata_terms(items)
+    types.BoundedMap(_, entries) -> validate_metadata_entries(entries)
+    types.Hidden | types.Atom(_) | types.TagOnly(_) | types.Redacted(_) ->
+      Ok(Nil)
   }
 }
 
@@ -377,17 +378,17 @@ fn validate_raw_term(
       use Nil <- result_try(validate_name(name))
       validate_raw_terms(items, policy, depth + 1)
     }
-    False, types.ListView(length, items) ->
+    False, types.BoundedList(length, items) ->
       case length >= list.length(items) {
         False -> Error("invalid_raw_value")
         True -> validate_raw_terms(items, policy, depth + 1)
       }
-    False, types.MapView(size, entries) ->
+    False, types.BoundedMap(size, entries) ->
       case size >= list.length(entries) && list.length(entries) <= 32 {
         False -> Error("invalid_raw_value")
         True -> validate_raw_entries(entries, policy, depth + 1)
       }
-    False, types.Atom(name) | False, types.Tag(name) -> validate_name(name)
+    False, types.Atom(name) | False, types.TagOnly(name) -> validate_name(name)
     False, types.Redacted(reason) ->
       case valid_text(reason, 128) {
         True -> Ok(Nil)
@@ -431,7 +432,7 @@ fn validate_redacted_value(
 
 fn raw_key(term: types.TermView) -> Option(String) {
   case term {
-    types.Atom(name) | types.Tag(name) -> Some(normalize_key(name))
+    types.Atom(name) | types.TagOnly(name) -> Some(normalize_key(name))
     types.Scalar(_, Some(display), _)
     | types.BinaryMetadata(_, Some(display), _) -> Some(normalize_key(display))
     _ -> None

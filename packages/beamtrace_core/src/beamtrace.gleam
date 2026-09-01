@@ -27,6 +27,7 @@ pub opaque type Trace {
     trace_events: List(types.TraceEvent),
     causal_graph: dag.CausalGraph,
     prepared_trace: diff.PreparedTrace,
+    validated_event_count: Int,
   )
 }
 
@@ -75,7 +76,7 @@ pub fn graph(trace: Trace) -> dag.CausalGraph {
 /// Return cached comparison preparation. This is O(1); no DAG is rebuilt.
 /// Unlike `diff.prepare`, it cannot fail because the trace is already
 /// validated.
-pub fn prepare(trace: Trace) -> diff.PreparedTrace {
+pub fn prepared(trace: Trace) -> diff.PreparedTrace {
   trace.prepared_trace
 }
 
@@ -94,9 +95,9 @@ pub fn error_message(error: TraceError) -> String {
   }
 }
 
-/// Return the number of validated events. This is O(n).
+/// Return the number of validated events. This is O(1).
 pub fn event_count(trace: Trace) -> Int {
-  list.length(trace.trace_events)
+  trace.validated_event_count
 }
 
 /// Run the offline diagnostics with their documented default thresholds: hot
@@ -158,6 +159,11 @@ fn build_trace(
   case diff.prepare_with_graph(trace_events) {
     Error(error) -> Error(GraphError(error))
     Ok(#(causal_graph, prepared_trace)) ->
-      Ok(Trace(trace_events, causal_graph, prepared_trace))
+      Ok(Trace(
+        trace_events,
+        causal_graph,
+        prepared_trace,
+        list.length(trace_events),
+      ))
   }
 }

@@ -6257,12 +6257,12 @@ class DarkTheme extends CustomType {
 }
 var Theme$DarkTheme$const = new DarkTheme;
 class TeamTrace extends CustomType {
-  constructor(id2, node, module_, function_, arity, privacy, delivery_status, event_count, received_at_ms, legal_hold, locked) {
+  constructor(id2, node, module, function$, arity, privacy, delivery_status, event_count, received_at_ms, legal_hold, locked) {
     super();
     this.id = id2;
     this.node = node;
-    this.module_ = module_;
-    this.function_ = function_;
+    this.module = module;
+    this.function = function$;
     this.arity = arity;
     this.privacy = privacy;
     this.delivery_status = delivery_status;
@@ -8948,10 +8948,10 @@ function updateHold(traceId, enabled, onSuccess, onError) {
 
 // build/dev/javascript/beamtrace_web/beamtrace_web/team_control.mjs
 function mfa_decoder() {
-  return field("module", string2, (module_) => {
-    return field("function", string2, (function_) => {
+  return field("module", string2, (module) => {
+    return field("function", string2, (function$) => {
       return field("arity", int2, (arity) => {
-        return success([module_, function_, arity]);
+        return success([module, function$, arity]);
       });
     });
   });
@@ -10199,7 +10199,7 @@ function team_trace_row(model, trace) {
       span(toList([class$("kind-pill")]), toList([text3(trace.delivery_status)]))
     ])),
     td(List$Empty$const, toList([
-      text3(trace.node + " · " + trace.module_ + ":" + trace.function_ + "/" + to_string(trace.arity))
+      text3(trace.node + " · " + trace.module + ":" + trace.function + "/" + to_string(trace.arity))
     ])),
     td(List$Empty$const, toList([
       text3(trace.privacy),

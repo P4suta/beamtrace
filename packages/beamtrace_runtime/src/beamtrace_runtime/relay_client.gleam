@@ -42,8 +42,8 @@ pub type ChannelState {
 pub type TransferMetadata {
   TransferMetadata(
     node: String,
-    module_: String,
-    function_: String,
+    module: String,
+    function: String,
     arity: Int,
     delivery_status: relay_session.DeliveryStatus,
   )
@@ -205,8 +205,8 @@ fn transfer_events(
               session_id: session_id,
               relay_id: receipt.relay_id,
               node: metadata.node,
-              module_: metadata.module_,
-              function_: metadata.function_,
+              module: metadata.module,
+              function: metadata.function,
               arity: metadata.arity,
               mode: session_mode(mode),
               privacy: encoding_privacy(encoding),

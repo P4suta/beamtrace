@@ -8,7 +8,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/string
 
 pub type Mfa {
-  Mfa(module_: String, function_: String, arity: Int)
+  Mfa(module: String, function: String, arity: Int)
 }
 
 pub type UiMode {
@@ -922,7 +922,7 @@ fn parse_capture_preset(source: String) -> Result(types.Preset, ParseError) {
 
 pub fn parse_mfa(source: String) -> Result(Mfa, ParseError) {
   case core_mfa.parse(source) {
-    Ok(value) -> Ok(Mfa(value.module_, value.function_, value.arity))
+    Ok(value) -> Ok(Mfa(value.module, value.function, value.arity))
     Error(error) ->
       Error(usage(
         "invalid MFA '" <> source <> "': " <> core_mfa.error_message(error),

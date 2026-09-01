@@ -46,7 +46,7 @@ pub fn main() {
       local_instant: types.LocalInstant(offset_ns: 100, order: 1),
       kind: types.Send(
         to: types.ProcessRef("shop@localhost", "<0.20.0>"),
-        message: types.Tag("charge"),
+        message: types.TagOnly("charge"),
         serial: types.SequenceSerial(previous: 0, current: 1),
       ),
       evidence: types.Exact,
@@ -106,10 +106,10 @@ has a renderer: `beamtrace.error_message`, `codec.error_message`,
 Erlang and JavaScript.
 
 `codec.decode_event` requires BeamTrace's own canonical bytes; any re-serialised
-JSON fails with `NonCanonicalJson`. `diff.compare` is deprecated because it
-silently falls back to an unchecked comparison; use `diff.compare_checked` or
-the façade. `diff.prepare` returns `Result(PreparedTrace, DagError)`; compare a
-reusable baseline like this:
+JSON fails with `NonCanonicalJson`. `diff.compare` validates both causal DAGs
+and returns the first `DagError` instead of comparing an invalid trace.
+`diff.prepare` returns `Result(PreparedTrace, DagError)`; compare a reusable
+baseline like this:
 
 ```gleam
 import beamtrace/diff

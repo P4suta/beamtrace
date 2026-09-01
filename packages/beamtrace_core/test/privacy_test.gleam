@@ -63,7 +63,7 @@ pub fn raw_mode_redacts_named_keys_and_limits_depth_test() {
     fingerprint,
   )
   |> should.equal(
-    types.MapView(2, [
+    types.BoundedMap(2, [
       #(types.Atom("password"), types.Redacted("key policy")),
       #(types.Atom("profile"), types.Tuple([types.Redacted("depth limit")])),
     ]),
@@ -86,7 +86,7 @@ pub fn raw_mode_honours_case_insensitive_custom_redaction_keys_test() {
     fingerprint,
   )
   |> should.equal(
-    types.MapView(1, [
+    types.BoundedMap(1, [
       #(
         types.Scalar(
           "string",

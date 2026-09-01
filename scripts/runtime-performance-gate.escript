@@ -91,7 +91,7 @@ prepared_compare_gate() ->
 
 repeated_compare(_Events, 0) -> ok;
 repeated_compare(Events, Remaining) ->
-    {diff_report, _Items, 0, 0, 0, 0, none} =
+    {ok, {diff_report, _Items, 0, 0, 0, 0, none}} =
         'beamtrace@diff':compare(Events, Events),
     repeated_compare(Events, Remaining - 1).
 

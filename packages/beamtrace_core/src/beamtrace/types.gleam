@@ -141,7 +141,7 @@ pub fn empty_calibration() -> ClockCalibration {
 
 /// A module/function/arity target. Parse untrusted text with `beamtrace/mfa`.
 pub type Mfa {
-  Mfa(module_: String, function_: String, arity: Int)
+  Mfa(module: String, function: String, arity: Int)
 }
 
 /// A physical BEAM process reference scoped by node.
@@ -202,11 +202,11 @@ pub type RawTerm {
 pub type TermView {
   Hidden
   Atom(name: String)
-  Tag(name: String)
+  TagOnly(name: String)
   Tuple(items: List(TermView))
   Constructor(name: String, fields: List(TermView))
-  ListView(length: Int, items: List(TermView))
-  MapView(size: Int, entries: List(#(TermView, TermView)))
+  BoundedList(length: Int, items: List(TermView))
+  BoundedMap(size: Int, entries: List(#(TermView, TermView)))
   BinaryMetadata(
     bytes: Int,
     display: Option(String),

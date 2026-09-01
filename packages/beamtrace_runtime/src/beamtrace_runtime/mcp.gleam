@@ -631,7 +631,7 @@ fn call_compare_summary(id: RpcId, source: String, modern: Bool) -> String {
             storage.load(arguments.right_path)
           {
             Ok(left), Ok(right) -> {
-              case diff.compare_checked(left.events, right.events) {
+              case diff.compare(left.events, right.events) {
                 Error(error) ->
                   tool_error(
                     id,

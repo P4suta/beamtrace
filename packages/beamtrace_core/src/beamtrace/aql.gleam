@@ -46,12 +46,6 @@ pub type AqlError {
   AqlError(offset: Int, message: String)
 }
 
-/// Compatibility summary of fields safe for the agent and fields left for the
-/// relay. Prefer `compile_trigger` when an executable split is required.
-pub type AgentPlan {
-  AgentPlan(match_spec_fields: List(String), residual_fields: List(String))
-}
-
 /// Equality operations supported by dependency-free target match-specs.
 pub type AgentComparator {
   AgentEqual
@@ -324,15 +318,6 @@ fn gt_order() {
   Gt
 }
 
-/// Classify referenced fields as target-safe or relay-only in O(query size).
-/// This compatibility helper cannot fail or emit executable user code.
-@deprecated("Use compile_trigger, which returns the executable target predicate and relay residual")
-pub fn compile_agent(query: Query) -> AgentPlan {
-  let fields = fields(query, []) |> list.reverse |> unique(dict.new(), [])
-  let #(safe, residual) = split_fields(fields, [], [])
-  AgentPlan(safe, residual)
-}
-
 /// Split an AQL query into a target-safe root predicate and a relay-side
 /// residual. Mixed safe/unsafe OR and NOT expressions stay wholly residual;
 /// pushing only one branch would incorrectly discard valid roots.
@@ -409,14 +394,14 @@ fn fixed_trigger_value(field: String, trigger: types.Mfa) -> Option(Value) {
   case field {
     "mfa" ->
       Some(StringValue(
-        trigger.module_
+        trigger.module
         <> ":"
-        <> trigger.function_
+        <> trigger.function
         <> "/"
         <> int.to_string(trigger.arity),
       ))
-    "module" -> Some(StringValue(trigger.module_))
-    "function" -> Some(StringValue(trigger.function_))
+    "module" -> Some(StringValue(trigger.module))
+    "function" -> Some(StringValue(trigger.function))
     "arity" | "arg.count" -> Some(IntValue(trigger.arity))
     _ -> None
   }
@@ -491,53 +476,6 @@ fn simplify_not(predicate: AgentPredicate) -> AgentPredicate {
     AgentNot(inner) -> inner
     _ -> AgentNot(predicate)
   }
-}
-
-fn fields(query: Query, accumulator: List(String)) -> List(String) {
-  case query {
-    Compare(field, _, _) -> [field, ..accumulator]
-    And(left, right) | Or(left, right) ->
-      fields(right, fields(left, accumulator))
-    Not(query) -> fields(query, accumulator)
-  }
-}
-
-fn unique(
-  values: List(String),
-  seen: Dict(String, Nil),
-  accumulator: List(String),
-) -> List(String) {
-  case values {
-    [] -> list.reverse(accumulator)
-    [value, ..rest] ->
-      case dict.has_key(seen, value) {
-        True -> unique(rest, seen, accumulator)
-        False ->
-          unique(rest, dict.insert(seen, value, Nil), [value, ..accumulator])
-      }
-  }
-}
-
-fn split_fields(
-  values: List(String),
-  safe: List(String),
-  residual: List(String),
-) -> #(List(String), List(String)) {
-  case values {
-    [] -> #(list.reverse(safe), list.reverse(residual))
-    [value, ..rest] ->
-      case agent_safe(value) {
-        True -> split_fields(rest, [value, ..safe], residual)
-        False -> split_fields(rest, safe, [value, ..residual])
-      }
-  }
-}
-
-fn agent_safe(field: String) -> Bool {
-  list.contains(
-    ["message.tag", "message.size", "mfa", "module", "function", "arity"],
-    field,
-  )
 }
 
 fn lex(source: String) -> Result(List(Token), AqlError) {

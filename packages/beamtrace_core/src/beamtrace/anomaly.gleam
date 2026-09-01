@@ -11,7 +11,7 @@ import gleam/int
 import gleam/list
 
 /// A bounded live metric tracked by the online detector.
-pub type Metric {
+pub type MetricKind {
   Mailbox
   Memory
   Heap
@@ -36,7 +36,7 @@ pub type AnomalyKind {
 }
 
 /// An exact VM signal received directly from the runtime.
-pub type SystemSignal {
+pub type VmSignal {
   LongGc
   LongScheduleSignal
   LargeHeapSignal
@@ -56,7 +56,7 @@ pub type Alert {
 /// The EWMA and hysteresis counters for one metric.
 pub type Baseline {
   Baseline(
-    metric: Metric,
+    metric: MetricKind,
     ewma: Float,
     initialized: Bool,
     high_samples: Int,
@@ -64,7 +64,7 @@ pub type Baseline {
   )
 }
 
-/// Pure detector state. Its metric and alert lists remain bounded by `Metric`.
+/// Pure detector state. Its metric and alert lists remain bounded by `MetricKind`.
 pub type Detector {
   Detector(
     alpha: Float,
@@ -96,7 +96,7 @@ pub fn new_detector(
 /// fail; inferred alerts record the threshold inputs used.
 pub fn observe(
   detector: Detector,
-  metric: Metric,
+  metric: MetricKind,
   value: Float,
   observed_at_ns: Int,
 ) -> Detector {
@@ -167,7 +167,7 @@ fn update_baseline(baseline: Baseline, value: Float, alpha: Float) -> Baseline {
   }
 }
 
-fn find_baseline(baselines: List(Baseline), metric: Metric) -> Baseline {
+fn find_baseline(baselines: List(Baseline), metric: MetricKind) -> Baseline {
   case baselines {
     [] -> Baseline(metric, 0.0, False, 0, 0)
     [baseline, ..rest] ->
@@ -200,7 +200,7 @@ fn remove_alert(alerts: List(Alert), kind: AnomalyKind) -> List(Alert) {
   list.filter(alerts, fn(alert) { alert.kind != kind })
 }
 
-fn anomaly_kind(metric: Metric) -> AnomalyKind {
+fn anomaly_kind(metric: MetricKind) -> AnomalyKind {
   case metric {
     Mailbox -> MailboxGrowth
     Memory -> MemoryGrowth
@@ -212,7 +212,7 @@ fn anomaly_kind(metric: Metric) -> AnomalyKind {
   }
 }
 
-fn summary(metric: Metric) -> String {
+fn summary(metric: MetricKind) -> String {
   case metric {
     Mailbox -> "mailbox is growing above its baseline"
     Memory -> "process memory is growing above its baseline"
@@ -225,7 +225,7 @@ fn summary(metric: Metric) -> String {
 }
 
 /// Convert one runtime signal into an exact-evidence alert in O(1).
-pub fn from_system_signal(signal: SystemSignal, value: Int) -> Alert {
+pub fn from_vm_signal(signal: VmSignal, value: Int) -> Alert {
   case signal {
     LongGc ->
       Alert(

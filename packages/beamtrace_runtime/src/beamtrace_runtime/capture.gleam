@@ -133,7 +133,7 @@ pub type Budget {
 }
 
 pub type MfaCandidate {
-  MfaCandidate(node: String, module_: String, function_: String, arity: Int)
+  MfaCandidate(node: String, module: String, function: String, arity: Int)
 }
 
 pub type PreparedCapture {
@@ -178,14 +178,14 @@ pub fn execute(
 ) -> Result(CaptureResult, String) {
   use prepared <- try_result(prepare(spec))
   let budget = spec.budget
-  let types.Mfa(module_, function_, arity) = spec.trigger
+  let types.Mfa(module, function, arity) = spec.trigger
   use payload <- try_result(case spec.nodes {
     [node] ->
       collect_remote_spec(
         node,
         cookie,
-        module_,
-        function_,
+        module,
+        function,
         arity,
         budget.max_duration_ms,
         budget.drain_timeout_ms,
@@ -201,8 +201,8 @@ pub fn execute(
       collect_distributed_spec(
         spec.nodes,
         cookie,
-        module_,
-        function_,
+        module,
+        function,
         arity,
         budget.max_duration_ms,
         budget.drain_timeout_ms,
@@ -632,7 +632,7 @@ fn normalize_event(
   let #(peer_node, peer_pid) = raw_event_peer(event)
   let peer = types.ProcessRef(peer_node, peer_pid)
   let semantic = raw_event_semantic(event)
-  let message = shaped_term(event, types.Tag(semantic))
+  let message = shaped_term(event, types.TagOnly(semantic))
   let kind = case raw_event_kind(event) {
     "root" -> types.Root(trigger, root_arguments(event))
     "send" -> types.Send(peer, message, event_serial(event))
@@ -770,9 +770,9 @@ fn normalize_term(term: RawTermView) -> types.TermView {
       types.Constructor(name, list.map(fields, normalize_term))
     RawTuple(_, items) -> types.Tuple(list.map(items, normalize_term))
     RawList(length, items) ->
-      types.ListView(length, list.map(items, normalize_term))
+      types.BoundedList(length, list.map(items, normalize_term))
     RawMap(size, entries) ->
-      types.MapView(
+      types.BoundedMap(
         size,
         list.map(entries, fn(entry) {
           #(normalize_term(entry.0), normalize_term(entry.1))
@@ -807,9 +807,9 @@ fn non_empty(value: String) -> Option(String) {
   }
 }
 
-fn optional_mfa(module_: String, function_: String, arity: Int) {
-  case module_ != "" && function_ != "" && arity >= 0 && arity <= 255 {
-    True -> Some(types.Mfa(module_, function_, arity))
+fn optional_mfa(module: String, function: String, arity: Int) {
+  case module != "" && function != "" && arity >= 0 && arity <= 255 {
+    True -> Some(types.Mfa(module, function, arity))
     False -> None
   }
 }
@@ -1012,8 +1012,8 @@ fn event_context(event: types.TraceEvent, trigger: types.Mfa) {
       list.append(
         [
           #("mfa", aql.StringValue(mfa_name(trigger))),
-          #("module", aql.StringValue(trigger.module_)),
-          #("function", aql.StringValue(trigger.function_)),
+          #("module", aql.StringValue(trigger.module)),
+          #("function", aql.StringValue(trigger.function)),
           #("arity", aql.IntValue(trigger.arity)),
           #("arg.count", aql.IntValue(list.length(arguments))),
         ],
@@ -1099,10 +1099,10 @@ fn term_context(prefix: String, term: types.TermView) {
 fn term_type(term: types.TermView) -> String {
   case term {
     types.Hidden -> "hidden"
-    types.Atom(_) | types.Tag(_) -> "atom"
+    types.Atom(_) | types.TagOnly(_) -> "atom"
     types.Tuple(_) | types.Constructor(_, _) -> "tuple"
-    types.ListView(_, _) -> "list"
-    types.MapView(_, _) -> "map"
+    types.BoundedList(_, _) -> "list"
+    types.BoundedMap(_, _) -> "map"
     types.BinaryMetadata(_, _, _) -> "binary"
     types.Scalar(kind, _, _) -> kind
     types.Redacted(_) -> "redacted"
@@ -1113,8 +1113,8 @@ fn term_size(term: types.TermView) -> Option(Int) {
   case term {
     types.Tuple(items) -> Some(list.length(items))
     types.Constructor(_, fields) -> Some(list.length(fields) + 1)
-    types.ListView(length, _) -> Some(length)
-    types.MapView(size, _) -> Some(size)
+    types.BoundedList(length, _) -> Some(length)
+    types.BoundedMap(size, _) -> Some(size)
     types.BinaryMetadata(bytes, _, _) -> Some(bytes)
     _ -> None
   }
@@ -1138,13 +1138,14 @@ fn event_kind_name(kind: types.TraceEventKind) -> String {
 
 fn message_tag(message: types.TermView) -> String {
   case message {
-    types.Tag(value) | types.Atom(value) | types.Constructor(value, _) -> value
+    types.TagOnly(value) | types.Atom(value) | types.Constructor(value, _) ->
+      value
     _ -> ""
   }
 }
 
 fn mfa_name(mfa: types.Mfa) -> String {
-  mfa.module_ <> ":" <> mfa.function_ <> "/" <> int.to_string(mfa.arity)
+  mfa.module <> ":" <> mfa.function <> "/" <> int.to_string(mfa.arity)
 }
 
 pub fn remote(
@@ -1252,8 +1253,8 @@ fn try_result(
 fn collect_remote_spec(
   node: String,
   cookie: String,
-  module_: String,
-  function_: String,
+  module: String,
+  function: String,
   arity: Int,
   capture_window_ms: Int,
   drain_timeout_ms: Int,
@@ -1270,8 +1271,8 @@ fn collect_remote_spec(
 fn collect_distributed_spec(
   nodes: List(String),
   cookie: String,
-  module_: String,
-  function_: String,
+  module: String,
+  function: String,
   arity: Int,
   capture_window_ms: Int,
   drain_timeout_ms: Int,

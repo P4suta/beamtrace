@@ -11,3 +11,4 @@
 - [0008](0008-sealed-archive-lands-on-overview.md) — A sealed archive opens on its result
 - [0009](0009-palette-focus-without-showmodal.md) — Keyboard focus is managed with effects, not showModal()
 - [0010](0010-checked-in-web-dist-gate.md) — The checked-in Web distribution must reproduce from source
+- [0011](0011-core-vocabulary-finalized-before-first-stable-release.md) — Core vocabulary is finalized before the first stable release

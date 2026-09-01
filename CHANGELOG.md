@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### ⚠ BREAKING CHANGES
+
+* **core:** finalize the public vocabulary before the first stable release (see `docs/migration-v0.4.md`): the unchecked `diff.compare` is removed and `diff.compare_checked` takes its name; `aql.compile_agent`/`AgentPlan` are removed in favour of `compile_trigger`; `beamtrace.prepare` becomes `prepared`; `types.Mfa` labels drop their trailing underscores; `TermView.Tag`/`ListView`/`MapView` become `TagOnly`/`BoundedList`/`BoundedMap`; `anomaly.Metric`/`SystemSignal` become `MetricKind`/`VmSignal`
+
 ### Features
 
 * **core:** add opaque prepared traces and reusable multi-run comparison APIs

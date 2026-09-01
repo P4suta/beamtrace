@@ -58,7 +58,7 @@ fn named_event(
     local_instant: types.LocalInstant(at, at),
     kind: types.Send(
       process.physical,
-      types.Tag(tag),
+      types.TagOnly(tag),
       types.SequenceSerial(at, at + 1),
     ),
     evidence: types.Exact,
@@ -77,7 +77,7 @@ pub fn logical_identity_survives_restart_test() {
 }
 
 pub fn compare_ignores_pid_and_node_local_time_test() {
-  let report =
+  let assert Ok(report) =
     diff.compare([event("left", "<0.21.0>", 10)], [
       event("right", "<0.99.0>", 9000),
     ])
@@ -95,7 +95,7 @@ pub fn compare_ignores_pid_and_node_local_time_test() {
 }
 
 pub fn compare_reports_relative_causal_latency_not_run_start_offset_test() {
-  let report =
+  let assert Ok(report) =
     diff.compare(
       [event("left-1", "<0.21.0>", 100), event("left-2", "<0.21.0>", 150)],
       [event("right-1", "<0.99.0>", 9000), event("right-2", "<0.99.0>", 9100)],
@@ -109,7 +109,7 @@ pub fn compare_reports_relative_causal_latency_not_run_start_offset_test() {
 }
 
 pub fn bounded_myers_aligns_unique_logical_signatures_without_guessing_test() {
-  let report =
+  let assert Ok(report) =
     diff.compare(
       [
         named_event("left-a", "<0.1.0>", "worker", "a", 1),
@@ -129,7 +129,7 @@ pub fn bounded_myers_aligns_unique_logical_signatures_without_guessing_test() {
 }
 
 pub fn unrelated_unique_signatures_are_added_and_removed_not_matched_test() {
-  let report =
+  let assert Ok(report) =
     diff.compare([named_event("left", "<0.1.0>", "worker", "left", 1)], [
       named_event("right", "<0.2.0>", "worker", "right", 1),
     ])
@@ -141,7 +141,7 @@ pub fn unrelated_unique_signatures_are_added_and_removed_not_matched_test() {
 }
 
 pub fn repeated_unanchored_signatures_are_explicitly_ambiguous_test() {
-  let report =
+  let assert Ok(report) =
     diff.compare(
       [
         named_event("left-1", "<0.1.0>", "worker", "repeat", 1),
@@ -164,7 +164,7 @@ pub fn repeated_unanchored_signatures_are_explicitly_ambiguous_test() {
   report.ambiguity_count |> should.equal(1)
 }
 
-pub fn prepared_comparison_matches_compatibility_wrapper_test() {
+pub fn prepared_comparison_matches_direct_compare_test() {
   let left_branch = [
     named_event("left-a", "<0.1.0>", "worker", "a", 1),
     named_event("left-c", "<0.1.0>", "worker", "c", 3),
@@ -182,25 +182,18 @@ pub fn prepared_comparison_matches_compatibility_wrapper_test() {
     named_event("right-1", "<0.5.0>", "worker", "repeat", 10),
     named_event("right-2", "<0.6.0>", "worker", "repeat", 20),
   ]
-  let duplicate_ids = [
-    named_event("duplicate", "<0.7.0>", "worker", "a", 1),
-    named_event("duplicate", "<0.7.0>", "worker", "b", 2),
-  ]
   let cases = [
     #(left_branch, left_branch),
     #(left_branch, right_branch),
     #(right_branch, left_branch),
     #(repeated_left, repeated_right),
-    #(duplicate_ids, right_branch),
   ]
 
   list.each(cases, fn(pair) {
-    case diff.prepare(pair.0), diff.prepare(pair.1) {
-      Ok(left), Ok(right) ->
-        diff.compare_prepared(left, right)
-        |> should.equal(diff.compare(pair.0, pair.1))
-      Error(_), _ | _, Error(_) -> Nil
-    }
+    let assert Ok(left) = diff.prepare(pair.0)
+    let assert Ok(right) = diff.prepare(pair.1)
+    diff.compare(pair.0, pair.1)
+    |> should.equal(Ok(diff.compare_prepared(left, right)))
   })
 }
 
@@ -212,7 +205,7 @@ pub fn checked_comparison_rejects_duplicate_event_ids_test() {
 
   diff.prepare(duplicates)
   |> should.equal(Error(dag.DuplicateEventId("duplicate")))
-  diff.compare_checked(duplicates, [])
+  diff.compare(duplicates, [])
   |> should.equal(Error(dag.DuplicateEventId("duplicate")))
 }
 

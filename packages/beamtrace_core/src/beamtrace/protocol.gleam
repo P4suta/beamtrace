@@ -33,7 +33,7 @@ pub fn classify(message: types.TermView) -> SemanticMessage {
     types.Tuple([types.Atom("DOWN"), _, _, _, _]) -> MonitorDown
     types.Tuple([types.Atom("EXIT"), _, _]) -> ExitSignal
     types.Tuple([types.Atom("spawn_request"), _, _, _]) -> SpawnProtocol
-    types.Atom("timeout") | types.Tag("timeout") -> Timeout
+    types.Atom("timeout") | types.TagOnly("timeout") -> Timeout
     _ -> Ordinary
   }
 }

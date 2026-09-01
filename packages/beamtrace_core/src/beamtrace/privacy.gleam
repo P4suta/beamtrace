@@ -64,14 +64,14 @@ fn shape_at(
             }),
           )
         types.RawList(items) ->
-          types.ListView(
+          types.BoundedList(
             list.length(items),
             list.map(items, fn(item) {
               shape_at(item, privacy, fingerprint, depth + 1)
             }),
           )
         types.RawMap(entries) ->
-          types.MapView(
+          types.BoundedMap(
             list.length(entries),
             list.map(entries, fn(entry) {
               let #(key, value) = entry
@@ -153,12 +153,12 @@ pub fn render(view: types.TermView) -> String {
   case view {
     types.Hidden -> "<hidden>"
     types.Atom(name) -> name
-    types.Tag(name) -> name
+    types.TagOnly(name) -> name
     types.Tuple(items) -> "{" <> render_items(items) <> "}"
     types.Constructor(name, fields) ->
       name <> "(" <> render_items(fields) <> ")"
-    types.ListView(length, _) -> "list[" <> int.to_string(length) <> "]"
-    types.MapView(size, _) -> "map{" <> int.to_string(size) <> "}"
+    types.BoundedList(length, _) -> "list[" <> int.to_string(length) <> "]"
+    types.BoundedMap(size, _) -> "map{" <> int.to_string(size) <> "}"
     types.BinaryMetadata(bytes, display, _) ->
       case display {
         Some(value) -> "binary(" <> int.to_string(bytes) <> "):" <> value

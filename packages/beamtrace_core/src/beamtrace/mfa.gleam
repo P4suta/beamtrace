@@ -28,21 +28,21 @@ pub type MfaError {
 pub fn parse(source: String) -> Result(types.Mfa, MfaError) {
   case string.split(source, on: ":") {
     ["", _] -> Error(EmptyModule)
-    [module_, function_and_arity] ->
-      case validate_component(module_, "module") {
+    [module, function_and_arity] ->
+      case validate_component(module, "module") {
         Error(error) -> Error(error)
         Ok(Nil) ->
           case string.split(function_and_arity, on: "/") {
             ["", _] -> Error(EmptyFunction)
-            [function_, arity_source] ->
-              case validate_component(function_, "function") {
+            [function, arity_source] ->
+              case validate_component(function, "function") {
                 Error(error) -> Error(error)
                 Ok(Nil) ->
                   case int.parse(arity_source) {
                     Error(_) -> Error(InvalidArity(arity_source))
                     Ok(arity) if arity < 0 || arity > 255 ->
                       Error(ArityOutOfRange(arity))
-                    Ok(arity) -> Ok(types.Mfa(module_, function_, arity))
+                    Ok(arity) -> Ok(types.Mfa(module, function, arity))
                   }
               }
             _ -> Error(InvalidFormat)
@@ -65,7 +65,7 @@ fn validate_component(
 
 /// Render an MFA in BeamTrace's canonical `Module:function/arity` form.
 pub fn to_string(value: types.Mfa) -> String {
-  value.module_ <> ":" <> value.function_ <> "/" <> int.to_string(value.arity)
+  value.module <> ":" <> value.function <> "/" <> int.to_string(value.arity)
 }
 
 /// Render a stable explanation suitable for CLI and library consumers.

@@ -512,7 +512,8 @@ fn call_endpoints(
   event: types.TraceEvent,
 ) -> Result(#(types.ProcessRef, types.ProcessRef), Nil) {
   case event.kind {
-    types.Send(to, types.Tag("call"), _) -> Ok(#(event.process.physical, to))
+    types.Send(to, types.TagOnly("call"), _) ->
+      Ok(#(event.process.physical, to))
     _ -> Error(Nil)
   }
 }
@@ -521,7 +522,8 @@ fn reply_endpoints(
   event: types.TraceEvent,
 ) -> Result(#(types.ProcessRef, types.ProcessRef), Nil) {
   case event.kind {
-    types.Send(to, types.Tag("reply"), _) -> Ok(#(to, event.process.physical))
+    types.Send(to, types.TagOnly("reply"), _) ->
+      Ok(#(to, event.process.physical))
     _ -> Error(Nil)
   }
 }

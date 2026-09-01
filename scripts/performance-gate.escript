@@ -100,7 +100,7 @@ run_dag(Events) ->
 
 run_diff(Events) ->
     case 'beamtrace@diff':compare(Events, Events) of
-        {diff_report, _Items, 0, 0, 0, 0, none} -> ok;
+        {ok, {diff_report, _Items, 0, 0, 0, 0, none}} -> ok;
         Report -> erlang:error({diff_failed, Report})
     end.
 

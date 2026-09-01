@@ -59,8 +59,8 @@ pub type TraceSession {
     project: String,
     environment: String,
     node: String,
-    module_: String,
-    function_: String,
+    module: String,
+    function: String,
     arity: Int,
     mode: String,
     privacy: String,
@@ -294,8 +294,8 @@ fn insert_trace_session(
                 sqlight.text(requested.id),
                 sqlight.text(requested.relay_id),
                 sqlight.text(requested.node),
-                sqlight.text(requested.module_),
-                sqlight.text(requested.function_),
+                sqlight.text(requested.module),
+                sqlight.text(requested.function),
                 sqlight.int(requested.arity),
                 sqlight.text(requested.mode),
                 sqlight.int(requested.started_at_ms),
@@ -865,8 +865,8 @@ fn immutable_session_matches(left: TraceSession, right: TraceSession) -> Bool {
   && left.project == right.project
   && left.environment == right.environment
   && left.node == right.node
-  && left.module_ == right.module_
-  && left.function_ == right.function_
+  && left.module == right.module
+  && left.function == right.function
   && left.arity == right.arity
   && left.mode == right.mode
   && left.privacy == right.privacy
@@ -1802,8 +1802,8 @@ fn trace_session_decoder() -> decode.Decoder(TraceSession) {
   use project <- decode.field(2, decode.string)
   use environment <- decode.field(3, decode.string)
   use node <- decode.field(4, decode.string)
-  use module_ <- decode.field(5, decode.string)
-  use function_ <- decode.field(6, decode.string)
+  use module <- decode.field(5, decode.string)
+  use function <- decode.field(6, decode.string)
   use arity <- decode.field(7, decode.int)
   use mode <- decode.field(8, decode.string)
   use privacy <- decode.field(9, decode.string)
@@ -1821,8 +1821,8 @@ fn trace_session_decoder() -> decode.Decoder(TraceSession) {
     project,
     environment,
     node,
-    module_,
-    function_,
+    module,
+    function,
     arity,
     mode,
     privacy,
@@ -1968,8 +1968,8 @@ fn valid_trace_session(session: TraceSession) -> Bool {
   && valid_text(session.project, 256)
   && valid_text(session.environment, 256)
   && valid_text(session.node, 255)
-  && valid_text(session.module_, 255)
-  && valid_text(session.function_, 255)
+  && valid_text(session.module, 255)
+  && valid_text(session.function, 255)
   && session.arity >= 0
   && session.arity <= 255
   && list.contains(["exact", "live"], session.mode)

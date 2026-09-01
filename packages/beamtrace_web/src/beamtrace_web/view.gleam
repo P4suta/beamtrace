@@ -673,9 +673,9 @@ fn team_trace_row(
         html.text(
           trace.node
           <> " · "
-          <> trace.module_
+          <> trace.module
           <> ":"
-          <> trace.function_
+          <> trace.function
           <> "/"
           <> int.to_string(trace.arity),
         ),

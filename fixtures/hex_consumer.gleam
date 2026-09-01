@@ -25,7 +25,7 @@ pub fn main() {
       local_instant: types.LocalInstant(offset_ns: 100, order: 1),
       kind: types.Send(
         to: types.ProcessRef("shop@localhost", "<0.20.0>"),
-        message: types.Tag("charge"),
+        message: types.TagOnly("charge"),
         serial: types.SequenceSerial(previous: 0, current: 1),
       ),
       evidence: types.Exact,
