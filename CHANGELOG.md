@@ -9,6 +9,8 @@
 
 ### Features
 
+* **cli:** polish pass — `-v` works alongside `-V`; capture/record help explains the positional node shorthand and what `--profile` fills; the one-time bootstrap URL prints its 60-second validity; a new specification/parser audit test pins every listed flag and the exact `--json`/`--force` acceptance per command
+
 * **cli:** `compare` now follows the interactive-default rule of every other viewer — an interactive terminal opens the Web comparison workspace, while pipes, CI, and `--json` keep the byte-compatible classic output and exit codes; the dev launcher also stops swallowing `--out` and friends
 
 * **cli:** add `beamtrace help aql` and `docs/aql-reference.md` — grammar, operators, duration literals, the full field vocabulary rendered from `aql.event_fields`, evaluation rules, and examples; `--where` help links to it
