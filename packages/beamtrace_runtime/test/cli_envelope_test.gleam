@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
+import beamtrace/aql
 import beamtrace_runtime/cli
 import beamtrace_runtime/cli_errors
 import beamtrace_runtime/cli_spec
@@ -105,4 +106,17 @@ pub fn lifecycle_constructs_failures_only_through_the_catalogue_test() {
   let assert Ok(source) = read_file("src/beamtrace_runtime/cli_lifecycle.gleam")
   source |> string.contains("emit_json_error(") |> should.be_false()
   source |> string.contains("cli_errors.CliError(") |> should.be_false()
+}
+
+pub fn aql_reference_documents_every_event_field_test() {
+  let assert Ok(reference) = read_file("../../docs/aql-reference.md")
+  list.each(aql.event_fields(), fn(field) {
+    case string.contains(reference, "`" <> field <> "`") {
+      True -> Nil
+      False -> panic as { "aql-reference.md lacks the field " <> field }
+    }
+  })
+  cli_spec.positional_choices("help")
+  |> list.contains("aql")
+  |> should.be_true()
 }

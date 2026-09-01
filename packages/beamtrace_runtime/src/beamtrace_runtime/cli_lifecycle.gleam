@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import argv
+import beamtrace/aql
 import beamtrace/codec
 import beamtrace/dag
 import beamtrace/diff
@@ -115,6 +116,10 @@ fn run(command_: cli.Command) -> Int {
     }
     cli.CommandHelp("errors") -> {
       io.println(error_catalogue_help())
+      0
+    }
+    cli.CommandHelp("aql") -> {
+      io.println(aql_help())
       0
     }
     cli.CommandHelp(name) -> {
@@ -2368,6 +2373,29 @@ fn read_cookie_file(path: String) -> Result(String, String)
 
 @external(erlang, "beamtrace_cli_ffi", "absolute_path")
 fn absolute_path(path: String) -> String
+
+fn aql_help() -> String {
+  let fields =
+    aql.event_fields()
+    |> list.map(fn(field) { "  " <> field })
+    |> string.join("\n")
+  "AQL root predicates (--where and the beamtrace.toml 'where' key):\n"
+  <> "\n"
+  <> "Grammar:   expr := comparison | expr and expr | expr or expr\n"
+  <> "                 | not expr | ( expr )\n"
+  <> "           comparison := field OP value\n"
+  <> "Operators: == != > >= < <=   ('or' binds loosest, then 'and', 'not')\n"
+  <> "Values:    \"string\", bare_word, integers, floats, true/false,\n"
+  <> "           durations with ns/us/ms/s (250ms, 2s)\n"
+  <> "Fields ('*' stands for a zero-based argument index):\n"
+  <> fields
+  <> "\n"
+  <> "\n"
+  <> "A missing or differently-typed field makes its comparison false.\n"
+  <> "Typos fail at parse time with a caret and a suggestion.\n"
+  <> "Reference: docs/aql-reference.md\n"
+  <> "Example:   --where 'arg.0.tag == \"charge\" and exact == true'"
+}
 
 fn error_catalogue_help() -> String {
   let rows =
