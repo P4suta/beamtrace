@@ -80,6 +80,12 @@ pub fn start(
   )
 }
 
+/// The one-time bootstrap URL expires this long after being printed; rerun
+/// the command for a fresh URL.
+const bootstrap_token_ttl_ms = 60_000
+
+const bootstrap_ttl_label = "60 s"
+
 /// Start a local workspace and optionally launch its one-time bootstrap URL.
 /// Browser launch failure is reported but never stops the bound server.
 pub fn start_with_browser(
@@ -178,7 +184,7 @@ pub fn new_local(
   archive_path: Option(String),
   capture_store: Option(capture_session.Store),
 ) -> LocalRuntime {
-  let #(auth_store, bootstrap_token) = local_auth.new(60_000)
+  let #(auth_store, bootstrap_token) = local_auth.new(bootstrap_token_ttl_ms)
   let context =
     api.Context(
       tool_version: runtime_version.current,
@@ -230,13 +236,24 @@ fn start_local(
       let bootstrap_url =
         url <> "/bootstrap/" <> runtime.bootstrap_token <> bootstrap_query
       case open_browser {
-        False -> io.println("One-time bootstrap URL: " <> bootstrap_url)
+        False ->
+          io.println(
+            "One-time bootstrap URL (valid for "
+            <> bootstrap_ttl_label
+            <> "): "
+            <> bootstrap_url,
+          )
         True ->
           case launch_browser(bootstrap_url) {
             Ok(Nil) -> io.println("Opened the one-time bootstrap URL.")
             Error(reason) -> {
               io.println_error("Could not open the default browser: " <> reason)
-              io.println("One-time bootstrap URL: " <> bootstrap_url)
+              io.println(
+                "One-time bootstrap URL (valid for "
+                <> bootstrap_ttl_label
+                <> "): "
+                <> bootstrap_url,
+              )
             }
           }
       }

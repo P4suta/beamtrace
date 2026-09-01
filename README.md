@@ -22,7 +22,9 @@ Download the archive for your platform from the
 - `beamtrace-<version>-macos-arm64.zip`
 - `beamtrace-<version>-windows-x64.zip`
 
-Each self-contained archive includes ERTS. Download its adjacent `.sha256`
+Each self-contained archive includes ERTS — for BeamTrace itself and
+`beamtrace demo`. `record` and `capture` start **your** application on your
+own Erlang/OTP 27–29 toolchain from `PATH` (see ADR 0002). Download its adjacent `.sha256`
 file, verify the checksum, and verify the GitHub artifact attestation before
 running it:
 

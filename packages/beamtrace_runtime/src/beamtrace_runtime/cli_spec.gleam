@@ -46,6 +46,8 @@ pub fn commands() -> List(CommandSpec) {
       "Capture one bounded causal operation from an existing node.",
       "beamtrace capture [<node>] --trigger Module:function/arity [options]",
       [
+        "The positional <node> is shorthand for --node.",
+        "--profile fills node, trigger, and other fields from beamtrace.toml (docs/project-config.md).",
         "Output: beamtrace-YYYYMMDDTHHMMSSZ[-N].beamtrace",
         "Preset: generic; max roots: 1; privacy: metadata",
       ],
@@ -65,7 +67,10 @@ pub fn commands() -> List(CommandSpec) {
           "Archive path; omitted means a safe generated name.",
         ),
         OptionSpec("--force", "Replace an explicitly named existing archive."),
-        OptionSpec("--profile NAME", "Project capture profile."),
+        OptionSpec(
+          "--profile NAME",
+          "Capture profile from beamtrace.toml (docs/project-config.md).",
+        ),
         OptionSpec("--max-roots N", "Capture between 1 and 1000 roots."),
         OptionSpec("--preset PRESET", "Capture preset; default generic."),
         OptionSpec(
@@ -82,6 +87,8 @@ pub fn commands() -> List(CommandSpec) {
       "beamtrace record --trigger Module:function/arity [options] -- <command>",
       [
         "Interactive: Web; non-interactive: no UI",
+        "Your application runs on the Erlang toolchain from PATH; the bundled runtime only runs BeamTrace and demo.",
+        "--profile fills node, trigger, and other fields from beamtrace.toml (docs/project-config.md).",
         "Output: beamtrace-YYYYMMDDTHHMMSSZ[-N].beamtrace",
       ],
       [
@@ -100,7 +107,10 @@ pub fn commands() -> List(CommandSpec) {
           "Archive path; omitted means a safe generated name.",
         ),
         OptionSpec("--force", "Replace an explicitly named existing archive."),
-        OptionSpec("--profile NAME", "Project capture profile."),
+        OptionSpec(
+          "--profile NAME",
+          "Capture profile from beamtrace.toml (docs/project-config.md).",
+        ),
         OptionSpec("--web", "Use the Web progress workspace."),
         OptionSpec("--tui", "Use terminal progress UI."),
         OptionSpec("--no-ui", "Disable interactive UI."),
@@ -404,6 +414,20 @@ pub fn option_placeholder(flag: String) -> Option(String) {
   case string.split(flag, on: " ") {
     [_, placeholder, ..] -> Some(placeholder)
     _ -> None
+  }
+}
+
+/// The bare flags of one command's options, for audits and tooling.
+pub fn command_option_flags(command: String) -> List(String) {
+  case list.find(commands(), fn(spec) { spec.name == command }) {
+    Error(Nil) -> []
+    Ok(spec) ->
+      list.filter_map(spec.options, fn(option) {
+        case string.split(option.flag, " ") {
+          [flag, ..] -> Ok(flag)
+          [] -> Error(Nil)
+        }
+      })
   }
 }
 
