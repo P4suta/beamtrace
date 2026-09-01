@@ -15,3 +15,4 @@
 - [0012](0012-aql-errors-are-typed-and-field-checked.md) — AQL errors are typed, caret-rendered, and field-checked
 - [0014](0014-diagnostic-thresholds-are-explicit-records.md) — Diagnostic thresholds are explicit records
 - [0016](0016-cli-error-catalogue-is-closed.md) — The CLI error catalogue is closed
+- [0013](0013-event-builder-is-pipe-shaped-and-total.md) — The event builder is pipe-shaped and total

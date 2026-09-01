@@ -128,6 +128,7 @@ without allocating JSON and parsing it back into the same value.
 
 - `beamtrace/types` — capture specifications, node-relative events, structured outcomes, evidence, interval time, and privacy-safe term views
 - `beamtrace` — validated high-level trace façade with one-time DAG construction
+- `beamtrace/event` — pipe-shaped builder for constructing trace events without boilerplate
 - `beamtrace/mfa` — validated `Module:function/arity` parsing and rendering
 - `beamtrace/aql` — parsing, evaluation, and safe agent-side planning for BeamTrace Query Language
 - `beamtrace/dag` and `beamtrace/merge` — causal graph validation and distributed partial-order merging
