@@ -2,6 +2,7 @@ import beamtrace/aql
 import beamtrace/dag
 import beamtrace/types
 import beamtrace_runtime/capture
+import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
@@ -710,4 +711,53 @@ pub fn residual_aql_can_match_root_argument_shape_and_logical_process_test() {
   capture.filter_roots(result, query, types.Mfa("shop", "run", 1)).events
   |> list.map(fn(event) { event.id })
   |> should.equal(["root", "stop"])
+}
+
+pub fn event_context_keys_are_all_catalogued_in_aql_event_fields_test() {
+  let trigger = types.Mfa("shop", "checkout", 1)
+  let identity =
+    types.ProcessIdentity(
+      physical: types.ProcessRef("app@host", "<0.10.0>"),
+      logical: Some(types.LogicalActor("actor-1", "checkout")),
+      evidence: [
+        types.RegisteredName("checkout_server"),
+        types.ProcessLabel("checkout"),
+        types.InitialCall(trigger),
+        types.Ancestor("shop_sup"),
+        types.SupervisorChildId("checkout"),
+        types.RestartProximity(12),
+      ],
+    )
+  let base =
+    types.TraceEvent(
+      id: "root",
+      root_id: "r1",
+      node: "app@host",
+      process: identity,
+      local_instant: types.LocalInstant(1, 1),
+      kind: types.Root(trigger, [
+        types.TagOnly("order"),
+        types.Tuple([types.TagOnly("basket")]),
+      ]),
+      evidence: types.Exact,
+    )
+  let send =
+    types.TraceEvent(
+      ..base,
+      id: "send",
+      kind: types.Send(
+        types.ProcessRef("app@host", "<0.20.0>"),
+        types.Tuple([types.TagOnly("charge")]),
+        types.SequenceSerial(0, 1),
+      ),
+    )
+
+  [base, send]
+  |> list.flat_map(fn(event) {
+    capture.event_context(event, trigger) |> dict.keys
+  })
+  |> list.each(fn(key) {
+    aql.parse_for(key <> " == 1", fields: aql.event_fields())
+    |> should.equal(aql.parse(key <> " == 1"))
+  })
 }

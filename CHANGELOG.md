@@ -8,6 +8,7 @@
 
 ### Features
 
+* **core:** replace `aql.AqlError` with typed variants rendered by `error_message` and the caret-annotated `error_report`; add `aql.parse_for` field validation with did-you-mean suggestions and the `aql.event_fields` vocabulary — `--where` and `beamtrace.toml` typos now fail at parse time on every path
 * **core:** add opaque prepared traces and reusable multi-run comparison APIs
 * **codec:** add direct typed validators and single-parse versioned decoding
 

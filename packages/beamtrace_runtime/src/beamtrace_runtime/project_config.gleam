@@ -293,9 +293,12 @@ fn validate_trigger(value: String) -> Result(String, String) {
 
 fn validate_where(value: String) -> Result(String, String) {
   use value <- result_try(bounded_value("where", value))
-  case aql.parse(value) {
+  case aql.parse_for(value, fields: aql.event_fields()) {
     Ok(_) -> Ok(value)
-    Error(_) -> Error("invalid configuration value for 'where'")
+    Error(error) ->
+      Error(
+        "invalid configuration value for 'where': " <> aql.error_message(error),
+      )
   }
 }
 

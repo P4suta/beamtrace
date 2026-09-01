@@ -1,9 +1,12 @@
 //// Safe parsing, evaluation, and agent planning for BeamTrace Query Language.
 ////
-//// Parsing returns an offset-bearing `AqlError`; evaluation reads only the
-//// supplied context and compilation emits a bounded predicate plan, never
-//// arbitrary code. Parsing and evaluation are linear in query size and pure
-//// on Erlang and JavaScript.
+//// Parsing returns a typed, offset-bearing `AqlError` renderable with
+//// `error_message` or the caret-annotated `error_report`; `parse_for`
+//// additionally rejects fields outside a caller-supplied vocabulary such as
+//// `event_fields`. Evaluation reads only the supplied context and
+//// compilation emits a bounded predicate plan, never arbitrary code.
+//// Parsing and evaluation are linear in query size and pure on Erlang and
+//// JavaScript.
 
 import beamtrace/types
 import gleam/dict.{type Dict}
@@ -12,6 +15,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/order.{Gt, Lt}
+import gleam/result
 import gleam/string
 
 /// A typed literal accepted by AQL comparisons.
@@ -41,9 +45,33 @@ pub type Query {
   Not(query: Query)
 }
 
-/// A parse failure with a zero-based source offset and safe explanation.
+/// A parse failure at a zero-based grapheme offset into the source.
+///
+/// Every variant carries the offset first, so `error.offset` works on all of
+/// them. Render one line with `error_message` or a caret-annotated report
+/// with `error_report`.
 pub type AqlError {
-  AqlError(offset: Int, message: String)
+  /// A character that cannot start any AQL token.
+  UnexpectedCharacter(offset: Int, character: String)
+  /// A double-quoted string that never closes.
+  UnterminatedString(offset: Int)
+  /// A numeric literal that parses as neither integer nor float.
+  InvalidNumber(offset: Int, text: String)
+  /// A duration literal whose number part is not an integer.
+  InvalidDuration(offset: Int, text: String)
+  /// A comparison was expected but no field name is present.
+  ExpectedField(offset: Int)
+  /// A field name is present but no comparison operator follows.
+  ExpectedComparator(offset: Int)
+  /// A comparison operator is present but no value follows.
+  ExpectedValue(offset: Int)
+  /// A `(` at this offset is never closed by `)`.
+  UnclosedParenthesis(offset: Int)
+  /// A well-formed query already ended before this leftover token.
+  UnexpectedToken(offset: Int, lexeme: String)
+  /// A field outside the vocabulary given to `parse_for`, with the closest
+  /// catalogued field when one is within edit distance two.
+  UnknownField(offset: Int, field: String, suggestion: Option(String))
 }
 
 /// Equality operations supported by dependency-free target match-specs.
@@ -95,94 +123,335 @@ type TokenKind {
 
 /// Parse one AQL expression in O(source length). Invalid syntax returns the
 /// first typed `AqlError`; parsing never performs I/O or executes input.
+/// Field names are not checked here — use `parse_for` when the evaluation
+/// context is known.
 pub fn parse(source: String) -> Result(Query, AqlError) {
+  parse_with(source, None)
+}
+
+/// Parse one AQL expression and reject fields outside the given vocabulary.
+///
+/// Each entry is a literal field name or a pattern whose `*` segment matches
+/// one non-negative integer (for example `arg.*.tag`). An unknown field
+/// fails at its source offset with the closest catalogued field as a
+/// suggestion when it is within edit distance two. Use `event_fields` for
+/// the capture event vocabulary.
+pub fn parse_for(
+  source: String,
+  fields fields: List(String),
+) -> Result(Query, AqlError) {
+  parse_with(source, Some(fields))
+}
+
+/// The field vocabulary available to `--where` predicates evaluated against
+/// capture events, including the `arg.*.…` patterns whose `*` stands for a
+/// zero-based argument index. This list is the single source the runtime,
+/// the CLI help, and the documentation render from.
+pub fn event_fields() -> List(String) {
+  [
+    "node", "process.pid", "root_id", "event.kind", "exact", "timestamp_ns",
+    "process.label", "process.logical_id", "process.registered_name",
+    "process.initial_call", "process.ancestor", "process.child_id",
+    "process.restart_proximity_ms", "mfa", "module", "function", "arity",
+    "arg.count", "arg.*.tag", "arg.*.size", "arg.*.type", "message.tag",
+    "message.size", "message.type",
+  ]
+}
+
+/// Render a one-line, stable explanation of a parse failure. The offset is
+/// zero-based and counts graphemes; nothing from the runtime environment
+/// leaks into the message.
+pub fn error_message(error: AqlError) -> String {
+  case error {
+    UnexpectedCharacter(offset, character) ->
+      "unexpected character '" <> character <> "' at offset " <> at(offset)
+    UnterminatedString(offset) -> "unterminated string at offset " <> at(offset)
+    InvalidNumber(offset, text) ->
+      "invalid number '" <> text <> "' at offset " <> at(offset)
+    InvalidDuration(offset, text) ->
+      "invalid duration '" <> text <> "' at offset " <> at(offset)
+    ExpectedField(offset) -> "expected a field name at offset " <> at(offset)
+    ExpectedComparator(offset) ->
+      "expected a comparison operator at offset " <> at(offset)
+    ExpectedValue(offset) -> "expected a value at offset " <> at(offset)
+    UnclosedParenthesis(offset) -> "unclosed '(' at offset " <> at(offset)
+    UnexpectedToken(offset, lexeme) ->
+      "unexpected '" <> lexeme <> "' at offset " <> at(offset)
+    UnknownField(offset, field, suggestion) ->
+      "unknown field '"
+      <> field
+      <> "' at offset "
+      <> at(offset)
+      <> case suggestion {
+        Some(candidate) -> "; did you mean '" <> candidate <> "'?"
+        None -> ""
+      }
+  }
+}
+
+/// Render the source with a caret under the failing grapheme, followed by
+/// `error_message`. The report assumes a single-line query rendered in a
+/// monospaced context; offsets count graphemes, so multi-byte characters
+/// stay aligned.
+pub fn error_report(source source: String, error error: AqlError) -> String {
+  source
+  <> "\n"
+  <> string.repeat(" ", error.offset)
+  <> "^ "
+  <> error_message(error)
+}
+
+fn at(offset: Int) -> String {
+  int.to_string(offset)
+}
+
+fn check_field(
+  field: String,
+  offset: Int,
+  fields: Option(List(String)),
+) -> Result(Nil, AqlError) {
+  case fields {
+    None -> Ok(Nil)
+    Some(patterns) ->
+      case list.any(patterns, matches_pattern(field, _)) {
+        True -> Ok(Nil)
+        False -> Error(UnknownField(offset, field, suggest(field, patterns)))
+      }
+  }
+}
+
+fn matches_pattern(field: String, pattern: String) -> Bool {
+  segments_match(string.split(field, "."), string.split(pattern, "."))
+}
+
+fn segments_match(field: List(String), pattern: List(String)) -> Bool {
+  case field, pattern {
+    [], [] -> True
+    [segment, ..field_rest], [expected, ..pattern_rest] ->
+      case segment == expected || { expected == "*" && is_index(segment) } {
+        True -> segments_match(field_rest, pattern_rest)
+        False -> False
+      }
+    _, _ -> False
+  }
+}
+
+fn is_index(segment: String) -> Bool {
+  segment != ""
+  && list.all(string.to_graphemes(segment), string.contains("0123456789", _))
+}
+
+fn suggest(field: String, patterns: List(String)) -> Option(String) {
+  let candidates =
+    patterns
+    |> list.map(substitute_wildcard(_, string.split(field, ".")))
+    |> list.sort(string.compare)
+  list.fold(candidates, None, fn(best, candidate) {
+    let distance = edit_distance(field, candidate)
+    case distance <= 2 {
+      False -> best
+      True ->
+        case best {
+          None -> Some(#(candidate, distance))
+          Some(#(_, best_distance)) if distance < best_distance ->
+            Some(#(candidate, distance))
+          Some(_) -> best
+        }
+    }
+  })
+  |> option.map(fn(pair) { pair.0 })
+}
+
+fn substitute_wildcard(
+  pattern: String,
+  field_segments: List(String),
+) -> String {
+  let pattern_segments = string.split(pattern, ".")
+  case list.length(pattern_segments) == list.length(field_segments) {
+    False -> pattern
+    True ->
+      list.map2(pattern_segments, field_segments, fn(expected, actual) {
+        case expected == "*" && is_index(actual) {
+          True -> actual
+          False -> expected
+        }
+      })
+      |> string.join(".")
+  }
+}
+
+fn edit_distance(left: String, right: String) -> Int {
+  let left = string.to_graphemes(left)
+  let right = string.to_graphemes(right)
+  let first_row = count_up(0, list.length(right), [])
+  list.fold(left, #(first_row, 1), fn(state, left_char) {
+    let #(previous_row, row_number) = state
+    let next_row = distance_row(previous_row, right, left_char, [row_number])
+    #(next_row, row_number + 1)
+  }).0
+  |> list.last
+  |> result.unwrap(0)
+}
+
+fn count_up(next: Int, limit: Int, accumulator: List(Int)) -> List(Int) {
+  case next > limit {
+    True -> list.reverse(accumulator)
+    False -> count_up(next + 1, limit, [next, ..accumulator])
+  }
+}
+
+fn distance_row(
+  previous_row: List(Int),
+  right: List(String),
+  left_char: String,
+  accumulator: List(Int),
+) -> List(Int) {
+  case previous_row, right, accumulator {
+    [diagonal, above, ..previous_rest], [right_char, ..right_rest], [left, ..]
+    -> {
+      let substitution = case left_char == right_char {
+        True -> diagonal
+        False -> diagonal + 1
+      }
+      let cost = int.min(substitution, int.min(above + 1, left + 1))
+      distance_row([above, ..previous_rest], right_rest, left_char, [
+        cost,
+        ..accumulator
+      ])
+    }
+    _, _, _ -> list.reverse(accumulator)
+  }
+}
+
+fn token_lexeme(kind: TokenKind) -> String {
+  case kind {
+    Identifier(word) -> word
+    Quoted(value) -> "\"" <> value <> "\""
+    Numeric(value) -> value
+    Boolean(True) -> "true"
+    Boolean(False) -> "false"
+    AndToken -> "and"
+    OrToken -> "or"
+    NotToken -> "not"
+    EqualToken -> "=="
+    NotEqualToken -> "!="
+    GreaterToken -> ">"
+    GreaterEqualToken -> ">="
+    LessToken -> "<"
+    LessEqualToken -> "<="
+    LeftParen -> "("
+    RightParen -> ")"
+    End -> "end of query"
+  }
+}
+
+fn parse_with(
+  source: String,
+  fields: Option(List(String)),
+) -> Result(Query, AqlError) {
   use tokens <- result_try(lex(source))
-  use parsed <- result_try(parse_or(tokens))
+  use parsed <- result_try(parse_or(tokens, fields))
   let #(query, rest) = parsed
   case rest {
     [Token(End, _)] -> Ok(query)
-    [Token(_, offset), ..] -> Error(AqlError(offset, "unexpected token"))
+    [Token(kind, offset), ..] ->
+      Error(UnexpectedToken(offset, token_lexeme(kind)))
     [] -> Ok(query)
   }
 }
 
-fn parse_or(tokens: List(Token)) -> Result(#(Query, List(Token)), AqlError) {
-  use parsed <- result_try(parse_and(tokens))
+fn parse_or(
+  tokens: List(Token),
+  fields: Option(List(String)),
+) -> Result(#(Query, List(Token)), AqlError) {
+  use parsed <- result_try(parse_and(tokens, fields))
   let #(left, rest) = parsed
-  parse_or_tail(left, rest)
+  parse_or_tail(left, rest, fields)
 }
 
 fn parse_or_tail(
   left: Query,
   tokens: List(Token),
+  fields: Option(List(String)),
 ) -> Result(#(Query, List(Token)), AqlError) {
   case tokens {
     [Token(OrToken, _), ..rest] -> {
-      use parsed <- result_try(parse_and(rest))
+      use parsed <- result_try(parse_and(rest, fields))
       let #(right, remaining) = parsed
-      parse_or_tail(Or(left, right), remaining)
+      parse_or_tail(Or(left, right), remaining, fields)
     }
     _ -> Ok(#(left, tokens))
   }
 }
 
-fn parse_and(tokens: List(Token)) -> Result(#(Query, List(Token)), AqlError) {
-  use parsed <- result_try(parse_unary(tokens))
+fn parse_and(
+  tokens: List(Token),
+  fields: Option(List(String)),
+) -> Result(#(Query, List(Token)), AqlError) {
+  use parsed <- result_try(parse_unary(tokens, fields))
   let #(left, rest) = parsed
-  parse_and_tail(left, rest)
+  parse_and_tail(left, rest, fields)
 }
 
 fn parse_and_tail(
   left: Query,
   tokens: List(Token),
+  fields: Option(List(String)),
 ) -> Result(#(Query, List(Token)), AqlError) {
   case tokens {
     [Token(AndToken, _), ..rest] -> {
-      use parsed <- result_try(parse_unary(rest))
+      use parsed <- result_try(parse_unary(rest, fields))
       let #(right, remaining) = parsed
-      parse_and_tail(And(left, right), remaining)
+      parse_and_tail(And(left, right), remaining, fields)
     }
     _ -> Ok(#(left, tokens))
   }
 }
 
-fn parse_unary(tokens: List(Token)) -> Result(#(Query, List(Token)), AqlError) {
+fn parse_unary(
+  tokens: List(Token),
+  fields: Option(List(String)),
+) -> Result(#(Query, List(Token)), AqlError) {
   case tokens {
     [Token(NotToken, _), ..rest] -> {
-      use parsed <- result_try(parse_unary(rest))
+      use parsed <- result_try(parse_unary(rest, fields))
       let #(query, remaining) = parsed
       Ok(#(Not(query), remaining))
     }
-    [Token(LeftParen, _), ..rest] -> {
-      use parsed <- result_try(parse_or(rest))
+    [Token(LeftParen, open_offset), ..rest] -> {
+      use parsed <- result_try(parse_or(rest, fields))
       let #(query, remaining) = parsed
       case remaining {
         [Token(RightParen, _), ..tail] -> Ok(#(query, tail))
-        [Token(_, offset), ..] -> Error(AqlError(offset, "expected ')'"))
-        [] -> Error(AqlError(0, "expected ')'"))
+        _ -> Error(UnclosedParenthesis(open_offset))
       }
     }
-    _ -> parse_comparison(tokens)
+    _ -> parse_comparison(tokens, fields)
   }
 }
 
 fn parse_comparison(
   tokens: List(Token),
+  fields: Option(List(String)),
 ) -> Result(#(Query, List(Token)), AqlError) {
   case tokens {
-    [Token(Identifier(field), _), Token(operator, operator_offset), ..rest] -> {
+    [
+      Token(Identifier(field), field_offset),
+      Token(operator, operator_offset),
+      ..rest
+    ] -> {
+      use Nil <- result_try(check_field(field, field_offset, fields))
       use comparator <- result_try(comparator(operator, operator_offset))
       case rest {
         [Token(kind, value_offset), ..remaining] -> {
           use value <- result_try(value(kind, value_offset))
           Ok(#(Compare(field, comparator, value), remaining))
         }
-        [] -> Error(AqlError(operator_offset + 1, "expected value"))
+        [] -> Error(ExpectedValue(operator_offset + 1))
       }
     }
-    [Token(End, offset), ..] -> Error(AqlError(offset, "expected comparison"))
-    [Token(_, offset), ..] -> Error(AqlError(offset, "expected field name"))
-    [] -> Error(AqlError(0, "expected comparison"))
+    [Token(_, offset), ..] -> Error(ExpectedField(offset))
+    [] -> Error(ExpectedField(0))
   }
 }
 
@@ -194,7 +463,7 @@ fn comparator(kind: TokenKind, offset: Int) -> Result(Comparator, AqlError) {
     GreaterEqualToken -> Ok(GreaterThanOrEqual)
     LessToken -> Ok(LessThan)
     LessEqualToken -> Ok(LessThanOrEqual)
-    _ -> Error(AqlError(offset, "expected comparison operator"))
+    _ -> Error(ExpectedComparator(offset))
   }
 }
 
@@ -204,7 +473,7 @@ fn value(kind: TokenKind, offset: Int) -> Result(Value, AqlError) {
     Boolean(value) -> Ok(BoolValue(value))
     Numeric(value) -> parse_numeric(value, offset)
     Identifier(value) -> Ok(StringValue(value))
-    _ -> Error(AqlError(offset, "expected value"))
+    _ -> Error(ExpectedValue(offset))
   }
 }
 
@@ -213,13 +482,13 @@ fn parse_numeric(source: String, offset: Int) -> Result(Value, AqlError) {
     #(number, SomeUnit(multiplier, divisor)) ->
       case int.parse(number) {
         Ok(value) -> Ok(DurationValue(value * multiplier / divisor))
-        Error(_) -> Error(AqlError(offset, "invalid duration"))
+        Error(_) -> Error(InvalidDuration(offset, source))
       }
     #(_, NoUnit) ->
       case int.parse(source), float.parse(source) {
         Ok(value), _ -> Ok(IntValue(value))
         _, Ok(value) -> Ok(FloatValue(value))
-        _, _ -> Error(AqlError(offset, "invalid number"))
+        _, _ -> Error(InvalidNumber(offset, source))
       }
   }
 }
@@ -522,7 +791,13 @@ fn lex_chars(
     _ -> {
       let #(word, remaining, consumed) = word(chars, [], 0)
       case word {
-        "" -> Error(AqlError(offset, "unexpected character"))
+        "" ->
+          Error(
+            UnexpectedCharacter(offset, case chars {
+              [char, ..] -> char
+              [] -> ""
+            }),
+          )
         _ ->
           lex_chars(remaining, offset + consumed, [
             Token(classify_word(word), offset),
@@ -539,7 +814,7 @@ fn quoted(
   accumulator: List(String),
 ) -> Result(#(String, List(String), Int), AqlError) {
   case chars {
-    [] -> Error(AqlError(offset, "unterminated string"))
+    [] -> Error(UnterminatedString(offset))
     ["\"", ..rest] ->
       Ok(#(string.concat(list.reverse(accumulator)), rest, offset + 1))
     ["\\", "\"", ..rest] -> quoted(rest, offset + 2, ["\"", ..accumulator])

@@ -844,15 +844,10 @@ fn validate_where(source: Option(String)) -> Result(Nil, ParseError) {
   case source {
     None -> Ok(Nil)
     Some(source) ->
-      case aql.parse(source) {
+      case aql.parse_for(source, fields: aql.event_fields()) {
         Ok(_) -> Ok(Nil)
         Error(error) ->
-          Error(usage(
-            "invalid AQL at offset "
-            <> int.to_string(error.offset)
-            <> ": "
-            <> error.message,
-          ))
+          Error(usage("invalid AQL: " <> aql.error_message(error)))
       }
   }
 }

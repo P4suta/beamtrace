@@ -127,6 +127,19 @@ pub fn project_config_validates_profile_capture_values_test() {
   })
 }
 
+pub fn project_config_reports_the_aql_offset_and_suggestion_test() {
+  let assert Error(error) =
+    project_config.parse(
+      "/workspace/project/beamtrace.toml",
+      "[profiles.bad]\nwhere = \"message.tga == 1\"",
+    )
+  error
+  |> should.equal(
+    "invalid configuration value for 'where': unknown field 'message.tga' at "
+    <> "offset 0; did you mean 'message.tag'?",
+  )
+}
+
 pub fn doctor_cookie_files_include_resolved_defaults_and_profiles_once_test() {
   let source =
     "[defaults]\n"

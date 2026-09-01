@@ -534,7 +534,7 @@ pub fn malformed_where_aql_is_rejected_during_cli_parsing_test() {
       "x.beamtrace",
     ])
   error.exit_code |> should.equal(2)
-  error.message |> should.equal("invalid AQL at offset 14: expected value")
+  error.message |> should.equal("invalid AQL: expected a value at offset 14")
 }
 
 pub fn no_arguments_is_a_successful_short_guide_test() {
