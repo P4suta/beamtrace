@@ -2,6 +2,7 @@
 import beamtrace_tui/model
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import gleeunit/should
 
 fn events() {
@@ -182,4 +183,35 @@ pub fn escape_closes_the_guide_opened_from_the_attach_field_test() {
   let closed = model.handle_key(opened, "esc")
   closed.help_open |> should.be_false()
   closed.focus |> should.equal(model.AttachFocus)
+}
+
+pub fn key_guide_documents_every_quit_path_test() {
+  let guide = model.key_guide()
+  list.contains(guide, #("q", "quit (list view)")) |> should.be_true()
+  list.contains(guide, #("Alt+q", "quit from any input")) |> should.be_true()
+  list.contains(guide, #("Ctrl+C", "quit")) |> should.be_true()
+}
+
+pub fn alt_q_and_ctrl_c_quit_from_any_focus_but_q_types_in_inputs_test() {
+  let state =
+    model.update(model.init(events()), model.AttachAccepted("app@localhost"))
+  model.handle_key(state, "q").quit |> should.be_true()
+
+  let saving = model.update(state, model.FocusSave)
+  model.handle_key(saving, "alt+q").quit |> should.be_true()
+  model.handle_key(saving, "ctrl+c").quit |> should.be_true()
+  let typed = model.handle_key(saving, "q")
+  typed.quit |> should.be_false()
+  typed.save_input |> string.ends_with("q") |> should.be_true()
+}
+
+pub fn every_single_character_guide_key_acts_in_list_view_test() {
+  model.key_guide()
+  |> list.filter(fn(entry) {
+    string.length(entry.0) == 1 && entry.0 != "\u{23ce}"
+  })
+  |> list.each(fn(entry) {
+    let acts = entry.0 == "q" || model.key_to_message(entry.0) != None
+    acts |> should.be_true()
+  })
 }
