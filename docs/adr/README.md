@@ -1,6 +1,5 @@
 <!-- SPDX-License-Identifier: Apache-2.0 OR MIT -->
 # Architecture decision records
-
 - [0001](0001-record-architecture-decisions.md) — Record architecture decisions as MADR files
 - [0002](0002-demo-runs-on-bundled-runtime.md) — Demo runs on the bundled runtime; record runs on the user's toolchain
 - [0003](0003-single-cli-error-catalogue.md) — One CLI error catalogue for human and JSON output
@@ -16,3 +15,4 @@
 - [0014](0014-diagnostic-thresholds-are-explicit-records.md) — Diagnostic thresholds are explicit records
 - [0016](0016-cli-error-catalogue-is-closed.md) — The CLI error catalogue is closed
 - [0013](0013-event-builder-is-pipe-shaped-and-total.md) — The event builder is pipe-shaped and total
+- [0018](0018-interactive-defaults-open-the-web-workspace.md) — Interactive defaults open the Web workspace
