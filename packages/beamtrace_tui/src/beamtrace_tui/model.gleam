@@ -374,7 +374,9 @@ pub fn visible_live_events(model: Model) -> List(Event) {
 /// Every key the normal focus understands, for the footer and the `?` guide.
 pub fn key_guide() -> List(#(String, String)) {
   [
-    #("q", "quit"),
+    #("q", "quit (list view)"),
+    #("Alt+q", "quit from any input"),
+    #("Ctrl+C", "quit"),
     #("a", "attach"),
     #("r", "arm MFA"),
     #("c", "capture"),
