@@ -1,0 +1,6 @@
+name = "decode_and_compare"
+version = "0.0.0"
+
+[dependencies]
+gleam_stdlib = ">= 0.70.0 and < 2.0.0"
+beamtrace_core = { path = "../../packages/beamtrace_core" }
