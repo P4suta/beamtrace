@@ -28,6 +28,38 @@
 * reuse NDJSON framing and canonical graph output, and parallelize full-load event decoding
 * skip duplicate-root and identity-propagation work for ordinary captures
 
+## [0.3.0](https://github.com/P4suta/beamtrace/compare/v0.2.0...v0.3.0) (2026-09-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **core:** `aql.AqlError` shape; `.message` replaced by `aql.error_message`. See docs/migration-v0.4.md.
+* **core:** see docs/migration-v0.4.md for the full old→new mapping.
+* **platform:** `diff.prepare` returns `Result(PreparedTrace, DagError)` and `codec.event_v1_adapter_json` leaves the public interface of `beamtrace_core`; human CLI errors now print catalogue labels (`E_ARCHIVE_NOT_FOUND`, …) instead of the exit-derived `E_COMMAND_FAILED`.
+
+### Features
+
+* **cli:** add 'beamtrace help aql' and the AQL reference ([#41](https://github.com/P4suta/beamtrace/issues/41)) ([8e16a2e](https://github.com/P4suta/beamtrace/commit/8e16a2e504b4d840e3a7f20d08005ce64b72a50a))
+* **core:** add the beamtrace/event builder for boilerplate-free events ([#35](https://github.com/P4suta/beamtrace/issues/35)) ([4c9905a](https://github.com/P4suta/beamtrace/commit/4c9905a803e6d2dc20b94c530b08f70b55777ccf))
+* **core:** finalize the public vocabulary before the first stable release ([#33](https://github.com/P4suta/beamtrace/issues/33)) ([d67a673](https://github.com/P4suta/beamtrace/commit/d67a673c3a8cf9aa6ab73cfc832223a0a52441c6))
+* **core:** make AQL failures typed, caret-rendered, and field-checked ([#34](https://github.com/P4suta/beamtrace/issues/34)) ([12d10ef](https://github.com/P4suta/beamtrace/commit/12d10ef5e13340c1cf440bdbdc93cb8f599aea43))
+* **core:** parameterize diagnostics thresholds and expose capture findings ([#36](https://github.com/P4suta/beamtrace/issues/36)) ([daaf405](https://github.com/P4suta/beamtrace/commit/daaf40517d3e53d571d9b831306ce692d2306334))
+* **platform:** deliver the v0.3 user experience ([#32](https://github.com/P4suta/beamtrace/issues/32)) ([c50cf5f](https://github.com/P4suta/beamtrace/commit/c50cf5f6549c45d10584c210dcb086d388c94d34))
+* **platform:** introduce verifiable causal observation v2 ([#28](https://github.com/P4suta/beamtrace/issues/28)) ([4841223](https://github.com/P4suta/beamtrace/commit/48412239184db17440543ba2899e2af3e41c3738))
+* **platform:** streamline BeamTrace v0.3 experience ([#31](https://github.com/P4suta/beamtrace/issues/31)) ([ed3b17a](https://github.com/P4suta/beamtrace/commit/ed3b17a3733956926b07448116197832650999ab))
+
+
+### Bug Fixes
+
+* **platform:** preserve strict trace order and release state ([#29](https://github.com/P4suta/beamtrace/issues/29)) ([a3ae511](https://github.com/P4suta/beamtrace/commit/a3ae511ea288ce332176283937746d8af5970283))
+* **runtime:** normalize trace timestamps ([#26](https://github.com/P4suta/beamtrace/issues/26)) ([3f9c243](https://github.com/P4suta/beamtrace/commit/3f9c2439602f383c2bc7e145ed92f7a00f561161))
+* **tui:** document every quit path in the key guide ([#38](https://github.com/P4suta/beamtrace/issues/38)) ([b9e16d4](https://github.com/P4suta/beamtrace/commit/b9e16d44103086099c1f52b31b94062fe66eb100))
+
+
+### Performance
+
+* **core:** optimize trace analysis and archive access ([#30](https://github.com/P4suta/beamtrace/issues/30)) ([8063b0b](https://github.com/P4suta/beamtrace/commit/8063b0bec64ebcc293b33f0442fd6292128524ca))
+
 ## [0.2.0](https://github.com/P4suta/beamtrace/compare/v0.1.1...v0.2.0) (2026-08-25)
 
 
