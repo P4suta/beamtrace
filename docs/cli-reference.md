@@ -31,7 +31,7 @@ beamtrace completion SHELL   # bash, zsh, fish, or powershell
 | `relay` | Enroll and run an outbound Team relay. |
 | `tui` | Open the canonical terminal client. |
 | `init` | Create a safe project-local beamtrace.toml. |
-| `config` | Validate project defaults and profiles. |
+| `config` | Validate project defaults and profiles ([reference](project-config.md)). |
 | `doctor` | Check runtime, assets, distribution and optional tools. |
 | `mcp` | Run the stdio MCP server. |
 | `completion` | Generate shell completion from this command specification. |
