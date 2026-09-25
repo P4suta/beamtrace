@@ -11,14 +11,13 @@ if (-not $dogfoodRoot.StartsWith($buildRoot, [StringComparison]::OrdinalIgnoreCa
 }
 $certRoot = Join-Path $dogfoodRoot 'certs'
 $containerName = "beamtrace-s3-dogfood-$PID"
-$networkName = "beamtrace-s3-dogfood-network-$PID"
-$opensslImage = 'alpine/openssl@sha256:19f8eb9004a1dbaec323eed6094e9b6bcc1dbf2697ecb5fb8d2fad4e3336a8f7'
-$minioImage = 'minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e'
-$clientImage = 'minio/mc@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727'
+# renovate: datasource=docker depName=alpine/openssl
+$opensslImage = 'alpine/openssl:3.5.7@sha256:19f8eb9004a1dbaec323eed6094e9b6bcc1dbf2697ecb5fb8d2fad4e3336a8f7'
+# renovate: datasource=docker depName=versity/versitygw
+$gatewayImage = 'versity/versitygw:v1.8.0@sha256:30292fc2eeacc67a36993b01f7a7a5e3361a19cced0e80c1d71cfa2a4b0a2499'
 $accessKey = 'beamtrace-dogfood'
 $secretKey = 'beamtrace-dogfood-only-2026'
 $containerStarted = $false
-$networkCreated = $false
 $passed = $false
 
 New-Item -ItemType Directory -Path $certRoot -Force | Out-Null
@@ -49,24 +48,26 @@ try {
     $portProbe.Stop()
     $endpoint = "https://127.0.0.1:$port"
 
-    & docker network create $networkName | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Could not create the S3 dogfood container network.' }
-    $networkCreated = $true
-
+    # VersityGW serves S3 over TLS with the ephemeral certificate and keeps objects on a tmpfs through its posix backend.
+    # Credentials travel as environment variables so they stay out of the gateway's command line.
     & docker run --detach --rm --name $containerName `
-        --network $networkName `
-        --publish "127.0.0.1:${port}:9000" `
-        --env "MINIO_ROOT_USER=$accessKey" `
-        --env "MINIO_ROOT_PASSWORD=$secretKey" `
-        --mount "type=bind,source=$certRoot,target=/root/.minio/certs,readonly" `
-        $minioImage server /data --address ':9000'
+        --publish "127.0.0.1:${port}:7070" `
+        --env "ROOT_ACCESS_KEY_ID=$accessKey" `
+        --env "ROOT_SECRET_ACCESS_KEY=$secretKey" `
+        --mount "type=bind,source=$certRoot,target=/certs,readonly" `
+        --tmpfs /data `
+        $gatewayImage `
+        --port ':7070' --region 'us-east-1' `
+        --cert /certs/public.crt --key /certs/private.key `
+        --health /health `
+        posix /data
     if ($LASTEXITCODE -ne 0) { throw 'Could not start the S3-compatible TLS server.' }
     $containerStarted = $true
 
     $healthy = $false
     for ($attempt = 1; $attempt -le 60; $attempt++) {
         try {
-            $health = Invoke-WebRequest -Uri "$endpoint/minio/health/live" -SkipCertificateCheck -TimeoutSec 2
+            $health = Invoke-WebRequest -Uri "$endpoint/health" -SkipCertificateCheck -TimeoutSec 2
             if ($health.StatusCode -eq 200) {
                 $healthy = $true
                 break
@@ -77,14 +78,6 @@ try {
         }
     }
     if (-not $healthy) { throw 'S3-compatible TLS server did not become healthy.' }
-
-    & docker run --rm --entrypoint /bin/sh `
-        --network $networkName `
-        --env "DOGFOOD_ENDPOINT=https://${containerName}:9000" `
-        --env "DOGFOOD_ACCESS_KEY=$accessKey" `
-        --env "DOGFOOD_SECRET_KEY=$secretKey" `
-        $clientImage -c 'mc alias set dogfood "$DOGFOOD_ENDPOINT" "$DOGFOOD_ACCESS_KEY" "$DOGFOOD_SECRET_KEY" --insecure && mc mb dogfood/beamtrace-dogfood --insecure'
-    if ($LASTEXITCODE -ne 0) { throw 'Could not create the S3 dogfood bucket.' }
 
     Push-Location (Join-Path $repoRoot 'packages/beamtrace_runtime')
     try {
@@ -120,9 +113,6 @@ finally {
     if ($containerStarted) {
         if (-not $passed) { & docker logs $containerName 2>&1 | Write-Warning }
         & docker rm --force $containerName | Out-Null
-    }
-    if ($networkCreated) {
-        & docker network rm $networkName | Out-Null
     }
     if (Test-Path -LiteralPath $dogfoodRoot -PathType Container) {
         Remove-Item -LiteralPath $dogfoodRoot -Recurse -Force
