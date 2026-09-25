@@ -2,6 +2,26 @@
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["github>P4suta/renovate-config"],
   "labels": ["type: dependencies"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Container images that PowerShell scripts pin by tag and digest, announced by a renovate comment on the line above",
+      "managerFilePatterns": ["/^scripts/[^/]+\\.ps1$/"],
+      "matchStrings": [
+        "# renovate: datasource=docker depName=(?<depName>\\S+)\\r?\\n[^\\n]*'[^'\\s:@]+:(?<currentValue>[^'\\s@]+)@(?<currentDigest>sha256:[0-9a-f]{64})'"
+      ],
+      "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Release assets that PowerShell scripts download by version and verify by SHA-256, announced by a renovate comment on the line above",
+      "managerFilePatterns": ["/^scripts/[^/]+\\.ps1$/"],
+      "matchStrings": [
+        "# renovate: datasource=github-release-attachments depName=(?<depName>\\S+)\\r?\\n\\$\\w+ = '(?<currentValue>[^']+)'\\r?\\n\\$\\w+ = '(?<currentDigest>[0-9a-f]{64})'"
+      ],
+      "datasourceTemplate": "github-release-attachments"
+    }
+  ],
   "packageRules": [
     {
       "description": "OTP 27 in the fixture job is the oldest release BeamTrace supports, so it moves only when that support policy does",

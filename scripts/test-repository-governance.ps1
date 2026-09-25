@@ -129,9 +129,14 @@ foreach ($dependency in @(
     }
 }
 
+$ociDockerfile = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'packaging/Dockerfile')
+$ociBuilder = [regex]::Match($ociDockerfile, '(?m)^FROM (ghcr\.io/gleam-lang/gleam:[^\s@]+@sha256:[0-9a-f]{64}) AS builder\r?$')
+if (-not $ociBuilder.Success) {
+    throw 'The OCI builder is not a digest-pinned official Gleam image.'
+}
 $hexAcceptance = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'scripts/test-hex-package.ps1')
 foreach ($marker in @(
-    'ghcr.io/gleam-lang/gleam:v1.18.1-erlang-alpine@sha256:',
+    "'$($ociBuilder.Groups[1].Value)'",
     '''--user'', "${hostUid}:${hostGid}"'
 )) {
     if (-not $hexAcceptance.Contains($marker)) {
@@ -276,6 +281,28 @@ if (@($renovate.extends) -notcontains 'github>P4suta/renovate-config') {
 }
 if (@($renovate.labels) -notcontains 'type: dependencies') {
     throw 'Renovate pull requests are not labelled as dependency updates.'
+}
+$scriptManagers = @($renovate.customManagers | Where-Object { @($_.managerFilePatterns) -contains '/^scripts/[^/]+\.ps1$/' })
+foreach ($datasource in @('docker', 'github-release-attachments')) {
+    if (@($scriptManagers | Where-Object { $_.datasourceTemplate -eq $datasource }).Count -eq 0) {
+        throw "Renovate does not read the $datasource pins in scripts."
+    }
+}
+# A pin Renovate cannot see only fails once its upstream disappears, so every container image a script pins by digest carries a tag and a renovate comment on the line above.
+foreach ($scriptFile in Get-ChildItem -LiteralPath (Join-Path $repoRoot 'scripts') -Filter '*.ps1' -File) {
+    $lines = @(Get-Content -LiteralPath $scriptFile.FullName)
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        foreach ($pin in [regex]::Matches($lines[$index], "'(?<image>[^'\s:@]+)(?<tag>:[^'\s@]+)?@sha256:[0-9a-f]{64}'")) {
+            $annotation = if ($index -gt 0) { $lines[$index - 1].Trim() } else { '' }
+            if (-not $pin.Groups['tag'].Success -or $annotation -ne "# renovate: datasource=docker depName=$($pin.Groups['image'].Value)") {
+                throw "Renovate cannot update the container image pinned in $($scriptFile.Name): $($pin.Value)"
+            }
+        }
+    }
+}
+$rebarInstaller = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'scripts/ensure-rebar3.ps1')
+if (-not $rebarInstaller.Contains("# renovate: datasource=github-release-attachments depName=erlang/rebar3`n`$rebar3Version = '")) {
+    throw 'Renovate cannot update the rebar3 release that ensure-rebar3.ps1 verifies.'
 }
 if (-not $configure.Contains('-Method DELETE -Endpoint "repos/$Repository/automated-security-fixes"')) {
     throw 'Remote configuration must leave security updates to Renovate rather than Dependabot.'
