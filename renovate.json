@@ -1,5 +1,15 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["github>P4suta/renovate-config"],
-  "labels": ["type: dependencies"]
+  "labels": ["type: dependencies"],
+  "packageRules": [
+    {
+      "description": "OTP 27 in the fixture job is the oldest release BeamTrace supports, so it moves only when that support policy does",
+      "matchManagers": ["github-actions"],
+      "matchFileNames": [".github/workflows/ci.yml"],
+      "matchDepNames": ["erlang/otp"],
+      "matchCurrentValue": "27",
+      "enabled": false
+    }
+  ]
 }
