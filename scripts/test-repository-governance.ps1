@@ -13,7 +13,6 @@ $requiredFiles = @(
     '.github/ISSUE_TEMPLATE/feature.yml',
     '.github/ISSUE_TEMPLATE/config.yml',
     '.github/pull_request_template.md',
-    '.github/dependabot.yml',
     '.github/workflows/security.yml',
     '.github/workflows/release-please.yml',
     '.github/workflows/release-candidate.yml',
@@ -24,6 +23,7 @@ $requiredFiles = @(
     'GOVERNANCE.md',
     'package.json',
     'package-lock.json',
+    'renovate.json',
     'SUPPORT.md',
     'scripts/audit-github.ps1',
     'scripts/configure-github.ps1',
@@ -270,11 +270,15 @@ foreach ($marker in @('repos/$Repository/immutable-releases', 'Immutable release
     }
 }
 
-$dependabot = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/dependabot.yml')
-foreach ($marker in @('package-ecosystem: "github-actions"', 'package-ecosystem: "npm"', 'interval: "weekly"')) {
-    if (-not $dependabot.Contains($marker)) {
-        throw "Dependabot policy is missing: $marker"
-    }
+$renovate = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'renovate.json') | ConvertFrom-Json
+if (@($renovate.extends) -notcontains 'github>P4suta/renovate-config') {
+    throw 'Renovate does not extend the shared P4suta dependency-update policy.'
+}
+if (@($renovate.labels) -notcontains 'type: dependencies') {
+    throw 'Renovate pull requests are not labelled as dependency updates.'
+}
+if (-not $configure.Contains('-Method DELETE -Endpoint "repos/$Repository/automated-security-fixes"')) {
+    throw 'Remote configuration must leave security updates to Renovate rather than Dependabot.'
 }
 
 $mainRuleset = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/rulesets/main.json') | ConvertFrom-Json

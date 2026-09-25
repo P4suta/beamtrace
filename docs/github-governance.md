@@ -15,13 +15,16 @@ Release tags matching `v*` cannot be rewritten or deleted without an explicit ad
 
 - Workflows default to read-only token permissions and elevate only per job.
 - Third-party Actions are allow-listed and every Action reference is pinned to a full commit SHA.
-- Dependabot groups weekly npm and GitHub Actions updates.
+- Renovate proposes dependency updates under the shared [P4suta/renovate-config](https://github.com/P4suta/renovate-config) policy, which `renovate.json` extends and labels `type: dependencies`.
+  Non-major updates are grouped into one `build(deps): …` pull request before 9am on Monday (Asia/Tokyo) and merge automatically once the required checks pass; major updates wait for the maintainer, and a release must be three days old before it is proposed.
+  Renovate reads GitHub Actions (including the toolchain versions given to `erlef/setup-beam`), npm, the OCI `Dockerfile`, `.mise.toml`, and the Hex requirements of each `gleam.toml` it can parse.
 - Pull requests receive dependency review; JavaScript boundaries receive CodeQL analysis; OpenSSF Scorecard runs weekly.
 - Fast-check exercises arbitrary Unicode and control-character input at the Web API query boundary as part of the Chromium acceptance gate.
-- Dependency alerts, automated security updates, private vulnerability reporting, secret scanning, and push protection are enabled remotely.
+- Dependency alerts, private vulnerability reporting, secret scanning, and push protection are enabled remotely.
+  Dependabot security updates stay disabled, because Renovate turns dependency alerts into update pull requests.
 - Repository Actions cannot approve pull requests.
 
-Gleam and Hex dependencies are not currently supported by Dependabot, so their locked dependency changes remain part of the normal TDD review path.
+Renovate skips any `gleam.toml` that declares a path or git dependency, so the Hex dependencies of the runtime, TUI, and Web packages and the reviewed etui and Lustre commits remain part of the normal TDD review path.
 
 ## Applying and auditing
 
