@@ -110,7 +110,7 @@ Invoke-GitHubApi -Method PUT -Endpoint "repos/$Repository/actions/permissions/wo
 } | Out-Null
 
 Invoke-GitHubApi -Method PUT -Endpoint "repos/$Repository/vulnerability-alerts" | Out-Null
-Invoke-GitHubApi -Method PUT -Endpoint "repos/$Repository/automated-security-fixes" | Out-Null
+Invoke-GitHubApi -Method DELETE -Endpoint "repos/$Repository/automated-security-fixes" | Out-Null
 Invoke-GitHubApi -Method PUT -Endpoint "repos/$Repository/private-vulnerability-reporting" | Out-Null
 
 $releaseEnvironment = [ordered]@{

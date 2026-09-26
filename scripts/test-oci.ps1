@@ -20,8 +20,11 @@ foreach ($baseImage in $baseImages) {
         throw "OCI base image is not pinned to a SHA-256 digest: $reference"
     }
 }
+# The Gleam release is Renovate's to move, so the builder is held to the official erlang-alpine image rather than to one version.
+if ($source -notmatch '(?m)^FROM ghcr\.io/gleam-lang/gleam:v\d+\.\d+\.\d+-erlang-alpine@sha256:[0-9a-f]{64} AS builder\r?$') {
+    throw 'OCI Dockerfile does not build with the official Gleam erlang-alpine image.'
+}
 foreach ($marker in @(
-    'ghcr.io/gleam-lang/gleam:v1.18.1-erlang-alpine',
     'RUN apk add --no-cache build-base=0.5-r3 git=2.52.0-r0',
     'FROM erlang:29-alpine',
     'RUN apk add --no-cache ca-certificates=20260611-r0',
