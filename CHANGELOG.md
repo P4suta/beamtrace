@@ -10,6 +10,7 @@
 ### Features
 
 * **cli:** add `beamtrace help aql` and `docs/aql-reference.md` — grammar, operators, duration literals, the full field vocabulary rendered from `aql.event_fields`, evaluation rules, and examples; `--where` help links to it
+* **cli:** discover `beamtrace.toml` by walking from the working directory up to the repository boundary (`.git` directory or worktree file); `config check` prints the discovered path, the `init` template documents itself and ships no active placeholder profile, and `trigger` validation reports the MFA parser's message — the format now has a reference in `docs/project-config.md`
 
 * **core:** replace `aql.AqlError` with typed variants rendered by `error_message` and the caret-annotated `error_report`; add `aql.parse_for` field validation with did-you-mean suggestions and the `aql.event_fields` vocabulary — `--where` and `beamtrace.toml` typos now fail at parse time on every path
 * **core:** parameterize the offline diagnostics — `diagnostics.Thresholds`/`analyze`/`analyze_capture` and the facade's `findings_with`/`capture_findings` make every threshold explicit and give dangling calls a structural home instead of a silent omission

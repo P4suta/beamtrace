@@ -5,10 +5,23 @@
 
 -export([load/0, init/1, resolve_path/2]).
 
+%% Walk from the working directory toward the filesystem root, stopping at
+%% the first beamtrace.toml, at a repository boundary (a directory holding
+%% .git as a directory or a worktree file), or at the root. Configuration
+%% outside the repository is never picked up.
 load() ->
-    Path = filename:absname("beamtrace.toml"),
+    discover(filename:absname("")).
+
+discover(Directory) ->
+    Path = filename:join(Directory, "beamtrace.toml"),
     case file:read_link_info(Path) of
-        {error, enoent} -> {ok, none};
+        {error, enoent} ->
+            Parent = filename:dirname(Directory),
+            AtBoundary = Parent =:= Directory orelse repository_root(Directory),
+            case AtBoundary of
+                true -> {ok, none};
+                false -> discover(Parent)
+            end;
         {ok, #file_info{type = regular}} ->
             case file:read_file(Path) of
                 {ok, Contents} -> {ok, {some, {
@@ -18,6 +31,12 @@ load() ->
             end;
         {ok, _} -> {error, <<"beamtrace.toml must be a regular file">>};
         {error, Reason} -> {error, reason_binary(Reason)}
+    end.
+
+repository_root(Directory) ->
+    case file:read_link_info(filename:join(Directory, ".git")) of
+        {ok, _} -> true;
+        {error, _} -> false
     end.
 
 init(Contents) when is_binary(Contents) ->

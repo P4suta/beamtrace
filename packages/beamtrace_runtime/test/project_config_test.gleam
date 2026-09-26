@@ -159,3 +159,29 @@ pub fn doctor_cookie_files_include_resolved_defaults_and_profiles_once_test() {
   |> list.contains("/workspace/project/secrets/dev.cookie")
   |> should.be_true()
 }
+
+pub fn template_is_valid_and_ships_no_active_profile_test() {
+  let assert Ok(config) =
+    project_config.parse(
+      "/workspace/project/beamtrace.toml",
+      project_config.template,
+    )
+  config.profiles |> should.equal([])
+  project_config.template
+  |> string.contains("docs/project-config.md")
+  |> should.be_true()
+  project_config.template
+  |> string.contains("# [profiles.local]")
+  |> should.be_true()
+}
+
+pub fn trigger_validation_names_the_mfa_problem_test() {
+  let assert Error(error) =
+    project_config.parse(
+      "/workspace/project/beamtrace.toml",
+      "[profiles.bad]\ntrigger = \"not-an-mfa\"",
+    )
+  error
+  |> string.contains("invalid configuration value for 'trigger': invalid MFA")
+  |> should.be_true()
+}
