@@ -61,7 +61,7 @@ function Invoke-CheckedBeamTrace {
     )
 
     $output = if ($null -eq $resolvedLauncher) {
-        (& (Join-Path $PSScriptRoot 'beamtrace.ps1') -BeamTraceArguments $Arguments 2>&1 | Out-String)
+        (& (Join-Path $PSScriptRoot 'beamtrace.ps1') @Arguments 2>&1 | Out-String)
     }
     else {
         (& $resolvedLauncher @Arguments 2>&1 | Out-String)

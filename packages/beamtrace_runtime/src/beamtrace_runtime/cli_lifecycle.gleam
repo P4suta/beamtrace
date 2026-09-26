@@ -196,9 +196,15 @@ fn run(command_: cli.Command) -> Int {
     cli.Attach(node, mode, cookie_file, port) ->
       run_attach(node, mode, cookie_file, port)
     cli.Open(path, mode, port) -> run_open(path, mode, port)
-    cli.Compare(left, right) -> run_compare(left, right)
     cli.CompareMany(paths, display, port) ->
-      run_compare_many(paths, display, port)
+      run_compare_many(
+        paths,
+        cli.resolve_compare_display(
+          display,
+          interactive: terminal_interactive(),
+        ),
+        port,
+      )
     cli.Export(path, format, anchor_now) -> run_export(path, format, anchor_now)
     cli.Validate(path, json) -> run_validate(path, json)
     cli.Migrate(path, output) -> run_migrate(path, output)
@@ -426,7 +432,6 @@ fn run_json_with_force(command_: cli.Command, force: Bool) -> Int {
       run_export_json(path, format, anchor_now)
     cli.Validate(path, _) -> run_validate(path, True)
     cli.Migrate(path, output) -> run_migrate_json(path, output)
-    cli.Compare(left, right) -> run_compare_json([left, right])
     cli.CompareMany(paths, _, _) -> run_compare_json(paths)
     cli.Init -> run_init_json()
     cli.ConfigCheck -> run_config_check_json()
@@ -1129,6 +1134,19 @@ fn run_compare_json(paths: List(String)) -> Int {
 }
 
 fn run_compare_many(
+  paths: List(String),
+  display: cli.CompareDisplay,
+  port: Int,
+) -> Int {
+  case display, paths {
+    // The resolved terminal display on exactly two archives keeps the
+    // classic pairwise output and exit contract for scripts and pipes.
+    cli.CompareTerminal, [left, right] -> run_compare(left, right)
+    _, _ -> run_compare_workspace(paths, display, port)
+  }
+}
+
+fn run_compare_workspace(
   paths: List(String),
   display: cli.CompareDisplay,
   port: Int,

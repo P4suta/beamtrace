@@ -21,7 +21,8 @@ beamtrace demo
 ```
 
 The default Web workspace uses an OS-selected loopback port and a one-time
-bootstrap URL. `--no-open` prints the URL. `beamtrace demo --no-ui --json` is
+bootstrap URL, valid for 60 seconds — rerun the command for a fresh one.
+`--no-open` prints the URL. `beamtrace demo --no-ui --json` is
 deterministic in CI. The unnamed demo archive is deleted when the command ends.
 
 ## 3. Record one operation
@@ -31,7 +32,8 @@ beamtrace record --trigger app:main/0 -- gleam run
 ```
 
 Put every child-command argument after `--`; BeamTrace starts it directly and
-does not use a shell. The archive path is generated exclusively. An explicit
+does not use a shell. Your application runs on the Erlang toolchain from
+`PATH` — the bundled runtime only runs BeamTrace and `demo`. The archive path is generated exclusively. An explicit
 existing path is rejected unless `--force` is present.
 
 ## 4. Validate and compare
