@@ -17,7 +17,7 @@
 - persistent signed outbound relay WebSocket, one-time Ed25519 enrollment, credit-based batches, and canonical metadata privacy validation
 - relay producer capture from attached target nodes, including bounded audited raw grants
 - shared live-session fan-out and full multi-trace visual Compare workspace
-- HTTPS S3-compatible SigV4 blobs with conditional writes, verified reads, retention, and real MinIO TLS acceptance
+- HTTPS S3-compatible SigV4 blobs with conditional writes, verified reads, retention, and real TLS acceptance against a VersityGW gateway
 - indexed search, causal-neighborhood compare with explicit ambiguity/frontier paths, and interval p50/p95 with valid/missing sample counts
 - real Chromium acceptance over one million logical events, keyboard/axe checks, PTY harness, and package smoke tests
 - self-contained native archive packaging with bundled ERTS and SQLite NIF, SPDX SBOM/checksums, OCI image, Hex tarball, Homebrew/Scoop metadata, and GitHub release provenance
