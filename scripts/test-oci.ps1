@@ -24,10 +24,17 @@ foreach ($baseImage in $baseImages) {
 if ($source -notmatch '(?m)^FROM ghcr\.io/gleam-lang/gleam:v\d+\.\d+\.\d+-erlang-alpine@sha256:[0-9a-f]{64} AS builder\r?$') {
     throw 'OCI Dockerfile does not build with the official Gleam erlang-alpine image.'
 }
+$apkAdds = [regex]::Matches($source, '(?ms)^RUN\s+apk\s+add\b.*?(?=^\S|\z)')
+foreach ($apkAdd in $apkAdds) {
+    $packagePins = [regex]::Matches($apkAdd.Value, '(?<!\S)(?!-)[A-Za-z0-9][A-Za-z0-9+_.-]*=[^\s\\]+')
+    if ($packagePins.Count -ne 0) {
+        throw "OCI Alpine packages must follow the digest-pinned base repository: $($packagePins[0].Value)"
+    }
+}
 foreach ($marker in @(
-    'RUN apk add --no-cache build-base=0.5-r3 git=2.52.0-r0',
+    'RUN apk add --no-cache build-base git',
     'FROM erlang:29-alpine',
-    'RUN apk add --no-cache ca-certificates=20260611-r0',
+    'RUN apk add --no-cache ca-certificates',
     'gleam export erlang-shipment',
     'HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=3',
     'http://127.0.0.1:4040/api/v2/ready',

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 FROM ghcr.io/gleam-lang/gleam:v1.18.1-erlang-alpine@sha256:7c82e4a284b7c05c26eac34db497ea0e63ce7cb04bd019d966d70338eb172b68 AS builder
 
-RUN apk add --no-cache build-base=0.5-r3 git=2.52.0-r0
+RUN apk add --no-cache build-base git
 WORKDIR /src
 COPY packages/beamtrace_core packages/beamtrace_core
 COPY packages/beamtrace_tui packages/beamtrace_tui
@@ -25,7 +25,7 @@ LABEL org.opencontainers.image.title="BeamTrace" \
       org.opencontainers.image.description="BEAM causal workbench" \
       org.opencontainers.image.licenses="Apache-2.0 OR MIT"
 
-RUN apk add --no-cache ca-certificates=20260611-r0 \
+RUN apk add --no-cache ca-certificates \
     && addgroup -S -g 10001 beamtrace \
     && adduser -S -D -H -u 10001 -G beamtrace beamtrace \
     && mkdir -p /opt/beamtrace /var/lib/beamtrace \
