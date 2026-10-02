@@ -2,7 +2,7 @@ use reqwest::{blocking::Client, header};
 use serde::Deserialize;
 use std::{
     collections::{BTreeMap, BTreeSet},
-    time::Duration,
+    io::Write as _,
 };
 use zeroize::Zeroizing;
 
@@ -22,6 +22,7 @@ enum TransferError {
     RuntimeArguments,
     MissingToken,
     InvalidToken,
+    InvalidEncoding,
     ClientInitialization,
     WriteFailed,
     WriteRefused,
@@ -46,6 +47,7 @@ impl std::fmt::Display for TransferError {
             Self::RuntimeArguments => "Transfer accepts no runtime target arguments",
             Self::MissingToken => "Scoped migration token missing",
             Self::InvalidToken => "Config-scoped service token required; value withheld",
+            Self::InvalidEncoding => "Source environment encoding invalid; values withheld",
             Self::ClientInitialization => "Secure client initialization failed",
             Self::WriteFailed => "Doppler transfer failed; response withheld",
             Self::WriteRefused => "Doppler transfer refused; response withheld",
@@ -107,6 +109,11 @@ fn valid_key(value: &str) -> bool {
 }
 
 impl Target {
+    fn embedded() -> Result<Self> {
+        serde_json::from_str(include_str!("../target.json"))
+            .map_err(|_| TransferError::InvalidTarget)
+    }
+
     fn validate(&self) -> Result<()> {
         let Some((owner, repository)) = self.repository.split_once('/') else {
             return Err(TransferError::InvalidTarget);
@@ -116,11 +123,7 @@ impl Target {
             || !repository
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(&byte))
-            || self
-                .repository_id
-                .parse::<u64>()
-                .ok()
-                .is_none_or(|id| id == 0)
+            || !matches!(self.repository_id.parse::<u64>(), Ok(id) if id != 0)
             || !matches!(
                 self.git_ref.as_str(),
                 "refs/heads/main" | "refs/heads/doppler-secret-import"
@@ -135,7 +138,7 @@ impl Target {
         Ok(())
     }
 
-    fn authorize(&self, environment: impl Fn(&str) -> Option<String>) -> Result<Inputs> {
+    fn authorize(&self, environment: impl Fn(&str) -> Result<Option<String>>) -> Result<Inputs> {
         self.validate()?;
         for (key, expected) in [
             ("GITHUB_REPOSITORY", self.repository.as_str()),
@@ -143,13 +146,13 @@ impl Target {
             ("GITHUB_REF", self.git_ref.as_str()),
             ("GITHUB_EVENT_NAME", "workflow_dispatch"),
         ] {
-            if environment(key).as_deref() != Some(expected) {
+            if environment(key)?.as_deref() != Some(expected) {
                 return Err(TransferError::WrongInvocation);
             }
         }
         let mut values = BTreeMap::new();
         for key in &self.keys {
-            let value = Zeroizing::new(environment(key).ok_or(TransferError::MissingInput)?);
+            let value = Zeroizing::new(environment(key)?.ok_or(TransferError::MissingInput)?);
             if value.trim().is_empty() || value.contains("${") {
                 return Err(TransferError::UnresolvedInput);
             }
@@ -212,9 +215,12 @@ fn run() -> Result<usize> {
     if std::env::args_os().len() != 1 {
         return Err(TransferError::RuntimeArguments);
     }
-    let target: Target = serde_json::from_str(include_str!("../target.json"))
-        .map_err(|_| TransferError::InvalidTarget)?;
-    let inputs = target.authorize(|key| std::env::var(key).ok())?;
+    let target = Target::embedded()?;
+    let inputs = target.authorize(|key| match std::env::var(key) {
+        Ok(value) => Ok(Some(value)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => Err(TransferError::InvalidEncoding),
+    })?;
     let token = Zeroizing::new(
         std::env::var("DOPPLER_MIGRATION_TOKEN").map_err(|_| TransferError::MissingToken)?,
     );
@@ -229,7 +235,6 @@ fn run() -> Result<usize> {
     let client = Client::builder()
         .default_headers(headers)
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(30))
         .build()
         .map_err(|_| TransferError::ClientInitialization)?;
     let current = read(&client, &target)?;
@@ -246,16 +251,31 @@ fn run() -> Result<usize> {
     Ok(inputs.0.len())
 }
 
+struct Output(std::io::Stdout);
+
+impl Output {
+    fn of_process() -> Self {
+        Self(std::io::stdout())
+    }
+
+    fn report(&self, result: &Result<usize>) -> std::io::Result<()> {
+        match result {
+            Ok(count) => writeln!(
+                self.0.lock(),
+                "Transferred and privately verified {count} selected fields; values withheld"
+            ),
+            Err(error) => writeln!(self.0.lock(), "{error}"),
+        }
+    }
+}
+
 fn main() -> std::process::ExitCode {
-    match run() {
-        Ok(count) => {
-            println!("Transferred and privately verified {count} selected fields; values withheld");
-            std::process::ExitCode::SUCCESS
-        }
-        Err(message) => {
-            eprintln!("{message}");
-            std::process::ExitCode::FAILURE
-        }
+    let output = Output::of_process();
+    let result = run();
+    if output.report(&result).is_ok() && result.is_ok() {
+        std::process::ExitCode::SUCCESS
+    } else {
+        std::process::ExitCode::FAILURE
     }
 }
 
@@ -287,7 +307,7 @@ mod tests {
 
     #[test]
     fn only_the_fixed_repository_identity_ref_and_manual_event_can_transfer() {
-        assert!(target().authorize(environment).is_ok());
+        assert!(target().authorize(|key| Ok(environment(key))).is_ok());
         for key in [
             "GITHUB_REPOSITORY",
             "GITHUB_REPOSITORY_ID",
@@ -296,11 +316,11 @@ mod tests {
         ] {
             assert!(
                 target()
-                    .authorize(|name| if name == key {
+                    .authorize(|name| Ok(if name == key {
                         Some("different".into())
                     } else {
                         environment(name)
-                    })
+                    }))
                     .is_err()
             );
         }
@@ -311,11 +331,11 @@ mod tests {
         for value in [None, Some(""), Some("  "), Some("${shared.missing.VALUE}")] {
             assert!(
                 target()
-                    .authorize(|key| if key == "CARGO_TOKEN" {
+                    .authorize(|key| Ok(if key == "CARGO_TOKEN" {
                         value.map(str::to_owned)
                     } else {
                         environment(key)
-                    })
+                    }))
                     .is_err()
             );
         }
@@ -323,7 +343,9 @@ mod tests {
 
     #[test]
     fn existing_owner_values_are_preserved_and_conflicts_stop_the_transfer() {
-        let inputs = target().authorize(environment).expect("authorized fixture");
+        let inputs = target()
+            .authorize(|key| Ok(environment(key)))
+            .expect("authorized fixture");
         let current = BTreeMap::from([(
             "CARGO_TOKEN".into(),
             Secret {
@@ -337,7 +359,9 @@ mod tests {
 
     #[test]
     fn placeholders_can_be_filled_and_matching_values_are_idempotent() {
-        let inputs = target().authorize(environment).expect("authorized fixture");
+        let inputs = target()
+            .authorize(|key| Ok(environment(key)))
+            .expect("authorized fixture");
         let empty = BTreeMap::from([(
             "CARGO_TOKEN".into(),
             Secret {
@@ -381,8 +405,15 @@ mod tests {
 
     #[test]
     fn the_compiled_transfer_target_is_well_formed() {
-        let target: Target =
-            serde_json::from_str(include_str!("../target.json")).expect("embedded target");
+        let target = Target::embedded().expect("embedded target");
         assert!(target.validate().is_ok());
+    }
+
+    #[test]
+    fn invalid_environment_encoding_remains_an_error() {
+        assert!(matches!(
+            target().authorize(|_| Err(TransferError::InvalidEncoding)),
+            Err(TransferError::InvalidEncoding)
+        ));
     }
 }
