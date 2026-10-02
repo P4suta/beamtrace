@@ -1,0 +1,10 @@
+{
+  "config": "release",
+  "keys": [
+    "HEXPM_API_KEY"
+  ],
+  "project": "beamtrace",
+  "ref": "refs/heads/doppler-secret-import",
+  "repository": "P4suta/beamtrace",
+  "repository_id": "1343313550"
+}
