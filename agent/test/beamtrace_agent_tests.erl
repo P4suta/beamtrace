@@ -176,8 +176,7 @@ seal_drains_credit_starved_queue_and_emits_a_verifiable_receipt_test() ->
     queued = beamtrace_agent:ingest(Agent, #{id => 1}),
     queued = beamtrace_agent:ingest(Agent, #{id => 2}),
     queued = beamtrace_agent:ingest(Agent, #{id => 3}),
-    {ok, Receipt, verified} = beamtrace_agent:seal(Agent, quiet_period, 1000),
-    Batches = collect_sealed_batches([], undefined),
+    {Receipt, Batches} = sealed_batches(Agent, <<"seal-drain">>),
     ?assertEqual([1, 2], [Sequence || {Sequence, _Batch} <- Batches]),
     ?assertEqual(
         [#{id => 1}, #{id => 2}, #{id => 3}],
@@ -189,15 +188,25 @@ seal_drains_credit_starved_queue_and_emits_a_verifiable_receipt_test() ->
     ?assertEqual({error, sealing}, beamtrace_agent:ingest(Agent, #{id => 4})),
     ok = beamtrace_agent:stop(Agent).
 
-collect_sealed_batches(Acc, Receipt) ->
+sealed_batches(Agent, CaptureId) ->
+    {ok, Receipt, verified} = beamtrace_agent:seal(Agent, user_stop, 1000),
+    Batches = collect_sealed_batches(CaptureId, Receipt, 1, []),
+    ?assertEqual(
+        maps:get(event_count, Receipt),
+        length(lists:append([Batch || {_Sequence, Batch} <- Batches]))
+    ),
+    {Receipt, Batches}.
+
+collect_sealed_batches(CaptureId, Receipt, Next, Acc) ->
     receive
-        {beamtrace_batch, <<"seal-drain">>, _Node, Sequence, Batch} ->
-            collect_sealed_batches([{Sequence, Batch} | Acc], Receipt);
-        {beamtrace_receipt, <<"seal-drain">>, _Node, SeenReceipt, verified} ->
-            collect_sealed_batches(Acc, SeenReceipt)
-    after 50 ->
-        ?assertMatch(#{final_batch_sequence := 2}, Receipt),
+        {beamtrace_batch, CaptureId, _Node, Sequence, Batch} ->
+            ?assertEqual(Next, Sequence),
+            collect_sealed_batches(CaptureId, Receipt, Next + 1, [{Sequence, Batch} | Acc]);
+        {beamtrace_receipt, CaptureId, _Node, Receipt, verified} ->
+            ?assertEqual(maps:get(final_batch_sequence, Receipt), Next - 1),
         lists:reverse(Acc)
+    after 1000 ->
+        error({missing_sealed_capture, CaptureId, Next})
     end.
 
 exact_meta_trigger_and_cleanup_test_() ->
@@ -214,15 +223,19 @@ argument_shape_filter_is_enforced_by_the_meta_match_spec() ->
         root_filter => {arg_tag, 0, equal, <<"allowed">>},
         batch_size => 20
     }),
-    ok = beamtrace_agent:grant(Agent, 10),
-    {ok, armed} =
-        beamtrace_agent:arm(Agent, {beamtrace_agent_fixture, filtered_trigger, 1}),
-    {denied, 1} = beamtrace_agent_fixture:filtered_trigger({denied, 1}),
-    {allowed, 2} = beamtrace_agent_fixture:filtered_trigger({allowed, 2}),
-    Events = collect_events(10, []),
-    Roots = [Event || #{kind := root} = Event <- Events],
-    ?assertEqual(1, length(Roots)),
-    ok = beamtrace_agent:stop(Agent),
+    try
+        ok = beamtrace_agent:grant(Agent, 10),
+        {ok, armed} =
+            beamtrace_agent:arm(Agent, {beamtrace_agent_fixture, filtered_trigger, 1}),
+        {denied, 1} = beamtrace_agent_fixture:filtered_trigger({denied, 1}),
+        {allowed, 2} = beamtrace_agent_fixture:filtered_trigger({allowed, 2}),
+        {_Receipt, Batches} = sealed_batches(Agent, <<"filtered-root">>),
+        Events = lists:append([Batch || {_Sequence, Batch} <- Batches]),
+        Roots = [Event || #{kind := root} = Event <- Events],
+        ?assertEqual(1, length(Roots))
+    after
+        stop_agent(Agent)
+    end,
     ?assertEqual(false, seq_trace:get_system_tracer()).
 
 exact_meta_trigger_and_cleanup() ->
@@ -236,38 +249,44 @@ exact_meta_trigger_and_cleanup() ->
         batch_size => 20,
         privacy => #{mode => metadata, salt => <<"e2e-salt">>}
     }),
-    ok = beamtrace_agent:grant(Agent, 10),
-    {ok, armed} =
-        beamtrace_agent:arm(Agent, {beamtrace_agent_fixture, trigger, 1}),
-    ok = beamtrace_agent_fixture:trigger(Target),
-    Events = collect_events(20, []),
-    Kinds = [maps:get(kind, Event) || Event <- Events],
-    ?assert(lists:member(root, Kinds)),
-    ?assert(lists:member(send, Kinds)),
-    ?assert(lists:member('receive', Kinds)),
-    Orders = [maps:get(local_order, Event) || Event <- Events],
-    ?assert(lists:all(
-        fun(Order) ->
-            is_integer(Order) andalso Order >= 0 andalso Order =< 9007199254740991
-        end,
-        Orders
-    )),
-    ?assertEqual(length(Orders), length(lists:usort(Orders))),
-    ok = beamtrace_agent:stop(Agent),
-    timer:sleep(20),
-    ?assertEqual(false, seq_trace:get_system_tracer()),
-    Target ! stop.
+    TargetMonitor = erlang:monitor(process, Target),
+    try
+        ok = beamtrace_agent:grant(Agent, 10),
+        {ok, armed} =
+            beamtrace_agent:arm(Agent, {beamtrace_agent_fixture, trigger, 1}),
+        ok = beamtrace_agent_fixture:trigger(Target),
+        {_Receipt, Batches} = sealed_batches(Agent, <<"exact-e2e">>),
+        Events = lists:append([Batch || {_Sequence, Batch} <- Batches]),
+        Kinds = [maps:get(kind, Event) || Event <- Events],
+        ?assert(lists:member(root, Kinds)),
+        ?assert(lists:member(send, Kinds)),
+        ?assert(lists:member('receive', Kinds)),
+        Orders = [maps:get(local_order, Event) || Event <- Events],
+        ?assert(lists:all(
+            fun(Order) ->
+                is_integer(Order) andalso Order >= 0 andalso Order =< 9007199254740991
+            end,
+            Orders
+        )),
+        ?assertEqual(length(Orders), length(lists:usort(Orders)))
+    after
+        stop_agent(Agent),
+        Target ! stop,
+        receive
+            {'DOWN', TargetMonitor, process, Target, normal} -> ok
+        after 1000 ->
+            error(target_did_not_stop)
+        end
+    end,
+    ?assertEqual(false, seq_trace:get_system_tracer()).
 
-collect_events(0, Acc) ->
-    lists:append(lists:reverse(Acc));
-collect_events(Count, Acc) ->
+stop_agent(Agent) ->
+    Monitor = erlang:monitor(process, Agent),
+    ok = beamtrace_agent:stop(Agent),
     receive
-        {beamtrace_batch, _CaptureId, _Node, _BatchSequence, Batch} ->
-            collect_events(Count - 1, [Batch | Acc]);
-        {target_received, _Message} ->
-            collect_events(Count, Acc)
-    after 50 ->
-        lists:append(lists:reverse(Acc))
+        {'DOWN', Monitor, process, Agent, normal} -> ok
+    after 1000 ->
+        error(agent_did_not_stop)
     end.
 
 echo_loop(Parent) ->
