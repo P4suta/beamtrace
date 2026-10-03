@@ -24,35 +24,25 @@ public codec, builds its causal graph, and runs a bounded diagnostic:
 import beamtrace/codec
 import beamtrace/dag
 import beamtrace/diagnostics
+import beamtrace/event
 import beamtrace/types
 import gleam/int
 import gleam/io
 import gleam/list
-import gleam/option.{None}
 
 pub fn main() {
-  let sender =
-    types.ProcessIdentity(
-      physical: types.ProcessRef("shop@localhost", "<0.10.0>"),
-      logical: None,
-      evidence: [],
-    )
-  let event =
-    types.TraceEvent(
+  let sender = event.process(node: "shop@localhost", pid: "<0.10.0>")
+  let sent =
+    event.builder(root: "checkout-1", process: sender)
+    |> event.at(offset_ns: 100, order: 1)
+    |> event.send(
       id: "send-1",
-      root_id: "checkout-1",
-      node: "shop@localhost",
-      process: sender,
-      local_instant: types.LocalInstant(offset_ns: 100, order: 1),
-      kind: types.Send(
-        to: types.ProcessRef("shop@localhost", "<0.20.0>"),
-        message: types.TagOnly("charge"),
-        serial: types.SequenceSerial(previous: 0, current: 1),
-      ),
-      evidence: types.Exact,
+      to: types.ProcessRef("shop@localhost", "<0.20.0>"),
+      message: types.TagOnly("charge"),
+      serial: event.serial(previous: 0, current: 1),
     )
 
-  let encoded = codec.encode_event(event)
+  let encoded = codec.encode_event(sent)
   let assert Ok(decoded) = codec.decode_event(encoded)
   let assert Ok(graph) = dag.build([decoded])
   let assert [finding] =
@@ -87,15 +77,35 @@ preparation behind one opaque `Trace` value:
 
 ```gleam
 import beamtrace
+import gleam/int
 import gleam/io
+import gleam/list
+import gleam/result
 
-case beamtrace.decode_events(baseline_lines), beamtrace.decode_events(run_lines) {
-  Ok(baseline), Ok(run) -> {
+pub fn summarize(
+  baseline_lines: List(String),
+  run_lines: List(String),
+) -> String {
+  let summary = {
+    use baseline <- result.try(beamtrace.decode_events(baseline_lines))
+    use run <- result.try(beamtrace.decode_events(run_lines))
     let report = beamtrace.compare(baseline, run)
     let findings = beamtrace.findings(run)
-    io.println(int.to_string(report.changed) <> " changed actors, " <> int.to_string(list.length(findings)) <> " findings")
+    Ok(
+      int.to_string(report.changed)
+      <> " changed actors, "
+      <> int.to_string(list.length(findings))
+      <> " findings",
+    )
   }
-  Error(failure), _ | _, Error(failure) -> io.println(beamtrace.error_message(failure))
+  case summary {
+    Ok(line) -> line
+    Error(failure) -> beamtrace.error_message(failure)
+  }
+}
+
+pub fn main() {
+  io.println(summarize([], []))
 }
 ```
 
@@ -112,17 +122,44 @@ and returns the first `DagError` instead of comparing an invalid trace.
 baseline like this:
 
 ```gleam
+import beamtrace/dag
 import beamtrace/diff
+import beamtrace/types
+import gleam/list
+import gleam/result
 
-let assert Ok(baseline) = diff.prepare(baseline_events)
-let assert Ok(candidate) = diff.prepare(candidate_events)
-let report = diff.compare_prepared(baseline, candidate)
+pub fn changed_against_baseline(
+  baseline_events: List(types.TraceEvent),
+  runs: List(List(types.TraceEvent)),
+) -> Result(List(Int), dag.DagError) {
+  use baseline <- result.try(diff.prepare(baseline_events))
+  list.try_map(runs, fn(events) {
+    use candidate <- result.try(diff.prepare(events))
+    Ok(diff.compare_prepared(baseline, candidate).changed)
+  })
+}
 ```
 
 Typed producers can call `codec.validate_manifest`, `codec.validate_event`,
 `codec.validate_graph_segment`, and `codec.validate_clocks` before encoding.
 These validators apply the same schema-v2 field rules as the decoding boundary
 without allocating JSON and parsing it back into the same value.
+
+## Examples
+
+Every Gleam code block in this README is a complete module and is compiled on
+both targets by the repository's snippet gate. Four runnable projects live in
+the repository's [`examples/`](https://github.com/P4suta/beamtrace/tree/main/examples)
+directory:
+
+- `decode_and_compare` — build events, decode them through the validated facade, and compare two runs
+- `build_events` — construct codec-valid events with `beamtrace/event` and round-trip them
+- `query_language` — reject an AQL typo with a caret report and split a query into an agent predicate and residual
+- `diagnostics_thresholds` — tune diagnostic thresholds through the facade
+
+The distribution consumer gate additionally runs
+[`fixtures/hex_consumer.gleam`](https://github.com/P4suta/beamtrace/blob/main/fixtures/hex_consumer.gleam)
+against the published package surface on both targets.
 
 ## Modules
 
