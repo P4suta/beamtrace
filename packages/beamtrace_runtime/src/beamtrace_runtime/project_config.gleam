@@ -16,14 +16,20 @@ pub type ProjectConfig {
   )
 }
 
-pub const template = "# BeamTrace project profiles. Secret values and commands are forbidden.\n"
+pub const template = "# BeamTrace project profiles — see docs/project-config.md.\n"
+  <> "# Found by walking from the working directory up to the repository root.\n"
+  <> "# Secret values and commands are forbidden.\n"
+  <> "\n"
   <> "[defaults]\n"
   <> "max_roots = 1\n"
   <> "preset = \"generic\"\n"
   <> "\n"
-  <> "[profiles.local]\n"
-  <> "trigger = \"my_module:my_function/1\"\n"
-  <> "out = \"traces/local.beamtrace\"\n"
+  <> "# Uncomment and adjust to make 'beamtrace record --profile local' work:\n"
+  <> "# [profiles.local]\n"
+  <> "# trigger = \"my_app:main/0\"        # the MFA that starts the operation\n"
+  <> "# out = \"traces/local.beamtrace\"   # resolved relative to this file\n"
+  <> "# where = \"message.tag == \\\"call\\\"\"  # optional AQL root predicate\n"
+  <> "# cookie_file = \".secrets/cookie\"  # optional private cookie file\n"
 
 pub fn prepare(arguments: List(String)) -> Result(List(String), String) {
   use configuration <- result_try(load())
@@ -67,7 +73,9 @@ pub fn check() -> Result(String, String) {
     Ok(None) -> Error("beamtrace.toml was not found")
     Ok(Some(config)) ->
       Ok(
-        "valid beamtrace.toml: "
+        "valid beamtrace.toml at "
+        <> config.path
+        <> ": "
         <> int.to_string(list.length(config.profiles))
         <> " profile(s)",
       )
@@ -287,7 +295,8 @@ fn validate_trigger(value: String) -> Result(String, String) {
   use value <- result_try(bounded_value("trigger", value))
   case cli.parse_mfa(value) {
     Ok(_) -> Ok(value)
-    Error(_) -> Error("invalid configuration value for 'trigger'")
+    Error(error) ->
+      Error("invalid configuration value for 'trigger': " <> error.message)
   }
 }
 
