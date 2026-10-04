@@ -19,7 +19,7 @@ WORKDIR /src/packages/beamtrace_runtime
 RUN gleam deps download \
     && gleam export erlang-shipment
 
-FROM erlang:29-alpine@sha256:77074ad338ad7303c2f127eb686759721dffbff952f7c8db162bb4adac1e1e1c
+FROM erlang:29-alpine@sha256:e7a27e743d17abf139518a69ba3861b43a88ad8396296f0a859d7f37031dbde0
 
 LABEL org.opencontainers.image.title="BeamTrace" \
       org.opencontainers.image.description="BEAM causal workbench" \
