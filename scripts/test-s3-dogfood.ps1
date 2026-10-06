@@ -12,7 +12,7 @@ if (-not $dogfoodRoot.StartsWith($buildRoot, [StringComparison]::OrdinalIgnoreCa
 $certRoot = Join-Path $dogfoodRoot 'certs'
 $containerName = "beamtrace-s3-dogfood-$PID"
 # renovate: datasource=docker depName=alpine/openssl
-$opensslImage = 'alpine/openssl:3.5.7@sha256:19f8eb9004a1dbaec323eed6094e9b6bcc1dbf2697ecb5fb8d2fad4e3336a8f7'
+$opensslImage = 'alpine/openssl:3.5.9@sha256:59c5cb51e536d40587667229468b007a2a6cae1705397e59e5f7774c08b74029'
 # renovate: datasource=docker depName=versity/versitygw
 $gatewayImage = 'versity/versitygw:v1.8.0@sha256:30292fc2eeacc67a36993b01f7a7a5e3361a19cced0e80c1d71cfa2a4b0a2499'
 $accessKey = 'beamtrace-dogfood'

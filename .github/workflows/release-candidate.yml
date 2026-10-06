@@ -46,7 +46,7 @@ jobs:
         with:
           otp-version: '29'
           gleam-version: '1.18.1'
-          rebar3-version: '3.27.0'
+          rebar3-version: '3.27.1'
       - name: Build and smoke-test release archive without publishing
         shell: pwsh
         run: ./scripts/test-package.ps1
@@ -84,7 +84,7 @@ jobs:
         with:
           otp-version: '29'
           gleam-version: '1.18.1'
-          rebar3-version: '3.27.0'
+          rebar3-version: '3.27.1'
       - name: Build and inspect Hex tarball without publishing
         shell: pwsh
         run: ./scripts/test-hex-package.ps1
