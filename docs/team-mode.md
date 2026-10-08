@@ -12,7 +12,7 @@ Set `BEAMTRACE_TEAM=1`, then provide:
 - `BEAMTRACE_OIDC_GROUP_ROLES`, for example `beam-viewers:viewer,beam-investigators:investigator,beam-raw:raw,beam-admins:admin`
 - `BEAMTRACE_PROJECT` and `BEAMTRACE_ENVIRONMENT`
 
-Optional bounded settings are `BEAMTRACE_RETENTION_DAYS` (default 7), `BEAMTRACE_RAW_RETENTION_DAYS` (default 1 and never greater than metadata retention), `BEAMTRACE_RELAY_MAX_EVENTS`, `BEAMTRACE_RELAY_MAX_BYTES`, and `BEAMTRACE_ENROLLMENT_TTL_MS`. Client secrets, distribution cookies, and S3 credentials are rejected if supplied through BeamTrace configuration.
+Optional bounded settings are `BEAMTRACE_RETENTION_DAYS` (default 7), `BEAMTRACE_RAW_RETENTION_DAYS` (default 1 and never greater than metadata retention), `BEAMTRACE_RELAY_MAX_EVENTS`, `BEAMTRACE_RELAY_MAX_BYTES`, and `BEAMTRACE_ENROLLMENT_TTL_MS`. Client secrets, distribution cookies, and S3 credentials are rejected if supplied through BeamTrace configuration. Defaults, accepted values, and the OIDC endpoint discovery rule for every variable are catalogued in [environment-variables.md](environment-variables.md).
 
 At startup the hub prints a one-time relay enrollment code. Deliver it through an authenticated operational channel; it is consumed atomically when the relay's Ed25519 public key is committed.
 

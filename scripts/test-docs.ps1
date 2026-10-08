@@ -144,5 +144,10 @@ if ($roadmap.Contains('durable shared annotations/audit records')) {
     throw 'Roadmap still reports durable annotations and audit records as future work.'
 }
 
+& node (Join-Path $PSScriptRoot 'check-env-docs.mjs')
+if ($LASTEXITCODE -ne 0) {
+    throw 'docs/environment-variables.md is out of sync with the sources.'
+}
+
 Write-Host 'Documentation acceptance passed.'
 exit 0
