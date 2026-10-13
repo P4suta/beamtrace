@@ -16,3 +16,4 @@
 - [0014](0014-diagnostic-thresholds-are-explicit-records.md) — Diagnostic thresholds are explicit records
 - [0016](0016-cli-error-catalogue-is-closed.md) — The CLI error catalogue is closed
 - [0013](0013-event-builder-is-pipe-shaped-and-total.md) — The event builder is pipe-shaped and total
+- [0019](0019-environment-variables-have-a-three-tier-contract.md) — Environment variables have a three-tier contract
