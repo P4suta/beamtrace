@@ -263,7 +263,7 @@ if (
     throw 'Release PR artifact generation is not guarded by its candidate gate.'
 }
 $configure = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'scripts/configure-github.ps1')
-foreach ($marker in @('googleapis/release-please-action@*', 'environments/release-automation/variables', 'RELEASE_PLEASE_APP_CLIENT_ID', 'repos/$Repository/immutable-releases')) {
+foreach ($marker in @('googleapis/release-please-action@*', 'environments/release-automation/variables', 'DOPPLER_AUTOMATION_IDENTITY_ID', 'repos/$Repository/immutable-releases')) {
     if (-not $configure.Contains($marker)) {
         throw "Remote release governance configuration is missing: $marker"
     }

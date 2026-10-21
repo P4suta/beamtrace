@@ -5,7 +5,7 @@ param(
     [ValidatePattern('^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')]
     [string] $Repository,
     [ValidatePattern('^[A-Za-z0-9_-]+$')]
-    [string] $ReleasePleaseAppClientId
+    [string] $DopplerAutomationIdentityId
 )
 
 $ErrorActionPreference = 'Stop'
@@ -102,7 +102,13 @@ Invoke-GitHubApi -Method PUT -Endpoint "repos/$Repository/actions/permissions" -
 Invoke-GitHubApi -Method PUT -Endpoint "repos/$Repository/actions/permissions/selected-actions" -Body @{
     github_owned_allowed = $true
     verified_allowed = $false
-    patterns_allowed = @('erlef/setup-beam@*', 'googleapis/release-please-action@*', 'ossf/scorecard-action@*')
+    patterns_allowed = @(
+        'erlef/setup-beam@*',
+        'googleapis/release-please-action@*',
+        'ossf/scorecard-action@*',
+        'dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534',
+        'dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c'
+    )
 } | Out-Null
 Invoke-GitHubApi -Method PUT -Endpoint "repos/$Repository/actions/permissions/workflow" -Body @{
     default_workflow_permissions = 'read'
@@ -147,19 +153,19 @@ if ($null -eq $mainBranchPolicy) {
     } | Out-Null
 }
 
-if (-not [string]::IsNullOrWhiteSpace($ReleasePleaseAppClientId)) {
+if (-not [string]::IsNullOrWhiteSpace($DopplerAutomationIdentityId)) {
     $variables = Invoke-GitHubApi -Method GET -Endpoint "repos/$Repository/environments/release-automation/variables?per_page=100"
-    $existingVariable = @($variables.variables) | Where-Object { $_.name -eq 'RELEASE_PLEASE_APP_CLIENT_ID' } | Select-Object -First 1
+    $existingVariable = @($variables.variables) | Where-Object { $_.name -eq 'DOPPLER_AUTOMATION_IDENTITY_ID' } | Select-Object -First 1
     if ($null -eq $existingVariable) {
         Invoke-GitHubApi -Method POST -Endpoint "repos/$Repository/environments/release-automation/variables" -Body @{
-            name = 'RELEASE_PLEASE_APP_CLIENT_ID'
-            value = $ReleasePleaseAppClientId
+            name = 'DOPPLER_AUTOMATION_IDENTITY_ID'
+            value = $DopplerAutomationIdentityId
         } | Out-Null
     }
     else {
-        Invoke-GitHubApi -Method PATCH -Endpoint "repos/$Repository/environments/release-automation/variables/RELEASE_PLEASE_APP_CLIENT_ID" -Body @{
-            name = 'RELEASE_PLEASE_APP_CLIENT_ID'
-            value = $ReleasePleaseAppClientId
+        Invoke-GitHubApi -Method PATCH -Endpoint "repos/$Repository/environments/release-automation/variables/DOPPLER_AUTOMATION_IDENTITY_ID" -Body @{
+            name = 'DOPPLER_AUTOMATION_IDENTITY_ID'
+            value = $DopplerAutomationIdentityId
         } | Out-Null
     }
 }

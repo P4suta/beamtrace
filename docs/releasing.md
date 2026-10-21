@@ -1,27 +1,39 @@
 <!-- SPDX-License-Identifier: Apache-2.0 OR MIT -->
 # Releasing BeamTrace
 
-BeamTrace `0.x` releases are alpha prereleases. Merging a release pull request is the sole human approval that may start publication; creating this automation does not itself authorize a tag or release. The `prerelease` setting must be removed through a reviewed change before `v1.0.0`.
+BeamTrace `0.x` releases are alpha prereleases.
+Merging a release pull request is the sole human approval that may start publication; creating this automation does not itself authorize a tag or release.
+The `prerelease` setting must be removed through a reviewed change before `v1.0.0`.
 
 ## One-time repository setup
 
-1. Create a GitHub App and install it only on `P4suta/beamtrace`.
-2. Grant the App repository permissions for Contents, Pull requests, and Issues, each with read/write access. Do not grant organization-wide installation access.
-3. Create the `release-automation` environment, restrict it to the `main` branch, add the environment variable `RELEASE_PLEASE_APP_CLIENT_ID` with the App client ID, and add the environment secret `RELEASE_PLEASE_APP_PRIVATE_KEY` containing the App private key.
-4. Create the `release` environment, restrict it to tags matching `v*`, and add a short-lived `HEXPM_API_KEY` environment secret with API Write access only. The key must belong to the maintainer account intended to own `beamtrace_core`.
-5. Enable GitHub release immutability for the repository. It only protects future releases, so the setting must be enabled and audited before merging a release pull request.
-6. Confirm that the `beamtrace_core` Hex package name is still available immediately before approving the first release pull request.
+1. Reuse the reviewed release-please App through the canonical shared Doppler config.
+2. Restrict minted App tokens to `P4suta/beamtrace` and the reviewed Contents, Pull requests, and Issues permissions.
+3. Keep `release-automation` restricted to `main`, and set its public `DOPPLER_AUTOMATION_IDENTITY_ID` variable to the read-only identity for `beamtrace.automation`.
+4. Keep `release` restricted to tags matching `v*`, and configure [Hex Workload Identity](https://hex.pm/docs/workload-identity) for `beamtrace_core`, repository `P4suta/beamtrace`, workflow `release.yml`, and environment `release`.
+5. Enable GitHub release immutability for the repository.
+   It only protects future releases, so the setting must be enabled and audited before merging a release pull request.
+6. Confirm full ownership, two-factor authentication, and an existing `beamtrace_core` package before configuring its workload identity.
 
-The environment and branch policies can be applied idempotently after the secrets have been created:
+An unpublished package requires its own authorized first-publication setup.
+This workflow never falls back to a stored Hex key.
+See [credential delivery](credential-delivery.md) for the staged cutover and authentication-only checks.
+
+The environment and branch policies can be applied after the scoped identity exists:
 
 ```powershell
 ./scripts/configure-github.ps1 `
   -Repository P4suta/beamtrace `
-  -ReleasePleaseAppClientId '<client-id>'
+  -DopplerAutomationIdentityId '<purpose-identity-id>'
 ./scripts/audit-github.ps1 -Repository P4suta/beamtrace
 ```
 
-The GitHub App token action uses the documented Client ID/private-key flow. The release-please workflow explicitly requests only the three reviewed App permissions.
+The GitHub App token action uses the Client ID and private key fetched from Doppler.
+The release-please workflow explicitly requests only the three reviewed App permissions.
+The Hex adapter discovers the registry audience, exchanges one GitHub OIDC token for a package-scoped token, and passes it only to Gleam's publishing process after artifact checks.
+Its `--check` mode performs no publication and requires a job with its own matching publisher binding.
+The adapter removes GitHub OIDC request credentials from the publishing child's environment.
+Run `mise run test:release-tools` to check parsing, token scope, dispatch safety, and the proof gate without authentication or publication.
 
 ## Bootstrap state
 
