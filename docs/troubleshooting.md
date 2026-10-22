@@ -7,7 +7,9 @@ code and hint appear in `--json` output. `beamtrace help errors` lists them.
 ## The browser did not open
 
 The server remains running. Open the printed one-time bootstrap URL, or rerun
-with `--no-open`. Confirm the bind line appears before using the URL.
+with `--no-open`. Confirm the bind line appears before using the URL. The URL
+is valid for 60 seconds after printing; when it has expired, rerun the
+command to get a fresh one.
 
 ## `E_AGENT_BEAM_UNAVAILABLE`
 
