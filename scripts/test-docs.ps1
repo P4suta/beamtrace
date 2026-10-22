@@ -85,7 +85,8 @@ $expectations = [ordered]@{
     'docs/releasing.md' = @(
         'release-automation',
         'DOPPLER_AUTOMATION_IDENTITY_ID',
-        'Workload Identity',
+        'DOPPLER_HEX_IDENTITY_ID',
+        'HEXPM_API_KEY',
         'Merging a release pull request is the sole human approval',
         'The workflow never uses Hex `--replace`'
     )

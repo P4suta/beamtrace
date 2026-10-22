@@ -5,7 +5,9 @@ param(
     [ValidatePattern('^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')]
     [string] $Repository,
     [ValidatePattern('^[A-Za-z0-9_-]+$')]
-    [string] $DopplerAutomationIdentityId
+    [string] $DopplerAutomationIdentityId,
+    [ValidatePattern('^[A-Za-z0-9_-]+$')]
+    [string] $DopplerHexIdentityId
 )
 
 $ErrorActionPreference = 'Stop'
@@ -106,8 +108,7 @@ Invoke-GitHubApi -Method PUT -Endpoint "repos/$Repository/actions/permissions/se
         'erlef/setup-beam@*',
         'googleapis/release-please-action@*',
         'ossf/scorecard-action@*',
-        'dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534',
-        'dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c'
+        'dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534'
     )
 } | Out-Null
 Invoke-GitHubApi -Method PUT -Endpoint "repos/$Repository/actions/permissions/workflow" -Body @{
@@ -166,6 +167,23 @@ if (-not [string]::IsNullOrWhiteSpace($DopplerAutomationIdentityId)) {
         Invoke-GitHubApi -Method PATCH -Endpoint "repos/$Repository/environments/release-automation/variables/DOPPLER_AUTOMATION_IDENTITY_ID" -Body @{
             name = 'DOPPLER_AUTOMATION_IDENTITY_ID'
             value = $DopplerAutomationIdentityId
+        } | Out-Null
+    }
+}
+
+if (-not [string]::IsNullOrWhiteSpace($DopplerHexIdentityId)) {
+    $variables = Invoke-GitHubApi -Method GET -Endpoint "repos/$Repository/environments/release/variables?per_page=100"
+    $existingVariable = @($variables.variables) | Where-Object { $_.name -eq 'DOPPLER_HEX_IDENTITY_ID' } | Select-Object -First 1
+    if ($null -eq $existingVariable) {
+        Invoke-GitHubApi -Method POST -Endpoint "repos/$Repository/environments/release/variables" -Body @{
+            name = 'DOPPLER_HEX_IDENTITY_ID'
+            value = $DopplerHexIdentityId
+        } | Out-Null
+    }
+    else {
+        Invoke-GitHubApi -Method PATCH -Endpoint "repos/$Repository/environments/release/variables/DOPPLER_HEX_IDENTITY_ID" -Body @{
+            name = 'DOPPLER_HEX_IDENTITY_ID'
+            value = $DopplerHexIdentityId
         } | Out-Null
     }
 }

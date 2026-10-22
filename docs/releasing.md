@@ -10,13 +10,15 @@ The `prerelease` setting must be removed through a reviewed change before `v1.0.
 1. Reuse the reviewed release-please App through the canonical shared Doppler config.
 2. Restrict minted App tokens to `P4suta/beamtrace` and the reviewed Contents, Pull requests, and Issues permissions.
 3. Keep `release-automation` restricted to `main`, and set its public `DOPPLER_AUTOMATION_IDENTITY_ID` variable to the read-only identity for `beamtrace.automation`.
-4. Keep `release` restricted to tags matching `v*`, and configure [Hex Workload Identity](https://hex.pm/docs/workload-identity) for `beamtrace_core`, repository `P4suta/beamtrace`, workflow `release.yml`, and environment `release`.
+4. Keep `release` restricted to tags matching `v*`, and set `DOPPLER_HEX_IDENTITY_ID` to the read-only identity for `beamtrace.release`.
 5. Enable GitHub release immutability for the repository.
    It only protects future releases, so the setting must be enabled and audited before merging a release pull request.
-6. Confirm full ownership, two-factor authentication, and an existing `beamtrace_core` package before configuring its workload identity.
+6. Store a current Hex key restricted to package `beamtrace_core` as `HEXPM_API_KEY` in `beamtrace.release`, without broad API or repository permissions.
 
-An unpublished package requires its own authorized first-publication setup.
-This workflow never falls back to a stored Hex key.
+Complete Hex key registration and its delivery identity setup before a future authorized release.
+Code and configuration preparation require no active publishing credential.
+The owner maintains the Hex key's lifetime and rotation through the provider and Doppler.
+This workflow uses the selected package-token method and rejects missing credentials.
 See [credential delivery](credential-delivery.md) for the staged cutover and authentication-only checks.
 
 The environment and branch policies can be applied after the scoped identity exists:
@@ -24,16 +26,18 @@ The environment and branch policies can be applied after the scoped identity exi
 ```powershell
 ./scripts/configure-github.ps1 `
   -Repository P4suta/beamtrace `
-  -DopplerAutomationIdentityId '<purpose-identity-id>'
+  -DopplerAutomationIdentityId '<automation-identity-id>' `
+  -DopplerHexIdentityId '<hex-identity-id>'
 ./scripts/audit-github.ps1 -Repository P4suta/beamtrace
 ```
 
 The GitHub App token action uses the Client ID and private key fetched from Doppler.
 The release-please workflow explicitly requests only the three reviewed App permissions.
-The Hex adapter discovers the registry audience, exchanges one GitHub OIDC token for a package-scoped token, and passes it only to Gleam's publishing process after artifact checks.
-Its `--check` mode performs no publication and requires a job with its own matching publisher binding.
-The adapter removes GitHub OIDC request credentials from the publishing child's environment.
-Run `mise run test:release-tools` to check parsing, token scope, dispatch safety, and the proof gate without authentication or publication.
+The Hex job fetches `HEXPM_API_KEY` through Doppler OIDC and exposes it only to the publishing step after artifact preparation.
+The manual **Verify Hex credential delivery** workflow checks delivery and config isolation without publishing after the key and identity are ready.
+For a check from `main`, permit that branch in the existing `release` environment only for the verification window and restore its tag policy afterward.
+A passing delivery check doesn't establish the Hex key's publish authority.
+Verify its package permission, lifetime, and revocation status in Hex before a future authorized release.
 
 ## Bootstrap state
 

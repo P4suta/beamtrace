@@ -300,17 +300,23 @@ jobs:
           otp-version: '29'
           gleam-version: '1.18.1'
           rebar3-version: '3.27.1'
-      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
-        with:
-          toolchain: 1.99.1
-      - name: Build audited workload identity tooling without credentials
-        run: cargo build --locked --release --manifest-path release-tools/release-tools/Cargo.toml
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: hex-package
           path: dist
+      - name: Fetch Hex publishing credential
+        id: hex-credentials
+        uses: dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534
+        with:
+          auth-method: oidc
+          doppler-identity-id: ${{ vars.DOPPLER_HEX_IDENTITY_ID }}
+          doppler-project: beamtrace
+          doppler-config: release
+          inject-env-vars: false
       - name: Publish or verify the immutable Hex version
         shell: pwsh
+        env:
+          HEXPM_API_KEY: ${{ steps.hex-credentials.outputs.HEXPM_API_KEY }}
         run: |
           $version = $env:RELEASE_TAG.Substring(1)
           $releaseSource = (Resolve-Path -LiteralPath 'release-source').Path

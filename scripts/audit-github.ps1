@@ -116,6 +116,8 @@ Assert-Policy ($null -ne $hasMainPolicy) 'Release automation environment is not 
 
 $automationVariables = Get-GitHubApi -Endpoint "repos/$Repository/environments/release-automation/variables?per_page=100"
 Assert-Policy (@($automationVariables.variables.name) -contains 'DOPPLER_AUTOMATION_IDENTITY_ID') 'Doppler automation identity environment variable is missing.'
+$releaseVariables = Get-GitHubApi -Endpoint "repos/$Repository/environments/release/variables?per_page=100"
+Assert-Policy (@($releaseVariables.variables.name) -contains 'DOPPLER_HEX_IDENTITY_ID') 'Doppler Hex identity environment variable is missing.'
 
 $releasePleaseWorkflow = Get-Content -Raw -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) '.github/workflows/release-please.yml')
 foreach ($marker in @('permission-contents: write', 'permission-pull-requests: write', 'permission-issues: write')) {

@@ -408,7 +408,8 @@ foreach ($marker in @(
     'Get-FileHash',
     '[string] $RepositoryRoot',
     "Join-Path `$repoRoot 'scripts/project-version.ps1'",
-    '& $workloadExecutable --publish',
+    'HEXPM_API_KEY',
+    "'I am not using semantic versioning' | & gleam publish --yes",
     'already exists',
     'repo.hex.pm/tarballs'
 )) {

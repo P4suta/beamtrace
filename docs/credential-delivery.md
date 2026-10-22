@@ -6,14 +6,16 @@ doppler_automation_app: release_please
 
 GitHub Actions exchanges its workload identity for a short-lived Doppler token at the credential-consuming step.
 Each purpose has its own read-only service account, config, and environment variable.
-Shared signing credentials stay in the canonical signing project and are referenced from the consumer config.
-The shared credential still carries the signing provider's authority after retrieval.
+The release App stays in the canonical automation project and is referenced from the consumer config.
+The Hex package token stays in this repository's dedicated publishing config.
+Retrieved credentials retain their provider permissions, so minted App tokens and the Hex key also need narrow scopes.
 
 | Purpose | Doppler config | GitHub environment variable | Environments |
 | --- | --- | --- | --- |
 | automation | `beamtrace.automation` | `DOPPLER_AUTOMATION_IDENTITY_ID` | release-automation |
+| publish_hex | `beamtrace.release` | `DOPPLER_HEX_IDENTITY_ID` | release |
 
-The manual **Verify credential access** workflow checks required fields and rejects access to an unrelated config.
+The manual **Verify credential access** workflow checks automation credentials and rejects access to an unrelated config.
 Automation also creates a repository-scoped App token with contents read access.
 This workflow performs no signing, notarization, registry publication, release creation, or deployment.
 Existing environment protections remain in force; their approval does not grant authority for another operation.
@@ -26,22 +28,29 @@ A workflow can exchange for every identity whose claims it satisfies; separate a
 Network, authentication, and runner failures leave that evidence inconclusive.
 Then disconnect the corresponding Doppler-to-GitHub sync while preserving its target fields, check for remaining consumers, and remove the obsolete GitHub fields and legacy configs.
 An expired or revoked registry key is a retirement candidate and must not be copied into a replacement config.
-Use the registry's native trusted publisher where supported; an unconfigured publisher stays unavailable until its owner configures the exact binding.
+The owner has selected a stored package token for Hex while its native Workload Identity registration is unavailable.
 
 Store only field names, identity metadata, source revisions, and verification outcomes in issues and logs.
 Keep credential values and native authentication state out of the repository.
 
 ## Hex publisher
 
-Hex uses its own native Workload Identity for `beamtrace_core` in `release.yml` and the protected `release` environment.
-The package owner must configure the exact production binding with two-factor authentication.
-The Rust adapter in `release-tools` validates the expected repository IDs, HTTPS OIDC origin, package scope, Bearer token type, and bounded lifetime before giving the token to Gleam.
-It keeps tokens out of arguments, files, workflow outputs, and logs, and removes GitHub OIDC request credentials from the child.
-Its explicit `--check` mode never starts the publisher.
-Build and run its tests, Clippy, Kani proofs, and assertion-counterexample gate through `mise run test:release-tools` without contacting the authentication endpoints.
+The owner stores a key restricted to `beamtrace_core` in `beamtrace.release.HEXPM_API_KEY` and maintains its lifetime and rotation.
+Use the package permission without broad API or repository permissions.
+An expired, revoked, or unverified old key doesn't become active through this configuration change.
+The owner supplies a current key through Doppler without sending its value through chat or the repository.
+Prepare the workflow and configuration before issuing a key.
+Key registration, delivery identity setup, and live delivery checks belong to the preparation for a future authorized release.
+An inactive Hex publisher doesn't block verification of the release automation App.
 
-Kani proves the production dispatch decision for both modes and both authentication states.
-The HTTPS services, GitHub's signed identity, Hex's configured publisher verification, and Gleam's existing publishing behavior remain external trust boundaries.
-Real identity exchange and package publication need their own source-bound evidence and authorization.
-Package existence and publisher registration remain pending until the owner checks them.
-No first-publication bootstrap or replacement static key forms part of this migration.
+The read-only Hex delivery identity can read only `beamtrace.release`.
+Bind its OIDC policy to the immutable repository and owner IDs, the `release` environment, `release.yml`, and the manual `verify-hex.yml` workflow.
+The publisher fetches this config after artifact preparation and passes only `HEXPM_API_KEY` to the publishing step.
+The publishing script rejects an empty or unresolved key and keeps the existing immutable package comparison before calling Gleam.
+This is the selected authentication method, with no automatic switch to a saved login or another key.
+
+The manual **Verify Hex credential delivery** workflow checks credential retrieval and config isolation without calling the publisher or a registry write endpoint.
+Run it only after the owner prepares the key and its delivery identity.
+That check establishes delivery, while key permissions, lifetime, and revocation require provider-side evidence.
+Publication remains a separate authorized operation.
+Reconsider native Hex Workload Identity only after its production availability and the exact package binding are confirmed.
