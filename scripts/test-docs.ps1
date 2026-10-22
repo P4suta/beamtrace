@@ -63,6 +63,10 @@ $expectations = [ordered]@{
         '## Fields',
         '## Evaluation rules',
         'ns/us/ms/s'
+    'docs/project-config.md' = @(
+        '## Discovery',
+        '## Forbidden keys',
+        'repository boundary'
     )
     'docs/getting-started.md' = @(
         'beamtrace demo --no-ui --json',
