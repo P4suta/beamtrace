@@ -54,14 +54,20 @@ The narrow test should be used for Red/Green iteration. `test-all` is the portab
 
 CI repeats the non-browser gate across OTP 27–29 and three operating systems, exercises short/long/TLS distribution separately, runs real S3-compatible TLS, Chromium, the exact official MCP client, and PTY acceptance, and builds the actual OCI image. Record acceptance covers direct Erlang, a resolved Gleam shim, Rebar3, and Mix; the Elixir fixture job makes the otherwise optional Mix boundary mandatory. The isolated core consumer executes the README codec/DAG/diagnostics example on Erlang and JavaScript; the post-publication gate repeats it against the exact Hex version. Tag workflows require all package versions to match the tag, build and smoke-test five self-contained native archives, reject ZIP growth above 5% of the published v0.1.0 per-target baseline, and attest release subjects with GitHub OIDC. Windows ARM64 packaging remains disabled until CI has a reproducible native Erlang/OTP runtime.
 
-The Linux performance gate runs with `+S 4:4` on OTP 27–29. For local
-acceptance on OTP 29, warm each workload and compare the median of three runs.
-The tracked workloads cover 100k Core analysis, one prepared baseline against
-multiple candidates, 100k capture normalization, 50k archive save/load/window
-and search, and a 128-event relay decode/ingest batch. Absolute ceilings remain
-conservative for shared CI runners; relative checks (prepared versus repeated
-analysis and selective versus full archive reads) are the primary regression
-signal.
+The Linux performance gate runs with `+S 4:4` on OTP 27–29.
+Core growth compares the median process reductions of three independent 25k and 50k runs against the existing threefold budget.
+Each run uses a fresh monitored process and waits for its exit before the next run, so earlier heap state doesn't affect the measurement.
+Elapsed time remains diagnostic for growth, and the 100k time and peak-memory ceilings remain in force.
+The tracked workloads also cover a prepared baseline against multiple candidates, 100k capture normalization, 50k archive save/load/window and search, and a 128-event relay decode/ingest batch.
+Prepared versus repeated analysis and selective versus full archive reads remain relative regression checks.
+
+`scripts/test-performance.ps1` first exercises the real measurement helpers on every OS.
+Its controls check worker isolation, failure propagation, median selection, the exact growth boundary, and rejection of zero or excessive work.
+Opposing elapsed-time inputs check that scheduling delay can't change the work verdict.
+The [Erlang process counter](https://www.erlang.org/doc/apps/erts/erlang.html#process_info/2) supplies the empirical work metric.
+Reductions are runtime-specific work units, so results compare workloads within one pinned OTP runtime rather than counts across OTP versions.
+They don't prove native-code cost or a complexity bound for arbitrary traces.
+The real fixed workloads and absolute ceilings cover that measurement boundary; revisit the metric when Core delegates work to native code or child processes.
 
 Changes carried in dependency forks are not automatically upstreamable.
 [The upstream candidate ledger](upstream-candidates.md) records pinned SHAs,

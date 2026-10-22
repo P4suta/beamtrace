@@ -5,6 +5,9 @@ param()
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
+& escript (Join-Path $PSScriptRoot 'performance-gate.escript') --self-test
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 if (-not $IsLinux) {
     Write-Host 'Performance gate is Linux-only; skipped on this platform.'
     exit 0
