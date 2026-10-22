@@ -114,8 +114,8 @@ try {
     if ($status -ne 404) {
         throw "Hex returned HTTP $status while checking beamtrace_core $Version."
     }
-    if ([string]::IsNullOrWhiteSpace($env:HEXPM_API_KEY)) {
-        throw 'HEXPM_API_KEY is required to publish a new Hex version.'
+    if ([string]::IsNullOrWhiteSpace($env:HEXPM_API_KEY) -or $env:HEXPM_API_KEY.StartsWith('${')) {
+        throw 'A resolved HEXPM_API_KEY is required to publish a new Hex version.'
     }
 
     $coreRoot = Join-Path $repoRoot 'packages/beamtrace_core'
@@ -125,8 +125,6 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Could not reproduce the Hex tarball before publish.' }
         $rebuilt = Join-Path $coreRoot "build/beamtrace_core-$Version.tar"
         Assert-SameHexPackage -Expected $localTarball -Actual $rebuilt
-        # Gleam deliberately requires this explicit acknowledgement for 0.x
-        # releases even when --yes accepts the ordinary publish prompt.
         'I am not using semantic versioning' | & gleam publish --yes
         if ($LASTEXITCODE -ne 0) { throw "Hex publish failed for beamtrace_core $Version." }
     }

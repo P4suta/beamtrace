@@ -281,6 +281,7 @@ jobs:
     environment: release
     permissions:
       contents: read
+      id-token: write
     steps:
       - name: Checkout immutable release source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -303,10 +304,19 @@ jobs:
         with:
           name: hex-package
           path: dist
+      - name: Fetch Hex publishing credential
+        id: hex-credentials
+        uses: dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534
+        with:
+          auth-method: oidc
+          doppler-identity-id: ${{ vars.DOPPLER_HEX_IDENTITY_ID }}
+          doppler-project: beamtrace
+          doppler-config: release
+          inject-env-vars: false
       - name: Publish or verify the immutable Hex version
         shell: pwsh
         env:
-          HEXPM_API_KEY: ${{ secrets.HEXPM_API_KEY }}
+          HEXPM_API_KEY: ${{ steps.hex-credentials.outputs.HEXPM_API_KEY }}
         run: |
           $version = $env:RELEASE_TAG.Substring(1)
           $releaseSource = (Resolve-Path -LiteralPath 'release-source').Path

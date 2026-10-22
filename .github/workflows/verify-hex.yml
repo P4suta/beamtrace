@@ -1,0 +1,61 @@
+---
+name: Verify Hex credential delivery
+
+'on':
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/verify-hex.yml
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: verify-hex-credentials
+  cancel-in-progress: false
+
+jobs:
+  hex:
+    name: Verify Hex credential delivery
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    environment: release
+    permissions:
+      id-token: write
+    steps:
+      - name: Fetch Hex publishing credential
+        id: credentials
+        uses: dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534
+        with:
+          auth-method: oidc
+          doppler-identity-id: ${{ vars.DOPPLER_HEX_IDENTITY_ID }}
+          doppler-project: beamtrace
+          doppler-config: release
+          inject-env-vars: false
+      - name: Reject missing or unresolved Hex credential
+        if: >-
+          ${{ steps.credentials.outcome == 'success' && (
+          steps.credentials.outputs.HEXPM_API_KEY == '' ||
+          startsWith(steps.credentials.outputs.HEXPM_API_KEY, '${')
+          ) }}
+        shell: bash
+        run: exit 1
+
+      - name: Attempt unrelated credential access
+        id: forbidden
+        continue-on-error: true
+        uses: dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534
+        with:
+          auth-method: oidc
+          doppler-identity-id: ${{ vars.DOPPLER_HEX_IDENTITY_ID }}
+          doppler-project: beamtrace
+          doppler-config: automation
+          inject-env-vars: false
+
+      - name: Reject unrelated credential access
+        if: ${{ always() && steps.forbidden.outcome != 'failure' }}
+        shell: bash
+        run: exit 1
