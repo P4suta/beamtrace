@@ -4,7 +4,8 @@ import gleam/dynamic/decode
 import gleam/int
 import sqlight
 
-const schema = "
+const schema =
+  "
 PRAGMA foreign_keys = ON;
 PRAGMA busy_timeout = 5000;
 PRAGMA journal_mode = WAL;

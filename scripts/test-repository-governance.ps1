@@ -356,19 +356,40 @@ $releaseContract = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'scripts/t
 if (-not $releaseContract.Contains("'actions/attest@'")) {
     throw 'Release acceptance must validate the attest action identity without freezing its updateable SHA.'
 }
-if ($releaseContract -match "actions/attest@[0-9a-f]{40}") {
+if ($releaseContract -match '(?:actions/(?:attest|create-github-app-token)|googleapis/release-please-action)@[0-9a-f]{40}') {
     throw 'Release acceptance duplicates an Action SHA that is already enforced by the full-SHA policy.'
+}
+
+function Get-UnpinnedWorkflowAction {
+    [OutputType([string])]
+    param([string] $Source)
+
+    foreach ($reference in [regex]::Matches($Source, '(?m)^\s*(?:-\s*)?uses:\s*([^\s#]+)')) {
+        $action = $reference.Groups[1].Value
+        if ($action -notmatch '@[0-9a-f]{40}$') {
+            $action
+        }
+    }
+}
+
+foreach ($fixturePrefix in @('  - uses: ', "  - name: Fixture`n    uses: ")) {
+    $immutable = @(
+        Get-UnpinnedWorkflowAction -Source ($fixturePrefix + 'actions/checkout@' + ('a' * 40))
+    )
+    if ($immutable.Count -ne 0) { throw 'The workflow pin check rejects an immutable action.' }
+    $mutable = @(
+        Get-UnpinnedWorkflowAction -Source ($fixturePrefix + 'actions/checkout@v7')
+    )
+    if ($mutable.Count -ne 1 -or $mutable[0] -ne 'actions/checkout@v7') {
+        throw 'The workflow pin check misses a mutable action in a named or unnamed step.'
+    }
 }
 
 $workflowFiles = Get-ChildItem -LiteralPath (Join-Path $repoRoot '.github/workflows') -Filter '*.yml' -File
 foreach ($workflowFile in $workflowFiles) {
     $source = Get-Content -Raw -LiteralPath $workflowFile.FullName
-    $uses = [regex]::Matches($source, '(?m)^\s*- uses:\s*([^\s#]+)')
-    foreach ($match in $uses) {
-        $action = $match.Groups[1].Value
-        if ($action -notmatch '@[0-9a-f]{40}$') {
-            throw "Action is not pinned to a full commit SHA in $($workflowFile.Name): $action"
-        }
+    foreach ($action in @(Get-UnpinnedWorkflowAction -Source $source)) {
+        throw "Action is not pinned to a full commit SHA in $($workflowFile.Name): $action"
     }
 }
 

@@ -16,7 +16,8 @@ pub type ProjectConfig {
   )
 }
 
-pub const template = "# BeamTrace project profiles. Secret values and commands are forbidden.\n"
+pub const template =
+  "# BeamTrace project profiles. Secret values and commands are forbidden.\n"
   <> "[defaults]\n"
   <> "max_roots = 1\n"
   <> "preset = \"generic\"\n"

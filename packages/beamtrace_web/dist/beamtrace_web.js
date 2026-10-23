@@ -834,7 +834,7 @@ function run_dynamic_function(data, name, f) {
     let placeholder = $[0];
     return [
       placeholder,
-      toList([new DecodeError(name, classify_dynamic(data), List$Empty$const)])
+      prepend(new DecodeError(name, classify_dynamic(data), List$Empty$const), List$Empty$const)
     ];
   }
 }
@@ -891,16 +891,13 @@ function one_of(first, alternatives) {
   });
 }
 function path_segment_to_string(key) {
-  let decoder = one_of(string2, toList([
-    (() => {
-      let _pipe = int2;
-      return map3(_pipe, to_string);
-    })(),
-    (() => {
-      let _pipe = float2;
-      return map3(_pipe, float_to_string);
-    })()
-  ]));
+  let decoder = one_of(string2, prepend((() => {
+    let _pipe = int2;
+    return map3(_pipe, to_string);
+  })(), prepend((() => {
+    let _pipe = float2;
+    return map3(_pipe, float_to_string);
+  })(), List$Empty$const)));
   let $ = run(key, decoder);
   if ($ instanceof Ok) {
     let key$1 = $[0];
@@ -923,7 +920,7 @@ function push_path(layer, path) {
 function list2(inner) {
   return new Decoder((data) => {
     return list(data, inner.function, (p, k) => {
-      return push_path(p, toList([k]));
+      return push_path(p, prepend(k, List$Empty$const));
     }, 0, List$Empty$const);
   });
 }
@@ -960,9 +957,7 @@ function index3(loop$path, loop$position, loop$inner, loop$data, loop$handle_mis
         let default$ = $1[0];
         let _pipe = [
           default$,
-          toList([
-            new DecodeError(kind, classify_dynamic(data), List$Empty$const)
-          ])
+          prepend(new DecodeError(kind, classify_dynamic(data), List$Empty$const), List$Empty$const)
         ];
         return push_path(_pipe, reverse(position));
       }
@@ -976,7 +971,7 @@ function subfield(field_path, field_decoder, next) {
       let default$ = $12[0];
       let _pipe = [
         default$,
-        toList([new DecodeError("Field", "Nothing", List$Empty$const)])
+        prepend(new DecodeError("Field", "Nothing", List$Empty$const), List$Empty$const)
       ];
       return push_path(_pipe, reverse(position));
     });
@@ -994,12 +989,10 @@ function success(data) {
   });
 }
 function decode_error(expected, found) {
-  return toList([
-    new DecodeError(expected, classify_dynamic(found), List$Empty$const)
-  ]);
+  return prepend(new DecodeError(expected, classify_dynamic(found), List$Empty$const), List$Empty$const);
 }
 function field(field_name, field_decoder, next) {
-  return subfield(toList([field_name]), field_decoder, next);
+  return subfield(prepend(field_name, List$Empty$const), field_decoder, next);
 }
 function optional_field(key, default$, field_decoder, next) {
   return new Decoder((data) => {
@@ -1018,13 +1011,11 @@ function optional_field(key, default$, field_decoder, next) {
       let kind = $1[0];
       _block$1 = [
         default$,
-        toList([
-          new DecodeError(kind, classify_dynamic(data), List$Empty$const)
-        ])
+        prepend(new DecodeError(kind, classify_dynamic(data), List$Empty$const), List$Empty$const)
       ];
     }
     let _pipe = _block$1;
-    _block = push_path(_pipe, toList([key]));
+    _block = push_path(_pipe, prepend(key, List$Empty$const));
     let $ = _block;
     let out = $[0];
     let errors1 = $[1];
@@ -1798,7 +1789,7 @@ function intersperse(list3, elem) {
     } else {
       let first$1 = list3.head;
       let rest$1 = $;
-      return intersperse_loop(rest$1, elem, toList([first$1]));
+      return intersperse_loop(rest$1, elem, prepend(first$1, List$Empty$const));
     }
   }
 }
@@ -1932,8 +1923,7 @@ function merge_all(loop$sequences, loop$direction, loop$compare) {
     if (sequences instanceof Empty) {
       return sequences;
     } else if (direction instanceof Ascending) {
-      let $ = sequences.tail;
-      if ($ instanceof Empty) {
+      if (sequences.tail instanceof Empty) {
         let sequence = sequences.head;
         return sequence;
       } else {
@@ -1942,17 +1932,14 @@ function merge_all(loop$sequences, loop$direction, loop$compare) {
         loop$direction = Sorting$Descending$const;
         loop$compare = compare2;
       }
+    } else if (sequences.tail instanceof Empty) {
+      let sequence = sequences.head;
+      return reverse(sequence);
     } else {
-      let $ = sequences.tail;
-      if ($ instanceof Empty) {
-        let sequence = sequences.head;
-        return reverse(sequence);
-      } else {
-        let sequences$1 = merge_descending_pairs(sequences, compare2, List$Empty$const);
-        loop$sequences = sequences$1;
-        loop$direction = Sorting$Ascending$const;
-        loop$compare = compare2;
-      }
+      let sequences$1 = merge_descending_pairs(sequences, compare2, List$Empty$const);
+      loop$sequences = sequences$1;
+      loop$direction = Sorting$Ascending$const;
+      loop$compare = compare2;
     }
   }
 }
@@ -1999,7 +1986,7 @@ function sequences(loop$list, loop$compare, loop$growing, loop$direction, loop$p
           }
           let acc$1 = _block;
           if (rest$1 instanceof Empty) {
-            return prepend(toList([new$1]), acc$1);
+            return prepend(prepend(new$1, List$Empty$const), acc$1);
           } else {
             let next = rest$1.head;
             let rest$2 = rest$1.tail;
@@ -2015,7 +2002,7 @@ function sequences(loop$list, loop$compare, loop$growing, loop$direction, loop$p
             let direction$1 = _block$1;
             loop$list = rest$2;
             loop$compare = compare2;
-            loop$growing = toList([new$1]);
+            loop$growing = prepend(new$1, List$Empty$const);
             loop$direction = direction$1;
             loop$prev = next;
             loop$acc = acc$1;
@@ -2030,7 +2017,7 @@ function sequences(loop$list, loop$compare, loop$growing, loop$direction, loop$p
         }
         let acc$1 = _block;
         if (rest$1 instanceof Empty) {
-          return prepend(toList([new$1]), acc$1);
+          return prepend(prepend(new$1, List$Empty$const), acc$1);
         } else {
           let next = rest$1.head;
           let rest$2 = rest$1.tail;
@@ -2046,7 +2033,7 @@ function sequences(loop$list, loop$compare, loop$growing, loop$direction, loop$p
           let direction$1 = _block$1;
           loop$list = rest$2;
           loop$compare = compare2;
-          loop$growing = toList([new$1]);
+          loop$growing = prepend(new$1, List$Empty$const);
           loop$direction = direction$1;
           loop$prev = next;
           loop$acc = acc$1;
@@ -2060,7 +2047,7 @@ function sequences(loop$list, loop$compare, loop$growing, loop$direction, loop$p
         }
         let acc$1 = _block;
         if (rest$1 instanceof Empty) {
-          return prepend(toList([new$1]), acc$1);
+          return prepend(prepend(new$1, List$Empty$const), acc$1);
         } else {
           let next = rest$1.head;
           let rest$2 = rest$1.tail;
@@ -2076,7 +2063,7 @@ function sequences(loop$list, loop$compare, loop$growing, loop$direction, loop$p
           let direction$1 = _block$1;
           loop$list = rest$2;
           loop$compare = compare2;
-          loop$growing = toList([new$1]);
+          loop$growing = prepend(new$1, List$Empty$const);
           loop$direction = direction$1;
           loop$prev = next;
           loop$acc = acc$1;
@@ -2113,7 +2100,7 @@ function sort(list3, compare2) {
         _block = Sorting$Descending$const;
       }
       let direction = _block;
-      let sequences$1 = sequences(rest$1, compare2, toList([x]), direction, y, List$Empty$const);
+      let sequences$1 = sequences(rest$1, compare2, prepend(x, List$Empty$const), direction, y, List$Empty$const);
       return merge_all(sequences$1, Sorting$Ascending$const, compare2);
     }
   }
@@ -2660,23 +2647,15 @@ function merge(loop$attributes, loop$merged) {
               loop$merged = prepend(attribute$1, merged);
             } else {
               let $4 = $3.head;
-              if ($4 instanceof Attribute) {
-                let $5 = $4.name;
-                if ($5 === "class") {
-                  let kind = $.kind;
-                  let class1 = $2;
-                  let rest = $3.tail;
-                  let class2 = $4.value;
-                  let value = class1 + " " + class2;
-                  let attribute$1 = new Attribute(kind, "class", value);
-                  loop$attributes = prepend(attribute$1, rest);
-                  loop$merged = merged;
-                } else {
-                  let attribute$1 = $;
-                  let rest = $3;
-                  loop$attributes = rest;
-                  loop$merged = prepend(attribute$1, merged);
-                }
+              if ($4 instanceof Attribute && $4.name === "class") {
+                let kind = $.kind;
+                let class1 = $2;
+                let rest = $3.tail;
+                let class2 = $4.value;
+                let value = class1 + " " + class2;
+                let attribute$1 = new Attribute(kind, "class", value);
+                loop$attributes = prepend(attribute$1, rest);
+                loop$merged = merged;
               } else {
                 let attribute$1 = $;
                 let rest = $3;
@@ -2700,23 +2679,15 @@ function merge(loop$attributes, loop$merged) {
               loop$merged = prepend(attribute$1, merged);
             } else {
               let $4 = $3.head;
-              if ($4 instanceof Attribute) {
-                let $5 = $4.name;
-                if ($5 === "style") {
-                  let kind = $.kind;
-                  let style1 = $2;
-                  let rest = $3.tail;
-                  let style2 = $4.value;
-                  let value = style1 + ";" + style2;
-                  let attribute$1 = new Attribute(kind, "style", value);
-                  loop$attributes = prepend(attribute$1, rest);
-                  loop$merged = merged;
-                } else {
-                  let attribute$1 = $;
-                  let rest = $3;
-                  loop$attributes = rest;
-                  loop$merged = prepend(attribute$1, merged);
-                }
+              if ($4 instanceof Attribute && $4.name === "style") {
+                let kind = $.kind;
+                let style1 = $2;
+                let rest = $3.tail;
+                let style2 = $4.value;
+                let value = style1 + ";" + style2;
+                let attribute$1 = new Attribute(kind, "style", value);
+                loop$attributes = prepend(attribute$1, rest);
+                loop$merged = merged;
               } else {
                 let attribute$1 = $;
                 let rest = $3;
@@ -2743,17 +2714,14 @@ function merge(loop$attributes, loop$merged) {
 function prepare(attributes) {
   if (attributes instanceof Empty) {
     return attributes;
+  } else if (attributes.tail instanceof Empty) {
+    return attributes;
   } else {
-    let $ = attributes.tail;
-    if ($ instanceof Empty) {
-      return attributes;
-    } else {
-      let _pipe = attributes;
-      let _pipe$1 = sort(_pipe, (a, b) => {
-        return compare2(b, a);
-      });
-      return merge(_pipe$1, empty_list);
-    }
+    let _pipe = attributes;
+    let _pipe$1 = sort(_pipe, (a, b) => {
+      return compare2(b, a);
+    });
+    return merge(_pipe$1, empty_list);
   }
 }
 
@@ -3213,7 +3181,7 @@ function label(attrs, children) {
   return element2("label", attrs, children);
 }
 function option(attrs, label2) {
-  return element2("option", attrs, toList([text2(label2)]));
+  return element2("option", attrs, prepend(text2(label2), List$Empty$const));
 }
 function output(attrs, children) {
   return element2("output", attrs, children);
@@ -3222,7 +3190,7 @@ function select(attrs, children) {
   return element2("select", attrs, children);
 }
 function textarea(attrs, content) {
-  return element2("textarea", prepend(property2("value", string3(content)), attrs), toList([text2(content)]));
+  return element2("textarea", prepend(property2("value", string3(content)), attrs), prepend(text2(content), List$Empty$const));
 }
 function details(attrs, children) {
   return element2("details", attrs, children);
@@ -4473,14 +4441,9 @@ function do_diff(loop$old, loop$old_keyed, loop$new, loop$new_keyed, loop$moved,
         if (changes instanceof Empty) {
           if (children instanceof Empty) {
             _block = new$3(patch_index, removed, changes, children);
-          } else if (!$) {
-            let $1 = children.tail;
-            if ($1 instanceof Empty && removed === 0) {
-              let child2 = children.head;
-              _block = add_parent(child2, patch_index);
-            } else {
-              _block = new$3(patch_index, removed, changes, children);
-            }
+          } else if (!$ && children.tail instanceof Empty && removed === 0) {
+            let child2 = children.head;
+            _block = add_parent(child2, patch_index);
           } else {
             _block = new$3(patch_index, removed, changes, children);
           }
@@ -4645,28 +4608,17 @@ function do_diff(loop$old, loop$old_keyed, loop$new, loop$new_keyed, loop$moved,
         if ($ instanceof Fragment) {
           let $1 = new$5.head;
           if ($1 instanceof Fragment) {
-            let prev2 = $;
+            let prev$1 = $;
             let old$1 = old.tail;
-            let next2 = $1;
+            let next$1 = $1;
             let new$1 = new$5.tail;
-            let $2 = do_diff(prev2.children, prev2.keyed_children, next2.children, next2.keyed_children, empty2(), 0, 0, 0, node_index, empty_list, empty_list, add2(path, node_index, next2.key), cache, events2);
+            let $2 = do_diff(prev$1.children, prev$1.keyed_children, next$1.children, next$1.keyed_children, empty2(), 0, 0, 0, node_index, empty_list, empty_list, add2(path, node_index, next$1.key), cache, events2);
             let patch = $2.patch;
             let cache$1 = $2.cache;
             let events$1 = $2.events;
             let _block;
-            let $3 = patch.changes;
-            if ($3 instanceof Empty) {
-              let $4 = patch.children;
-              if ($4 instanceof Empty) {
-                let $5 = patch.removed;
-                if ($5 === 0) {
-                  _block = children;
-                } else {
-                  _block = prepend(patch, children);
-                }
-              } else {
-                _block = prepend(patch, children);
-              }
+            if (patch.changes instanceof Empty && patch.children instanceof Empty && patch.removed === 0) {
+              _block = children;
             } else {
               _block = prepend(patch, children);
             }
@@ -4686,17 +4638,17 @@ function do_diff(loop$old, loop$old_keyed, loop$new, loop$new_keyed, loop$moved,
             loop$cache = cache$1;
             loop$events = events$1;
           } else {
-            let prev2 = $;
-            let old_remaining = old.tail;
-            let next2 = $1;
-            let new_remaining = new$5.tail;
-            let change = replace2(node_index - moved_offset, next2);
-            let $2 = replace_child(cache, events2, path, node_index, prev2, next2);
+            let prev$1 = $;
+            let old_remaining$1 = old.tail;
+            let next$1 = $1;
+            let new_remaining$1 = new$5.tail;
+            let change = replace2(node_index - moved_offset, next$1);
+            let $2 = replace_child(cache, events2, path, node_index, prev$1, next$1);
             let cache$1 = $2[0];
             let events$1 = $2[1];
-            loop$old = old_remaining;
+            loop$old = old_remaining$1;
             loop$old_keyed = old_keyed;
-            loop$new = new_remaining;
+            loop$new = new_remaining$1;
             loop$new_keyed = new_keyed;
             loop$moved = moved;
             loop$moved_offset = moved_offset;
@@ -4712,14 +4664,14 @@ function do_diff(loop$old, loop$old_keyed, loop$new, loop$new_keyed, loop$moved,
         } else if ($ instanceof Element) {
           let $1 = new$5.head;
           if ($1 instanceof Element) {
-            let prev2 = $;
-            let next2 = $1;
-            if (prev2.namespace === next2.namespace && prev2.tag === next2.tag) {
+            let prev$1 = $;
+            let next$1 = $1;
+            if (prev$1.namespace === next$1.namespace && prev$1.tag === next$1.tag) {
               let old$1 = old.tail;
               let new$1 = new$5.tail;
-              let child_path = add2(path, node_index, next2.key);
-              let controlled = is_controlled(cache, next2.namespace, next2.tag, child_path);
-              let $2 = diff_attributes(controlled, child_path, events2, prev2.attributes, next2.attributes, empty_list, empty_list);
+              let child_path = add2(path, node_index, next$1.key);
+              let controlled = is_controlled(cache, next$1.namespace, next$1.tag, child_path);
+              let $2 = diff_attributes(controlled, child_path, events2, prev$1.attributes, next$1.attributes, empty_list, empty_list);
               let added_attrs = $2.added;
               let removed_attrs = $2.removed;
               let events$1 = $2.events;
@@ -4730,24 +4682,13 @@ function do_diff(loop$old, loop$old_keyed, loop$new, loop$new_keyed, loop$moved,
                 _block = singleton_list(update(added_attrs, removed_attrs));
               }
               let initial_child_changes = _block;
-              let $3 = do_diff(prev2.children, prev2.keyed_children, next2.children, next2.keyed_children, empty2(), 0, 0, 0, node_index, initial_child_changes, empty_list, child_path, cache, events$1);
+              let $3 = do_diff(prev$1.children, prev$1.keyed_children, next$1.children, next$1.keyed_children, empty2(), 0, 0, 0, node_index, initial_child_changes, empty_list, child_path, cache, events$1);
               let patch = $3.patch;
               let cache$1 = $3.cache;
               let events$2 = $3.events;
               let _block$1;
-              let $4 = patch.changes;
-              if ($4 instanceof Empty) {
-                let $5 = patch.children;
-                if ($5 instanceof Empty) {
-                  let $6 = patch.removed;
-                  if ($6 === 0) {
-                    _block$1 = children;
-                  } else {
-                    _block$1 = prepend(patch, children);
-                  }
-                } else {
-                  _block$1 = prepend(patch, children);
-                }
+              if (patch.changes instanceof Empty && patch.children instanceof Empty && patch.removed === 0) {
+                _block$1 = children;
               } else {
                 _block$1 = prepend(patch, children);
               }
@@ -4767,17 +4708,17 @@ function do_diff(loop$old, loop$old_keyed, loop$new, loop$new_keyed, loop$moved,
               loop$cache = cache$1;
               loop$events = events$2;
             } else {
-              let prev3 = $;
-              let old_remaining = old.tail;
-              let next3 = $1;
-              let new_remaining = new$5.tail;
-              let change = replace2(node_index - moved_offset, next3);
-              let $2 = replace_child(cache, events2, path, node_index, prev3, next3);
-              let cache$1 = $2[0];
-              let events$1 = $2[1];
-              loop$old = old_remaining;
+              let prev$2 = $;
+              let old_remaining$1 = old.tail;
+              let next$2 = $1;
+              let new_remaining$1 = new$5.tail;
+              let change = replace2(node_index - moved_offset, next$2);
+              let $4 = replace_child(cache, events2, path, node_index, prev$2, next$2);
+              let cache$2 = $4[0];
+              let events$3 = $4[1];
+              loop$old = old_remaining$1;
               loop$old_keyed = old_keyed;
-              loop$new = new_remaining;
+              loop$new = new_remaining$1;
               loop$new_keyed = new_keyed;
               loop$moved = moved;
               loop$moved_offset = moved_offset;
@@ -4787,21 +4728,21 @@ function do_diff(loop$old, loop$old_keyed, loop$new, loop$new_keyed, loop$moved,
               loop$changes = prepend(change, changes);
               loop$children = children;
               loop$path = path;
-              loop$cache = cache$1;
-              loop$events = events$1;
+              loop$cache = cache$2;
+              loop$events = events$3;
             }
           } else {
-            let prev2 = $;
-            let old_remaining = old.tail;
-            let next2 = $1;
-            let new_remaining = new$5.tail;
-            let change = replace2(node_index - moved_offset, next2);
-            let $2 = replace_child(cache, events2, path, node_index, prev2, next2);
+            let prev$1 = $;
+            let old_remaining$1 = old.tail;
+            let next$1 = $1;
+            let new_remaining$1 = new$5.tail;
+            let change = replace2(node_index - moved_offset, next$1);
+            let $2 = replace_child(cache, events2, path, node_index, prev$1, next$1);
             let cache$1 = $2[0];
             let events$1 = $2[1];
-            loop$old = old_remaining;
+            loop$old = old_remaining$1;
             loop$old_keyed = old_keyed;
-            loop$new = new_remaining;
+            loop$new = new_remaining$1;
             loop$new_keyed = new_keyed;
             loop$moved = moved;
             loop$moved_offset = moved_offset;
@@ -4817,9 +4758,9 @@ function do_diff(loop$old, loop$old_keyed, loop$new, loop$new_keyed, loop$moved,
         } else if ($ instanceof Text) {
           let $1 = new$5.head;
           if ($1 instanceof Text) {
-            let prev2 = $;
-            let next2 = $1;
-            if (prev2.content === next2.content) {
+            let prev$1 = $;
+            let next$1 = $1;
+            if (prev$1.content === next$1.content) {
               let old$1 = old.tail;
               let new$1 = new$5.tail;
               loop$old = old$1;
@@ -4837,13 +4778,13 @@ function do_diff(loop$old, loop$old_keyed, loop$new, loop$new_keyed, loop$moved,
               loop$cache = cache;
               loop$events = events2;
             } else {
-              let old$1 = old.tail;
-              let next3 = $1;
-              let new$1 = new$5.tail;
-              let child2 = new$3(node_index, 0, singleton_list(replace_text(next3.content)), empty_list);
-              loop$old = old$1;
+              let old$2 = old.tail;
+              let next$2 = $1;
+              let new$22 = new$5.tail;
+              let child2 = new$3(node_index, 0, singleton_list(replace_text(next$2.content)), empty_list);
+              loop$old = old$2;
               loop$old_keyed = old_keyed;
-              loop$new = new$1;
+              loop$new = new$22;
               loop$new_keyed = new_keyed;
               loop$moved = moved;
               loop$moved_offset = moved_offset;
@@ -4857,17 +4798,17 @@ function do_diff(loop$old, loop$old_keyed, loop$new, loop$new_keyed, loop$moved,
               loop$events = events2;
             }
           } else {
-            let prev2 = $;
-            let old_remaining = old.tail;
-            let next2 = $1;
-            let new_remaining = new$5.tail;
-            let change = replace2(node_index - moved_offset, next2);
-            let $2 = replace_child(cache, events2, path, node_index, prev2, next2);
+            let prev$1 = $;
+            let old_remaining$1 = old.tail;
+            let next$1 = $1;
+            let new_remaining$1 = new$5.tail;
+            let change = replace2(node_index - moved_offset, next$1);
+            let $2 = replace_child(cache, events2, path, node_index, prev$1, next$1);
             let cache$1 = $2[0];
             let events$1 = $2[1];
-            loop$old = old_remaining;
+            loop$old = old_remaining$1;
             loop$old_keyed = old_keyed;
-            loop$new = new_remaining;
+            loop$new = new_remaining$1;
             loop$new_keyed = new_keyed;
             loop$moved = moved;
             loop$moved_offset = moved_offset;
@@ -4883,12 +4824,12 @@ function do_diff(loop$old, loop$old_keyed, loop$new, loop$new_keyed, loop$moved,
         } else if ($ instanceof UnsafeInnerHtml) {
           let $1 = new$5.head;
           if ($1 instanceof UnsafeInnerHtml) {
-            let prev2 = $;
+            let prev$1 = $;
             let old$1 = old.tail;
-            let next2 = $1;
+            let next$1 = $1;
             let new$1 = new$5.tail;
-            let child_path = add2(path, node_index, next2.key);
-            let $2 = diff_attributes(false, child_path, events2, prev2.attributes, next2.attributes, empty_list, empty_list);
+            let child_path = add2(path, node_index, next$1.key);
+            let $2 = diff_attributes(false, child_path, events2, prev$1.attributes, next$1.attributes, empty_list, empty_list);
             let added_attrs = $2.added;
             let removed_attrs = $2.removed;
             let events$1 = $2.events;
@@ -4900,11 +4841,11 @@ function do_diff(loop$old, loop$old_keyed, loop$new, loop$new_keyed, loop$moved,
             }
             let child_changes = _block;
             let _block$1;
-            let $3 = prev2.inner_html === next2.inner_html;
+            let $3 = prev$1.inner_html === next$1.inner_html;
             if ($3) {
               _block$1 = child_changes;
             } else {
-              _block$1 = prepend(replace_inner_html(next2.inner_html), child_changes);
+              _block$1 = prepend(replace_inner_html(next$1.inner_html), child_changes);
             }
             let child_changes$1 = _block$1;
             let _block$2;
@@ -4929,17 +4870,17 @@ function do_diff(loop$old, loop$old_keyed, loop$new, loop$new_keyed, loop$moved,
             loop$cache = cache;
             loop$events = events$1;
           } else {
-            let prev2 = $;
-            let old_remaining = old.tail;
-            let next2 = $1;
-            let new_remaining = new$5.tail;
-            let change = replace2(node_index - moved_offset, next2);
-            let $2 = replace_child(cache, events2, path, node_index, prev2, next2);
+            let prev$1 = $;
+            let old_remaining$1 = old.tail;
+            let next$1 = $1;
+            let new_remaining$1 = new$5.tail;
+            let change = replace2(node_index - moved_offset, next$1);
+            let $2 = replace_child(cache, events2, path, node_index, prev$1, next$1);
             let cache$1 = $2[0];
             let events$1 = $2[1];
-            loop$old = old_remaining;
+            loop$old = old_remaining$1;
             loop$old_keyed = old_keyed;
-            loop$new = new_remaining;
+            loop$new = new_remaining$1;
             loop$new_keyed = new_keyed;
             loop$moved = moved;
             loop$moved_offset = moved_offset;
@@ -4955,31 +4896,20 @@ function do_diff(loop$old, loop$old_keyed, loop$new, loop$new_keyed, loop$moved,
         } else if ($ instanceof Map2) {
           let $1 = new$5.head;
           if ($1 instanceof Map2) {
-            let prev2 = $;
+            let prev$1 = $;
             let old$1 = old.tail;
-            let next2 = $1;
+            let next$1 = $1;
             let new$1 = new$5.tail;
-            let child_path = add2(path, node_index, next2.key);
+            let child_path = add2(path, node_index, next$1.key);
             let child_key = child(child_path);
-            let $2 = do_diff(singleton_list(prev2.child), empty2(), singleton_list(next2.child), empty2(), empty2(), 0, 0, 0, node_index, empty_list, empty_list, subtree(child_path), cache, get_subtree(events2, child_key, prev2.mapper));
+            let $2 = do_diff(singleton_list(prev$1.child), empty2(), singleton_list(next$1.child), empty2(), empty2(), 0, 0, 0, node_index, empty_list, empty_list, subtree(child_path), cache, get_subtree(events2, child_key, prev$1.mapper));
             let patch = $2.patch;
             let cache$1 = $2.cache;
             let child_events = $2.events;
-            let events$1 = update_subtree(events2, child_key, next2.mapper, child_events);
+            let events$1 = update_subtree(events2, child_key, next$1.mapper, child_events);
             let _block;
-            let $3 = patch.changes;
-            if ($3 instanceof Empty) {
-              let $4 = patch.children;
-              if ($4 instanceof Empty) {
-                let $5 = patch.removed;
-                if ($5 === 0) {
-                  _block = children;
-                } else {
-                  _block = prepend(patch, children);
-                }
-              } else {
-                _block = prepend(patch, children);
-              }
+            if (patch.changes instanceof Empty && patch.children instanceof Empty && patch.removed === 0) {
+              _block = children;
             } else {
               _block = prepend(patch, children);
             }
@@ -4999,17 +4929,17 @@ function do_diff(loop$old, loop$old_keyed, loop$new, loop$new_keyed, loop$moved,
             loop$cache = cache$1;
             loop$events = events$1;
           } else {
-            let prev2 = $;
-            let old_remaining = old.tail;
-            let next2 = $1;
-            let new_remaining = new$5.tail;
-            let change = replace2(node_index - moved_offset, next2);
-            let $2 = replace_child(cache, events2, path, node_index, prev2, next2);
+            let prev$1 = $;
+            let old_remaining$1 = old.tail;
+            let next$1 = $1;
+            let new_remaining$1 = new$5.tail;
+            let change = replace2(node_index - moved_offset, next$1);
+            let $2 = replace_child(cache, events2, path, node_index, prev$1, next$1);
             let cache$1 = $2[0];
             let events$1 = $2[1];
-            loop$old = old_remaining;
+            loop$old = old_remaining$1;
             loop$old_keyed = old_keyed;
-            loop$new = new_remaining;
+            loop$new = new_remaining$1;
             loop$new_keyed = new_keyed;
             loop$moved = moved;
             loop$moved_offset = moved_offset;
@@ -5025,13 +4955,13 @@ function do_diff(loop$old, loop$old_keyed, loop$new, loop$new_keyed, loop$moved,
         } else {
           let $1 = new$5.head;
           if ($1 instanceof Memo) {
-            let prev2 = $;
+            let prev$1 = $;
             let old$1 = old.tail;
-            let next2 = $1;
+            let next$1 = $1;
             let new$1 = new$5.tail;
-            let $2 = equal_lists(prev2.dependencies, next2.dependencies);
+            let $2 = equal_lists(prev$1.dependencies, next$1.dependencies);
             if ($2) {
-              let cache$1 = keep_memo(cache, prev2.view, next2.view);
+              let cache$1 = keep_memo(cache, prev$1.view, next$1.view);
               loop$old = old$1;
               loop$old_keyed = old_keyed;
               loop$new = new$1;
@@ -5047,9 +4977,9 @@ function do_diff(loop$old, loop$old_keyed, loop$new, loop$new_keyed, loop$moved,
               loop$cache = cache$1;
               loop$events = events2;
             } else {
-              let prev_node = get_old_memo(cache, prev2.view, prev2.view);
-              let next_node = next2.view();
-              let cache$1 = add_memo(cache, next2.view, next_node);
+              let prev_node = get_old_memo(cache, prev$1.view, prev$1.view);
+              let next_node = next$1.view();
+              let cache$1 = add_memo(cache, next$1.view, next_node);
               loop$old = prepend(prev_node, old$1);
               loop$old_keyed = old_keyed;
               loop$new = prepend(next_node, new$1);
@@ -5066,17 +4996,17 @@ function do_diff(loop$old, loop$old_keyed, loop$new, loop$new_keyed, loop$moved,
               loop$events = events2;
             }
           } else {
-            let prev2 = $;
-            let old_remaining = old.tail;
-            let next2 = $1;
-            let new_remaining = new$5.tail;
-            let change = replace2(node_index - moved_offset, next2);
-            let $2 = replace_child(cache, events2, path, node_index, prev2, next2);
+            let prev$1 = $;
+            let old_remaining$1 = old.tail;
+            let next$1 = $1;
+            let new_remaining$1 = new$5.tail;
+            let change = replace2(node_index - moved_offset, next$1);
+            let $2 = replace_child(cache, events2, path, node_index, prev$1, next$1);
             let cache$1 = $2[0];
             let events$1 = $2[1];
-            loop$old = old_remaining;
+            loop$old = old_remaining$1;
             loop$old_keyed = old_keyed;
-            loop$new = new_remaining;
+            loop$new = new_remaining$1;
             loop$new_keyed = new_keyed;
             loop$moved = moved;
             loop$moved_offset = moved_offset;
@@ -6853,7 +6783,7 @@ function merge_team_traces(existing, incoming) {
     if ($) {
       return traces;
     } else {
-      return append2(traces, toList([incoming_trace]));
+      return append2(traces, prepend(incoming_trace, List$Empty$const));
     }
   });
   return take(_pipe, 100);
@@ -7097,13 +7027,8 @@ function update2(loop$model, loop$message) {
             return model.capture_form_open;
           }
         })(), model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, phase, "", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.selected_team_trace_ids, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
-      } else if (phase instanceof Failed) {
-        let $ = phase.reason;
-        if ($ === "system_tracer_occupied") {
-          return new Model(model.remote, model.mode, model.theme, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.capture_form_open, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, phase, "Exact capture was refused; another tracer owns the node. Use Live for bounded inferred sampling.", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.selected_team_trace_ids, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
-        } else {
-          return new Model(model.remote, model.mode, model.theme, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.capture_form_open, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.selected_team_trace_ids, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
-        }
+      } else if (phase instanceof Failed && phase.reason === "system_tracer_occupied") {
+        return new Model(model.remote, model.mode, model.theme, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.capture_form_open, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, phase, "Exact capture was refused; another tracer owns the node. Use Live for bounded inferred sampling.", model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.selected_team_trace_ids, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
       } else {
         return new Model(model.remote, model.mode, model.theme, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.capture_form_open, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, model.selected_team_trace_ids, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
       }
@@ -7199,7 +7124,7 @@ function update2(loop$model, loop$message) {
       } else {
         let $1 = length(model.selected_team_trace_ids) < 20;
         if ($1) {
-          return new Model(model.remote, model.mode, model.theme, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.capture_form_open, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, append2(model.selected_team_trace_ids, toList([id2])), model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
+          return new Model(model.remote, model.mode, model.theme, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.capture_form_open, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, model.team_error, model.selected_trace_id, append2(model.selected_team_trace_ids, prepend(id2, List$Empty$const)), model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
         } else {
           return new Model(model.remote, model.mode, model.theme, model.events, model.graph_edges, model.graph_boundaries, model.graph_loading, model.graph_error, model.total_events, model.loaded_start, model.loaded_limit, model.loaded_query, model.loading, model.load_error, model.selected_event_id, model.query, model.show_internal, model.viewport_start, model.viewport_size, model.zoom, model.palette_open, model.capture_form_open, model.bookmarks, model.annotation, model.trigger_input, model.mfa_suggestions, model.capture_where, model.capture_preset, model.capture_max_roots, model.save_path, model.capture_phase, model.capture_notice, model.live_rows, model.live_findings, model.live_supervision, model.live_spawn, model.live_links, model.live_generation, model.live_sampled_at_ms, model.live_loading, model.live_error, model.selected_live_pid, model.compare_paths_input, model.compare_loading, model.compare_error, model.compare_report, model.team_traces, model.team_next_cursor, model.team_loading, new Some("Select at most 20 traces for comparison"), model.selected_trace_id, model.selected_team_trace_ids, model.team_events, model.team_events_next_cursor, model.team_events_loading, model.team_events_error);
         }
@@ -7655,11 +7580,7 @@ function divergence_path(model) {
   }
 }
 function boundary_json(boundary) {
-  return object2(toList([
-    ["event_id", string3(boundary.event_id)],
-    ["kind", string3(boundary.kind)],
-    ["reason", string3(boundary.reason)]
-  ]));
+  return object2(prepend(["event_id", string3(boundary.event_id)], prepend(["kind", string3(boundary.kind)], prepend(["reason", string3(boundary.reason)], List$Empty$const))));
 }
 function evidence_kind(evidence) {
   if (evidence instanceof Exact) {
@@ -7669,79 +7590,49 @@ function evidence_kind(evidence) {
   }
 }
 function edge_json(edge) {
-  return object2(toList([
-    ["from", string3(edge.from)],
-    ["to", string3(edge.to)],
-    ["kind", string3(edge.kind)],
-    ["evidence", string3(evidence_kind(edge.evidence))]
-  ]));
+  return object2(prepend(["from", string3(edge.from)], prepend(["to", string3(edge.to)], prepend(["kind", string3(edge.kind)], prepend(["evidence", string3(evidence_kind(edge.evidence))], List$Empty$const)))));
 }
 function time_json(time) {
   if (time instanceof ExactTime) {
     let value2 = time.value_ns;
-    return object2(toList([
-      ["kind", string3("exact")],
-      ["value_ns", string3(value2)]
-    ]));
+    return object2(prepend(["kind", string3("exact")], prepend(["value_ns", string3(value2)], List$Empty$const)));
   } else if (time instanceof EstimatedTime) {
     let value2 = time.value_ns;
     let lower = time.lower_ns;
     let upper = time.upper_ns;
-    return object2(toList([
-      ["kind", string3("estimated")],
-      ["value_ns", string3(value2)],
-      ["lower_ns", string3(lower)],
-      ["upper_ns", string3(upper)]
-    ]));
+    return object2(prepend(["kind", string3("estimated")], prepend(["value_ns", string3(value2)], prepend(["lower_ns", string3(lower)], prepend(["upper_ns", string3(upper)], List$Empty$const)))));
   } else {
     let reason = time.reason;
-    return object2(toList([
-      ["kind", string3("unavailable")],
-      ["reason", string3(reason)]
-    ]));
+    return object2(prepend(["kind", string3("unavailable")], prepend(["reason", string3(reason)], List$Empty$const)));
   }
 }
 function row_json(row) {
-  return object2(toList([
-    ["id", string3(row.id)],
-    ["actor", string3(row.actor)],
-    ["kind", string3(row.kind)],
-    ["local_offset_ns", int3(row.timestamp_ns)],
-    ["duration_ns", int3(row.duration_ns)],
-    ["time", time_json(row.time)],
-    ["anomalous", bool2(row.anomalous)],
-    ["evidence", string3(evidence_kind(row.evidence))]
-  ]));
+  return object2(prepend(["id", string3(row.id)], prepend(["actor", string3(row.actor)], prepend(["kind", string3(row.kind)], prepend(["local_offset_ns", int3(row.timestamp_ns)], prepend(["duration_ns", int3(row.duration_ns)], prepend(["time", time_json(row.time)], prepend(["anomalous", bool2(row.anomalous)], prepend(["evidence", string3(evidence_kind(row.evidence))], List$Empty$const)))))))));
 }
 function rows_payload(rows, edges, boundaries, divergence) {
   let rows$1 = take(rows, 1000);
   let ids = map2(rows$1, (row) => {
     return row.id;
   });
-  let _pipe = object2(toList([
-    ["rows", array2(rows$1, row_json)],
-    [
-      "edges",
-      (() => {
-        let _pipe2 = edges;
-        let _pipe$1 = filter(_pipe2, (edge) => {
-          return contains(ids, edge.from) || contains(ids, edge.to);
-        });
-        return array2(_pipe$1, edge_json);
-      })()
-    ],
-    [
-      "boundaries",
-      (() => {
-        let _pipe2 = boundaries;
-        let _pipe$1 = filter(_pipe2, (boundary) => {
-          return contains(ids, boundary.event_id);
-        });
-        return array2(_pipe$1, boundary_json);
-      })()
-    ],
-    ["divergence_path", array2(divergence, string3)]
-  ]));
+  let _pipe = object2(prepend(["rows", array2(rows$1, row_json)], prepend([
+    "edges",
+    (() => {
+      let _pipe2 = edges;
+      let _pipe$1 = filter(_pipe2, (edge) => {
+        return contains(ids, edge.from) || contains(ids, edge.to);
+      });
+      return array2(_pipe$1, edge_json);
+    })()
+  ], prepend([
+    "boundaries",
+    (() => {
+      let _pipe2 = boundaries;
+      let _pipe$1 = filter(_pipe2, (boundary) => {
+        return contains(ids, boundary.event_id);
+      });
+      return array2(_pipe$1, boundary_json);
+    })()
+  ], prepend(["divergence_path", array2(divergence, string3)], List$Empty$const)))));
   return to_string2(_pipe);
 }
 function live_payload(model) {
@@ -8363,7 +8254,7 @@ function v2_page_event_decoder() {
   });
 }
 function event_decoder() {
-  return one_of(v2_page_event_decoder(), toList([flat_v2_event_decoder(), flat_v1_event_decoder()]));
+  return one_of(v2_page_event_decoder(), prepend(flat_v2_event_decoder(), prepend(flat_v1_event_decoder(), List$Empty$const)));
 }
 function page_decoder() {
   return field("start", int2, (start5) => {
@@ -8589,7 +8480,7 @@ function decode_report(source) {
 function run2(paths) {
   return from2((dispatch2) => {
     return requestCompare((() => {
-      let _pipe = object2(toList([["paths", array2(paths, string3)]]));
+      let _pipe = object2(prepend(["paths", array2(paths, string3)], List$Empty$const));
       return to_string2(_pipe);
     })(), (body) => {
       let $ = decode_report(body);
@@ -9078,7 +8969,7 @@ function on_click(message) {
   return on("click", success(message));
 }
 function on_input(message) {
-  return on("input", subfield(toList(["target", "value"]), string2, (value2) => {
+  return on("input", subfield(prepend("target", prepend("value", List$Empty$const)), string2, (value2) => {
     return success(message(value2));
   }));
 }
@@ -9349,16 +9240,10 @@ function compare_summary(model) {
   }
 }
 function definition(label2, value2) {
-  return div(toList([class$("definition")]), toList([
-    span(List$Empty$const, toList([text3(label2)])),
-    strong(List$Empty$const, toList([text3(value2)]))
-  ]));
+  return div(prepend(class$("definition"), List$Empty$const), prepend(span(List$Empty$const, prepend(text3(label2), List$Empty$const)), prepend(strong(List$Empty$const, prepend(text3(value2), List$Empty$const)), List$Empty$const)));
 }
 function panel_heading(title2, index4) {
-  return div(toList([class$("panel-heading")]), toList([
-    span(List$Empty$const, toList([text3(index4)])),
-    strong(List$Empty$const, toList([text3(title2)]))
-  ]));
+  return div(prepend(class$("panel-heading"), List$Empty$const), prepend(span(List$Empty$const, prepend(text3(index4), List$Empty$const)), prepend(strong(List$Empty$const, prepend(text3(title2), List$Empty$const)), List$Empty$const)));
 }
 function event_boundary_label(model, event_id) {
   let _block;
@@ -9386,32 +9271,15 @@ function evidence_label(evidence) {
   }
 }
 function compare_inspector(model) {
-  return aside(toList([
-    class$("inspector panel"),
-    aria_label("Compare inspector"),
-    attribute2("tabindex", "0")
-  ]), toList([
-    panel_heading("Compare inspector", "03"),
-    (() => {
-      let $ = model.compare_report;
-      if ($ instanceof Some) {
-        let report = $[0];
-        return div(toList([class$("inspector-content")]), toList([
-          definition("Baseline", report.baseline),
-          definition("Runs", to_string(report.run_count)),
-          definition("Aligned candidates", to_string(length(report.reports))),
-          definition("Branch signatures", to_string(length(report.statistics))),
-          definition("Normalization", "logical actor · term shape · root-relative time")
-        ]));
-      } else {
-        return div(toList([class$("empty-state")]), toList([
-          p(List$Empty$const, toList([
-            text3("Run a comparison to inspect branch statistics.")
-          ]))
-        ]));
-      }
-    })()
-  ]));
+  return aside(prepend(class$("inspector panel"), prepend(aria_label("Compare inspector"), prepend(attribute2("tabindex", "0"), List$Empty$const))), prepend(panel_heading("Compare inspector", "03"), prepend((() => {
+    let $ = model.compare_report;
+    if ($ instanceof Some) {
+      let report = $[0];
+      return div(prepend(class$("inspector-content"), List$Empty$const), prepend(definition("Baseline", report.baseline), prepend(definition("Runs", to_string(report.run_count)), prepend(definition("Aligned candidates", to_string(length(report.reports))), prepend(definition("Branch signatures", to_string(length(report.statistics))), prepend(definition("Normalization", "logical actor · term shape · root-relative time"), List$Empty$const))))));
+    } else {
+      return div(prepend(class$("empty-state"), List$Empty$const), prepend(p(List$Empty$const, prepend(text3("Run a comparison to inspect branch statistics."), List$Empty$const)), List$Empty$const));
+    }
+  })(), List$Empty$const)));
 }
 function list_text(items) {
   if (items instanceof Empty) {
@@ -9441,46 +9309,22 @@ function capture_phase_label(phase) {
   }
 }
 function capture_navigator(model) {
-  return nav(toList([
-    class$("navigator panel"),
-    aria_label("Session navigator"),
-    attribute2("tabindex", "0")
-  ]), toList([
-    panel_heading("Nodes & sessions", "01"),
-    section(List$Empty$const, toList([
-      h2(List$Empty$const, toList([text3("Current target")])),
-      div(toList([class$("node-card selected")]), toList([
-        span(toList([class$("status-dot healthy")]), List$Empty$const),
-        span(List$Empty$const, toList([
-          strong(List$Empty$const, toList([text3("Attached BEAM session")])),
-          span(List$Empty$const, toList([
-            text3(capture_phase_label(model.capture_phase))
-          ]))
-        ]))
-      ]))
-    ])),
-    section(List$Empty$const, toList([
-      h2(List$Empty$const, toList([text3("Capture session")])),
-      p(List$Empty$const, toList([
-        text3((() => {
-          let $ = model.capture_phase;
-          let $1 = trim(model.trigger_input);
-          if ($ instanceof Ready) {
-            if ($1 === "") {
-              let count = $.event_count;
-              return "Sealed archive · " + to_string(count) + " events";
-            } else {
-              return $1;
-            }
-          } else if ($1 === "") {
-            return "No trigger armed";
-          } else {
-            return $1;
-          }
-        })())
-      ]))
-    ]))
-  ]));
+  return nav(prepend(class$("navigator panel"), prepend(aria_label("Session navigator"), prepend(attribute2("tabindex", "0"), List$Empty$const))), prepend(panel_heading("Nodes & sessions", "01"), prepend(section(List$Empty$const, prepend(h2(List$Empty$const, prepend(text3("Current target"), List$Empty$const)), prepend(div(prepend(class$("node-card selected"), List$Empty$const), prepend(span(prepend(class$("status-dot healthy"), List$Empty$const), List$Empty$const), prepend(span(List$Empty$const, prepend(strong(List$Empty$const, prepend(text3("Attached BEAM session"), List$Empty$const)), prepend(span(List$Empty$const, prepend(text3(capture_phase_label(model.capture_phase)), List$Empty$const)), List$Empty$const))), List$Empty$const))), List$Empty$const))), prepend(section(List$Empty$const, prepend(h2(List$Empty$const, prepend(text3("Capture session"), List$Empty$const)), prepend(p(List$Empty$const, prepend(text3((() => {
+    let $ = model.capture_phase;
+    let $1 = trim(model.trigger_input);
+    if ($ instanceof Ready) {
+      if ($1 === "") {
+        let count = $.event_count;
+        return "Sealed archive · " + to_string(count) + " events";
+      } else {
+        return $1;
+      }
+    } else if ($1 === "") {
+      return "No trigger armed";
+    } else {
+      return $1;
+    }
+  })()), List$Empty$const)), List$Empty$const))), List$Empty$const))));
 }
 function mode_title(mode) {
   if (mode instanceof Capture) {
@@ -9511,28 +9355,9 @@ function time_summary_label(summary2) {
   return time_estimate_label(summary2.estimate) + " · " + to_string(summary2.valid_samples) + " valid / " + to_string(summary2.missing_samples) + " missing";
 }
 function statistics_table(rows) {
-  return div(toList([class$("event-table-wrap compare-statistics")]), toList([
-    table(toList([aria_label("Multi-run branch statistics")]), toList([
-      thead(List$Empty$const, toList([
-        tr(List$Empty$const, toList([
-          th(List$Empty$const, toList([text3("Logical branch signature")])),
-          th(List$Empty$const, toList([text3("Latency")])),
-          th(List$Empty$const, toList([text3("Occurrence")]))
-        ]))
-      ])),
-      tbody(List$Empty$const, map2(rows, (row) => {
-        return tr(List$Empty$const, toList([
-          td(List$Empty$const, toList([text3(row.signature)])),
-          td(List$Empty$const, toList([
-            text3("p50 " + time_summary_label(row.p50) + " · p95 " + time_summary_label(row.p95))
-          ])),
-          td(List$Empty$const, toList([
-            text3(to_string(row.occurrences) + "/" + to_string(row.total_runs) + " runs")
-          ]))
-        ]));
-      }))
-    ]))
-  ]));
+  return div(prepend(class$("event-table-wrap compare-statistics"), List$Empty$const), prepend(table(prepend(aria_label("Multi-run branch statistics"), List$Empty$const), prepend(thead(List$Empty$const, prepend(tr(List$Empty$const, prepend(th(List$Empty$const, prepend(text3("Logical branch signature"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Latency"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Occurrence"), List$Empty$const)), List$Empty$const)))), List$Empty$const)), prepend(tbody(List$Empty$const, map2(rows, (row) => {
+    return tr(List$Empty$const, prepend(td(List$Empty$const, prepend(text3(row.signature), List$Empty$const)), prepend(td(List$Empty$const, prepend(text3("p50 " + time_summary_label(row.p50) + " · p95 " + time_summary_label(row.p95)), List$Empty$const)), prepend(td(List$Empty$const, prepend(text3(to_string(row.occurrences) + "/" + to_string(row.total_runs) + " runs"), List$Empty$const)), List$Empty$const))));
+  })), List$Empty$const))), List$Empty$const));
 }
 function or_dash(value2) {
   if (value2 === "") {
@@ -9561,33 +9386,10 @@ function compare_status_class(status2) {
   }
 }
 function alignment_row(row) {
-  return tr(toList([class$(compare_status_class(row.item.status))]), toList([
-    td(List$Empty$const, toList([text3(row.path)])),
-    td(List$Empty$const, toList([
-      span(toList([class$("kind-pill")]), toList([text3(row.item.status)]))
-    ])),
-    td(List$Empty$const, toList([text3(or_dash(row.item.left_id))])),
-    td(List$Empty$const, toList([text3(or_dash(row.item.right_id))])),
-    td(List$Empty$const, toList([text3(latency_delta(row.item))])),
-    td(List$Empty$const, toList([text3(or_dash(row.item.reason))]))
-  ]));
+  return tr(prepend(class$(compare_status_class(row.item.status)), List$Empty$const), prepend(td(List$Empty$const, prepend(text3(row.path), List$Empty$const)), prepend(td(List$Empty$const, prepend(span(prepend(class$("kind-pill"), List$Empty$const), prepend(text3(row.item.status), List$Empty$const)), List$Empty$const)), prepend(td(List$Empty$const, prepend(text3(or_dash(row.item.left_id)), List$Empty$const)), prepend(td(List$Empty$const, prepend(text3(or_dash(row.item.right_id)), List$Empty$const)), prepend(td(List$Empty$const, prepend(text3(latency_delta(row.item)), List$Empty$const)), prepend(td(List$Empty$const, prepend(text3(or_dash(row.item.reason)), List$Empty$const)), List$Empty$const)))))));
 }
 function alignment_table(rows) {
-  return div(toList([class$("event-table-wrap compare-alignment")]), toList([
-    table(toList([aria_label("Accessible trace alignment table")]), toList([
-      thead(List$Empty$const, toList([
-        tr(List$Empty$const, toList([
-          th(List$Empty$const, toList([text3("Candidate")])),
-          th(List$Empty$const, toList([text3("Status")])),
-          th(List$Empty$const, toList([text3("Baseline event")])),
-          th(List$Empty$const, toList([text3("Candidate event")])),
-          th(List$Empty$const, toList([text3("Latency Δ")])),
-          th(List$Empty$const, toList([text3("Reason")]))
-        ]))
-      ])),
-      tbody(List$Empty$const, map2(rows, alignment_row))
-    ]))
-  ]));
+  return div(prepend(class$("event-table-wrap compare-alignment"), List$Empty$const), prepend(table(prepend(aria_label("Accessible trace alignment table"), List$Empty$const), prepend(thead(List$Empty$const, prepend(tr(List$Empty$const, prepend(th(List$Empty$const, prepend(text3("Candidate"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Status"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Baseline event"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Candidate event"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Latency Δ"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Reason"), List$Empty$const)), List$Empty$const))))))), List$Empty$const)), prepend(tbody(List$Empty$const, map2(rows, alignment_row)), List$Empty$const))), List$Empty$const));
 }
 function first_divergence_path(loop$reports) {
   while (true) {
@@ -9608,21 +9410,13 @@ function first_divergence_path(loop$reports) {
 }
 function divergence_summary(reports) {
   let path = first_divergence_path(reports);
-  return div(toList([
-    class$("divergence-summary"),
-    aria_label("First divergence causal path")
-  ]), toList([
-    strong(List$Empty$const, toList([text3("First divergence")])),
-    span(List$Empty$const, toList([
-      text3((() => {
-        if (path instanceof Empty) {
-          return " · none established";
-        } else {
-          return " · " + join(path, " → ");
-        }
-      })())
-    ]))
-  ]));
+  return div(prepend(class$("divergence-summary"), prepend(aria_label("First divergence causal path"), List$Empty$const)), prepend(strong(List$Empty$const, prepend(text3("First divergence"), List$Empty$const)), prepend(span(List$Empty$const, prepend(text3((() => {
+    if (path instanceof Empty) {
+      return " · none established";
+    } else {
+      return " · " + join(path, " → ");
+    }
+  })()), List$Empty$const)), List$Empty$const)));
 }
 function live_evidence_label(findings) {
   if (findings instanceof Empty) {
@@ -9690,7 +9484,7 @@ function capture_ready(phase) {
   }
 }
 function preset_option(value2, label2) {
-  return option(toList([value(value2)]), label2);
+  return option(prepend(value(value2), List$Empty$const), label2);
 }
 function capture_busy(phase) {
   if (phase instanceof Arming) {
@@ -9722,30 +9516,7 @@ function theme_label(theme) {
 function palette2(model) {
   let $ = model.palette_open;
   if ($) {
-    return dialog(toList([
-      class$("command-palette"),
-      attribute2("open", ""),
-      aria_modal(true),
-      aria_label("Command palette")
-    ]), toList([
-      div(toList([class$("palette-heading")]), toList([
-        strong(List$Empty$const, toList([text3("Command palette")])),
-        button(toList([on_click(Msg$UserClosedPalette$const)]), toList([text3("Close")]))
-      ])),
-      button(toList([
-        autofocus(true),
-        on_click(Msg$UserChoseCaptureAction$const)
-      ]), toList([text3("Arm capture trigger")])),
-      button(toList([
-        on_click(new UserSelectedMode(Mode$Live$const))
-      ]), toList([text3("Open live anomalies")])),
-      button(toList([
-        on_click(new UserSelectedMode(Mode$Compare$const))
-      ]), toList([text3("Compare saved traces")])),
-      button(toList([
-        on_click(new UserSelectedMode(Mode$Team$const))
-      ]), toList([text3("Open Team trace library")]))
-    ]));
+    return dialog(prepend(class$("command-palette"), prepend(attribute2("open", ""), prepend(aria_modal(true), prepend(aria_label("Command palette"), List$Empty$const)))), prepend(div(prepend(class$("palette-heading"), List$Empty$const), prepend(strong(List$Empty$const, prepend(text3("Command palette"), List$Empty$const)), prepend(button(prepend(on_click(Msg$UserClosedPalette$const), List$Empty$const), prepend(text3("Close"), List$Empty$const)), List$Empty$const))), prepend(button(prepend(autofocus(true), prepend(on_click(Msg$UserChoseCaptureAction$const), List$Empty$const)), prepend(text3("Arm capture trigger"), List$Empty$const)), prepend(button(prepend(on_click(new UserSelectedMode(Mode$Live$const)), List$Empty$const), prepend(text3("Open live anomalies"), List$Empty$const)), prepend(button(prepend(on_click(new UserSelectedMode(Mode$Compare$const)), List$Empty$const), prepend(text3("Compare saved traces"), List$Empty$const)), prepend(button(prepend(on_click(new UserSelectedMode(Mode$Team$const)), List$Empty$const), prepend(text3("Open Team trace library"), List$Empty$const)), List$Empty$const))))));
   } else {
     return div(List$Empty$const, List$Empty$const);
   }
@@ -9755,242 +9526,103 @@ function event_minimap(model) {
   let last_start = max(model.total_events - model.viewport_size, 0);
   let next = min(model.viewport_start + model.viewport_size, last_start);
   let shown_end = min(model.viewport_start + model.viewport_size, model.total_events);
-  return footer(toList([class$("minimap"), aria_label("Time minimap")]), toList([
-    button(toList([
-      class$("quiet-button"),
-      disabled(model.viewport_start === 0 || model.loading),
-      on_click(new ViewportChanged(previous, model.viewport_size))
-    ]), toList([text3("Previous")])),
-    div(toList([class$("minimap-track")]), toList([
-      div(toList([
-        class$("minimap-window"),
-        attribute2("data-start", to_string(model.viewport_start))
-      ]), List$Empty$const)
-    ])),
-    span(List$Empty$const, toList([
-      text3(to_string(model.viewport_start + 1) + "–" + to_string(shown_end) + " / " + to_string(model.total_events))
-    ])),
-    button(toList([
-      class$("quiet-button"),
-      disabled(shown_end >= model.total_events || model.loading),
-      on_click(new ViewportChanged(next, model.viewport_size))
-    ]), toList([text3("Next")])),
-    span(toList([class$("zoom-label")]), toList([text3("Zoom " + zoom_label(model.zoom))]))
-  ]));
+  return footer(prepend(class$("minimap"), prepend(aria_label("Time minimap"), List$Empty$const)), prepend(button(prepend(class$("quiet-button"), prepend(disabled(model.viewport_start === 0 || model.loading), prepend(on_click(new ViewportChanged(previous, model.viewport_size)), List$Empty$const))), prepend(text3("Previous"), List$Empty$const)), prepend(div(prepend(class$("minimap-track"), List$Empty$const), prepend(div(prepend(class$("minimap-window"), prepend(attribute2("data-start", to_string(model.viewport_start)), List$Empty$const)), List$Empty$const), List$Empty$const)), prepend(span(List$Empty$const, prepend(text3(to_string(model.viewport_start + 1) + "–" + to_string(shown_end) + " / " + to_string(model.total_events)), List$Empty$const)), prepend(button(prepend(class$("quiet-button"), prepend(disabled(shown_end >= model.total_events || model.loading), prepend(on_click(new ViewportChanged(next, model.viewport_size)), List$Empty$const))), prepend(text3("Next"), List$Empty$const)), prepend(span(prepend(class$("zoom-label"), List$Empty$const), prepend(text3("Zoom " + zoom_label(model.zoom)), List$Empty$const)), List$Empty$const))))));
 }
 function minimap(model) {
   let $ = model.mode;
   if ($ instanceof Capture) {
     return event_minimap(model);
   } else if ($ instanceof Live) {
-    return footer(toList([
-      class$("minimap"),
-      aria_label("Live sampling status")
-    ]), toList([
-      span(List$Empty$const, toList([
-        text3("Generation " + to_string(model.live_generation) + " · sampled at " + to_string(model.live_sampled_at_ms) + " ms")
-      ])),
-      span(List$Empty$const, toList([
-        text3(to_string(length(model.live_findings)) + " active inferred anomalies")
-      ]))
-    ]));
+    return footer(prepend(class$("minimap"), prepend(aria_label("Live sampling status"), List$Empty$const)), prepend(span(List$Empty$const, prepend(text3("Generation " + to_string(model.live_generation) + " · sampled at " + to_string(model.live_sampled_at_ms) + " ms"), List$Empty$const)), prepend(span(List$Empty$const, prepend(text3(to_string(length(model.live_findings)) + " active inferred anomalies"), List$Empty$const)), List$Empty$const)));
   } else if ($ instanceof Compare) {
-    return footer(toList([
-      class$("minimap"),
-      aria_label("Compare summary")
-    ]), toList([
-      span(List$Empty$const, toList([text3(compare_summary(model))]))
-    ]));
+    return footer(prepend(class$("minimap"), prepend(aria_label("Compare summary"), List$Empty$const)), prepend(span(List$Empty$const, prepend(text3(compare_summary(model)), List$Empty$const)), List$Empty$const));
   } else {
-    return footer(toList([
-      class$("minimap"),
-      aria_label("Team trace status")
-    ]), toList([
-      span(List$Empty$const, toList([text3(team_status(model))]))
-    ]));
+    return footer(prepend(class$("minimap"), prepend(aria_label("Team trace status"), List$Empty$const)), prepend(span(List$Empty$const, prepend(text3(team_status(model)), List$Empty$const)), List$Empty$const));
   }
 }
 function team_inspector(model) {
-  return aside(toList([
-    class$("inspector panel"),
-    aria_label("Team trace inspector"),
-    attribute2("tabindex", "0")
-  ]), toList([
-    panel_heading("Trace policy", "03"),
-    (() => {
-      let $ = selected_team_trace(model);
-      if ($ instanceof Some) {
-        let trace = $[0];
-        return div(List$Empty$const, toList([
-          definition("Trace", trace.id),
-          definition("Delivery status", trace.delivery_status),
-          definition("Privacy", (() => {
-            let $1 = trace.locked;
-            if ($1) {
-              return trace.privacy + " · locked";
-            } else {
-              return trace.privacy;
-            }
-          })()),
-          definition("Legal hold", (() => {
-            let $1 = trace.legal_hold;
-            if ($1) {
-              return "enabled";
-            } else {
-              return "disabled";
-            }
-          })()),
-          button(toList([
-            class$("quiet-button"),
-            on_click(new UserRequestedTraceHold(trace.id, !trace.legal_hold))
-          ]), toList([
-            text3((() => {
-              let $1 = trace.legal_hold;
-              if ($1) {
-                return "Release legal hold";
-              } else {
-                return "Place legal hold";
-              }
-            })())
-          ])),
-          p(List$Empty$const, toList([
-            text3("Legal hold changes require an Admin role and are CSRF-protected and audited.")
-          ]))
-        ]));
-      } else {
-        return p(List$Empty$const, toList([text3("Select a trace")]));
-      }
-    })()
-  ]));
+  return aside(prepend(class$("inspector panel"), prepend(aria_label("Team trace inspector"), prepend(attribute2("tabindex", "0"), List$Empty$const))), prepend(panel_heading("Trace policy", "03"), prepend((() => {
+    let $ = selected_team_trace(model);
+    if ($ instanceof Some) {
+      let trace = $[0];
+      return div(List$Empty$const, prepend(definition("Trace", trace.id), prepend(definition("Delivery status", trace.delivery_status), prepend(definition("Privacy", (() => {
+        let $1 = trace.locked;
+        if ($1) {
+          return trace.privacy + " · locked";
+        } else {
+          return trace.privacy;
+        }
+      })()), prepend(definition("Legal hold", (() => {
+        let $1 = trace.legal_hold;
+        if ($1) {
+          return "enabled";
+        } else {
+          return "disabled";
+        }
+      })()), prepend(button(prepend(class$("quiet-button"), prepend(on_click(new UserRequestedTraceHold(trace.id, !trace.legal_hold)), List$Empty$const)), prepend(text3((() => {
+        let $1 = trace.legal_hold;
+        if ($1) {
+          return "Release legal hold";
+        } else {
+          return "Place legal hold";
+        }
+      })()), List$Empty$const)), prepend(p(List$Empty$const, prepend(text3("Legal hold changes require an Admin role and are CSRF-protected and audited."), List$Empty$const)), List$Empty$const)))))));
+    } else {
+      return p(List$Empty$const, prepend(text3("Select a trace"), List$Empty$const));
+    }
+  })(), List$Empty$const)));
 }
 function inspector_event(model, row) {
   let bookmarked = contains(model.bookmarks, row.id);
-  return div(toList([class$("inspector-content")]), toList([
-    div(toList([class$("inspector-title")]), toList([
-      div(List$Empty$const, toList([
-        p(toList([class$("eyebrow")]), toList([text3(row.kind)])),
-        h2(List$Empty$const, toList([text3(row.actor)]))
-      ])),
-      button(toList([
-        class$("bookmark-button"),
-        aria_pressed((() => {
-          if (bookmarked) {
-            return "true";
-          } else {
-            return "false";
-          }
-        })()),
-        on_click(new UserToggledBookmark(row.id))
-      ]), toList([
-        text3((() => {
-          if (bookmarked) {
-            return "★";
-          } else {
-            return "☆";
-          }
-        })())
-      ]))
-    ])),
-    definition("Event ID", row.id),
-    definition("Evidence", evidence_label(row.evidence)),
-    definition("Calibrated time", instant_label(row.time)),
-    definition("Raw calibrated bounds", raw_label(row.time)),
-    definition("Node-local offset", offset_label(row.timestamp_ns) + " (" + to_string(row.timestamp_ns) + " ns, not cross-node comparable)"),
-    definition("Duration", duration_label(row.duration_ns) + " (" + to_string(row.duration_ns) + " ns)"),
-    definition("Boundary", event_boundary_label(model, row.id)),
-    definition("Source", "Unavailable in this event metadata"),
-    label(toList([class$("annotation")]), toList([
-      span(List$Empty$const, toList([text3("Annotation")])),
-      textarea(toList([
-        placeholder("Record what this event explains…"),
-        value(model.annotation),
-        on_input((var0) => {
-          return new UserChangedAnnotation(var0);
-        })
-      ]), model.annotation)
-    ]))
-  ]));
+  return div(prepend(class$("inspector-content"), List$Empty$const), prepend(div(prepend(class$("inspector-title"), List$Empty$const), prepend(div(List$Empty$const, prepend(p(prepend(class$("eyebrow"), List$Empty$const), prepend(text3(row.kind), List$Empty$const)), prepend(h2(List$Empty$const, prepend(text3(row.actor), List$Empty$const)), List$Empty$const))), prepend(button(prepend(class$("bookmark-button"), prepend(aria_pressed((() => {
+    if (bookmarked) {
+      return "true";
+    } else {
+      return "false";
+    }
+  })()), prepend(on_click(new UserToggledBookmark(row.id)), List$Empty$const))), prepend(text3((() => {
+    if (bookmarked) {
+      return "★";
+    } else {
+      return "☆";
+    }
+  })()), List$Empty$const)), List$Empty$const))), prepend(definition("Event ID", row.id), prepend(definition("Evidence", evidence_label(row.evidence)), prepend(definition("Calibrated time", instant_label(row.time)), prepend(definition("Raw calibrated bounds", raw_label(row.time)), prepend(definition("Node-local offset", offset_label(row.timestamp_ns) + " (" + to_string(row.timestamp_ns) + " ns, not cross-node comparable)"), prepend(definition("Duration", duration_label(row.duration_ns) + " (" + to_string(row.duration_ns) + " ns)"), prepend(definition("Boundary", event_boundary_label(model, row.id)), prepend(definition("Source", "Unavailable in this event metadata"), prepend(label(prepend(class$("annotation"), List$Empty$const), prepend(span(List$Empty$const, prepend(text3("Annotation"), List$Empty$const)), prepend(textarea(prepend(placeholder("Record what this event explains…"), prepend(value(model.annotation), prepend(on_input((var0) => {
+    return new UserChangedAnnotation(var0);
+  }), List$Empty$const))), model.annotation), List$Empty$const))), List$Empty$const)))))))))));
 }
 function event_inspector(model) {
-  return aside(toList([
-    class$("inspector panel"),
-    aria_label("Event inspector"),
-    attribute2("tabindex", "0")
-  ]), toList([
-    panel_heading("Event inspector", "03"),
-    (() => {
-      let $ = selected_event(model);
-      if ($ instanceof Some) {
-        let row = $[0];
-        return inspector_event(model, row);
-      } else {
-        return div(toList([class$("empty-state")]), toList([
-          p(List$Empty$const, toList([
-            text3("Select an event to inspect exact evidence.")
-          ]))
-        ]));
-      }
-    })()
-  ]));
+  return aside(prepend(class$("inspector panel"), prepend(aria_label("Event inspector"), prepend(attribute2("tabindex", "0"), List$Empty$const))), prepend(panel_heading("Event inspector", "03"), prepend((() => {
+    let $ = selected_event(model);
+    if ($ instanceof Some) {
+      let row = $[0];
+      return inspector_event(model, row);
+    } else {
+      return div(prepend(class$("empty-state"), List$Empty$const), prepend(p(List$Empty$const, prepend(text3("Select an event to inspect exact evidence."), List$Empty$const)), List$Empty$const));
+    }
+  })(), List$Empty$const)));
 }
 function live_inspector_process(model, row) {
   let findings = live_findings_for(model, row.pid);
-  return div(toList([class$("inspector-content")]), toList([
-    div(toList([class$("inspector-title")]), toList([
-      div(List$Empty$const, toList([
-        p(toList([class$("eyebrow")]), toList([text3(row.status)])),
-        h2(List$Empty$const, toList([text3(row.label)]))
-      ]))
-    ])),
-    definition("PID", row.pid + " @ " + row.node),
-    definition("Initial call", row.initial_call),
-    definition("Current function", row.current_function),
-    definition("Mailbox", to_string(row.mailbox_len)),
-    definition("Memory", to_string(row.memory_bytes) + " bytes"),
-    definition("Heap", to_string(row.total_heap_words) + " words"),
-    definition("Ancestors", list_text(row.ancestors)),
-    definition("Links", list_text(row.links)),
-    section(toList([class$("finding-list")]), toList([
-      h3(List$Empty$const, toList([text3("Anomaly evidence")])),
-      (() => {
-        if (findings instanceof Empty) {
-          return p(List$Empty$const, toList([
-            text3("No anomaly crossed its hysteresis threshold.")
-          ]));
-        } else {
-          return ul(List$Empty$const, map2(findings, (finding) => {
-            return li(List$Empty$const, toList([
-              strong(List$Empty$const, toList([text3(finding.kind)])),
-              span(List$Empty$const, toList([text3(finding.summary)])),
-              span(List$Empty$const, toList([text3(evidence_label(finding.evidence))]))
-            ]));
-          }));
-        }
-      })()
-    ]))
-  ]));
+  return div(prepend(class$("inspector-content"), List$Empty$const), prepend(div(prepend(class$("inspector-title"), List$Empty$const), prepend(div(List$Empty$const, prepend(p(prepend(class$("eyebrow"), List$Empty$const), prepend(text3(row.status), List$Empty$const)), prepend(h2(List$Empty$const, prepend(text3(row.label), List$Empty$const)), List$Empty$const))), List$Empty$const)), prepend(definition("PID", row.pid + " @ " + row.node), prepend(definition("Initial call", row.initial_call), prepend(definition("Current function", row.current_function), prepend(definition("Mailbox", to_string(row.mailbox_len)), prepend(definition("Memory", to_string(row.memory_bytes) + " bytes"), prepend(definition("Heap", to_string(row.total_heap_words) + " words"), prepend(definition("Ancestors", list_text(row.ancestors)), prepend(definition("Links", list_text(row.links)), prepend(section(prepend(class$("finding-list"), List$Empty$const), prepend(h3(List$Empty$const, prepend(text3("Anomaly evidence"), List$Empty$const)), prepend((() => {
+    if (findings instanceof Empty) {
+      return p(List$Empty$const, prepend(text3("No anomaly crossed its hysteresis threshold."), List$Empty$const));
+    } else {
+      return ul(List$Empty$const, map2(findings, (finding) => {
+        return li(List$Empty$const, prepend(strong(List$Empty$const, prepend(text3(finding.kind), List$Empty$const)), prepend(span(List$Empty$const, prepend(text3(finding.summary), List$Empty$const)), prepend(span(List$Empty$const, prepend(text3(evidence_label(finding.evidence)), List$Empty$const)), List$Empty$const))));
+      }));
+    }
+  })(), List$Empty$const))), List$Empty$const)))))))))));
 }
 function live_inspector(model) {
-  return aside(toList([
-    class$("inspector panel"),
-    aria_label("Process inspector"),
-    attribute2("tabindex", "0")
-  ]), toList([
-    panel_heading("Process inspector", "03"),
-    (() => {
-      let $ = selected_live_process(model);
-      if ($ instanceof Ok) {
-        let row = $[0];
-        return live_inspector_process(model, row);
-      } else {
-        return div(toList([class$("empty-state")]), toList([
-          p(List$Empty$const, toList([
-            text3("Select a process to inspect sampled metadata and evidence.")
-          ]))
-        ]));
-      }
-    })()
-  ]));
+  return aside(prepend(class$("inspector panel"), prepend(aria_label("Process inspector"), prepend(attribute2("tabindex", "0"), List$Empty$const))), prepend(panel_heading("Process inspector", "03"), prepend((() => {
+    let $ = selected_live_process(model);
+    if ($ instanceof Ok) {
+      let row = $[0];
+      return live_inspector_process(model, row);
+    } else {
+      return div(prepend(class$("empty-state"), List$Empty$const), prepend(p(List$Empty$const, prepend(text3("Select a process to inspect sampled metadata and evidence."), List$Empty$const)), List$Empty$const));
+    }
+  })(), List$Empty$const)));
 }
 function inspector(model) {
   let $ = model.mode;
@@ -10005,30 +9637,7 @@ function inspector(model) {
   }
 }
 function team_navigator(model) {
-  return nav(toList([
-    class$("navigator panel"),
-    aria_label("Team trace navigator"),
-    attribute2("tabindex", "0")
-  ]), toList([
-    panel_heading("Team trace library", "01"),
-    section(List$Empty$const, toList([
-      h2(List$Empty$const, toList([text3("Retention-safe sessions")])),
-      p(List$Empty$const, toList([
-        text3(to_string(length(model.team_traces)) + " traces loaded · max 100")
-      ])),
-      button(toList([
-        class$("quiet-button"),
-        disabled(model.team_loading),
-        on_click(Msg$UserRequestedTeamTraces$const)
-      ]), toList([text3("Refresh traces")]))
-    ])),
-    section(List$Empty$const, toList([
-      h2(List$Empty$const, toList([text3("Privacy")])),
-      p(List$Empty$const, toList([
-        text3("Raw and unknown trace contents remain locked unless your combined role permits access.")
-      ]))
-    ]))
-  ]));
+  return nav(prepend(class$("navigator panel"), prepend(aria_label("Team trace navigator"), prepend(attribute2("tabindex", "0"), List$Empty$const))), prepend(panel_heading("Team trace library", "01"), prepend(section(List$Empty$const, prepend(h2(List$Empty$const, prepend(text3("Retention-safe sessions"), List$Empty$const)), prepend(p(List$Empty$const, prepend(text3(to_string(length(model.team_traces)) + " traces loaded · max 100"), List$Empty$const)), prepend(button(prepend(class$("quiet-button"), prepend(disabled(model.team_loading), prepend(on_click(Msg$UserRequestedTeamTraces$const), List$Empty$const))), prepend(text3("Refresh traces"), List$Empty$const)), List$Empty$const)))), prepend(section(List$Empty$const, prepend(h2(List$Empty$const, prepend(text3("Privacy"), List$Empty$const)), prepend(p(List$Empty$const, prepend(text3("Raw and unknown trace contents remain locked unless your combined role permits access."), List$Empty$const)), List$Empty$const))), List$Empty$const))));
 }
 function session_navigator(model) {
   let $ = model.mode;
@@ -10039,267 +9648,126 @@ function session_navigator(model) {
   }
 }
 function mobile_drawers(model) {
-  return div(toList([class$("mobile-drawers")]), toList([
-    details(toList([class$("mobile-session-drawer")]), toList([
-      summary(List$Empty$const, toList([text3("Session navigator")])),
-      session_navigator(model)
-    ])),
-    details(toList([class$("mobile-inspector-drawer")]), toList([
-      summary(List$Empty$const, toList([text3("Inspector")])),
-      inspector(model)
-    ]))
-  ]));
+  return div(prepend(class$("mobile-drawers"), List$Empty$const), prepend(details(prepend(class$("mobile-session-drawer"), List$Empty$const), prepend(summary(List$Empty$const, prepend(text3("Session navigator"), List$Empty$const)), prepend(session_navigator(model), List$Empty$const))), prepend(details(prepend(class$("mobile-inspector-drawer"), List$Empty$const), prepend(summary(List$Empty$const, prepend(text3("Inspector"), List$Empty$const)), prepend(inspector(model), List$Empty$const))), List$Empty$const)));
 }
 function event_row2(row) {
-  return tr(toList([
-    class$((() => {
-      let $ = row.anomalous;
-      if ($) {
-        return "anomalous";
-      } else {
-        return "";
-      }
-    })()),
-    on_click(new UserSelectedEvent(row.id))
-  ]), toList([
-    td(List$Empty$const, toList([
-      button(toList([class$("event-link")]), toList([text3(row.id)]))
-    ])),
-    td(List$Empty$const, toList([text3(row.actor)])),
-    td(List$Empty$const, toList([
-      span(toList([class$("kind-pill")]), toList([text3(row.kind)]))
-    ])),
-    td(toList([title(raw_label(row.time))]), toList([
-      text3(offset_label(row.timestamp_ns) + " · " + instant_label(row.time))
-    ])),
-    td(List$Empty$const, toList([text3(evidence_label(row.evidence))]))
-  ]));
+  return tr(prepend(class$((() => {
+    let $ = row.anomalous;
+    if ($) {
+      return "anomalous";
+    } else {
+      return "";
+    }
+  })()), prepend(on_click(new UserSelectedEvent(row.id)), List$Empty$const)), prepend(td(List$Empty$const, prepend(button(prepend(class$("event-link"), List$Empty$const), prepend(text3(row.id), List$Empty$const)), List$Empty$const)), prepend(td(List$Empty$const, prepend(text3(row.actor), List$Empty$const)), prepend(td(List$Empty$const, prepend(span(prepend(class$("kind-pill"), List$Empty$const), prepend(text3(row.kind), List$Empty$const)), List$Empty$const)), prepend(td(prepend(title(raw_label(row.time)), List$Empty$const), prepend(text3(offset_label(row.timestamp_ns) + " · " + instant_label(row.time)), List$Empty$const)), prepend(td(List$Empty$const, prepend(text3(evidence_label(row.evidence)), List$Empty$const)), List$Empty$const))))));
 }
 function event_table(rows, empty_reason) {
-  return div(toList([class$("event-table-wrap")]), toList([
-    table(toList([aria_label("Accessible causal event table")]), toList([
-      thead(List$Empty$const, toList([
-        tr(List$Empty$const, toList([
-          th(List$Empty$const, toList([text3("Event")])),
-          th(List$Empty$const, toList([text3("Actor")])),
-          th(List$Empty$const, toList([text3("Kind")])),
-          th(List$Empty$const, toList([text3("Time")])),
-          th(List$Empty$const, toList([text3("Evidence")]))
-        ]))
-      ])),
-      tbody(List$Empty$const, (() => {
-        if (rows instanceof Empty) {
-          return toList([
-            tr(toList([class$("empty-state")]), toList([
-              td(toList([attribute2("colspan", "5")]), toList([text3(empty_reason)]))
-            ]))
-          ]);
-        } else {
-          return map2(rows, event_row2);
-        }
-      })())
-    ]))
-  ]));
+  return div(prepend(class$("event-table-wrap"), List$Empty$const), prepend(table(prepend(aria_label("Accessible causal event table"), List$Empty$const), prepend(thead(List$Empty$const, prepend(tr(List$Empty$const, prepend(th(List$Empty$const, prepend(text3("Event"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Actor"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Kind"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Time"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Evidence"), List$Empty$const)), List$Empty$const)))))), List$Empty$const)), prepend(tbody(List$Empty$const, (() => {
+    if (rows instanceof Empty) {
+      return prepend(tr(prepend(class$("empty-state"), List$Empty$const), prepend(td(prepend(attribute2("colspan", "5"), List$Empty$const), prepend(text3(empty_reason), List$Empty$const)), List$Empty$const)), List$Empty$const);
+    } else {
+      return map2(rows, event_row2);
+    }
+  })()), List$Empty$const))), List$Empty$const));
 }
 function team_event_section(model) {
   let $ = selected_team_trace(model);
   if ($ instanceof Some) {
     let trace = $[0];
     if (trace.locked) {
-      return div(toList([class$("empty-state locked-trace")]), toList([
-        h3(List$Empty$const, toList([text3("Trace contents locked")])),
-        p(List$Empty$const, toList([
-          text3("This page does not request or render raw payloads without ViewRawTrace permission.")
-        ]))
-      ]));
+      return div(prepend(class$("empty-state locked-trace"), List$Empty$const), prepend(h3(List$Empty$const, prepend(text3("Trace contents locked"), List$Empty$const)), prepend(p(List$Empty$const, prepend(text3("This page does not request or render raw payloads without ViewRawTrace permission."), List$Empty$const)), List$Empty$const)));
     } else {
-      let trace2 = $[0];
-      return section(toList([class$("team-events")]), toList([
-        h3(List$Empty$const, toList([text3("Events · " + trace2.id)])),
-        (() => {
-          let $1 = model.team_events_error;
-          if ($1 instanceof Some) {
-            let reason = $1[0];
-            return p(toList([role("alert")]), toList([text3(reason)]));
-          } else {
-            return event_table(model.team_events, (() => {
-              let $2 = model.team_events_loading;
-              if ($2) {
-                return "Loading trace events…";
-              } else {
-                return "This trace page has no events";
-              }
-            })());
-          }
-        })(),
-        (() => {
-          let $1 = model.team_events_next_cursor;
-          if ($1 instanceof Some) {
-            return button(toList([
-              class$("quiet-button"),
-              disabled(model.team_events_loading),
-              on_click(Msg$UserRequestedMoreTeamEvents$const)
-            ]), toList([text3("Load more events")]));
-          } else {
-            return div(List$Empty$const, List$Empty$const);
-          }
-        })()
-      ]));
+      let trace$1 = $[0];
+      return section(prepend(class$("team-events"), List$Empty$const), prepend(h3(List$Empty$const, prepend(text3("Events · " + trace$1.id), List$Empty$const)), prepend((() => {
+        let $1 = model.team_events_error;
+        if ($1 instanceof Some) {
+          let reason = $1[0];
+          return p(prepend(role("alert"), List$Empty$const), prepend(text3(reason), List$Empty$const));
+        } else {
+          return event_table(model.team_events, (() => {
+            let $2 = model.team_events_loading;
+            if ($2) {
+              return "Loading trace events…";
+            } else {
+              return "This trace page has no events";
+            }
+          })());
+        }
+      })(), prepend((() => {
+        let $1 = model.team_events_next_cursor;
+        if ($1 instanceof Some) {
+          return button(prepend(class$("quiet-button"), prepend(disabled(model.team_events_loading), prepend(on_click(Msg$UserRequestedMoreTeamEvents$const), List$Empty$const))), prepend(text3("Load more events"), List$Empty$const));
+        } else {
+          return div(List$Empty$const, List$Empty$const);
+        }
+      })(), List$Empty$const))));
     }
   } else {
-    return div(toList([class$("empty-state")]), toList([
-      p(List$Empty$const, toList([
-        text3("Select a trace to inspect its bounded event page.")
-      ]))
-    ]));
+    return div(prepend(class$("empty-state"), List$Empty$const), prepend(p(List$Empty$const, prepend(text3("Select a trace to inspect its bounded event page."), List$Empty$const)), List$Empty$const));
   }
 }
 function team_trace_row(model, trace) {
-  return tr(toList([
-    class$((() => {
-      let $ = trace.locked;
-      if ($) {
-        return "locked";
-      } else {
-        return "";
-      }
-    })())
-  ]), toList([
-    td(List$Empty$const, toList([
-      button(toList([
-        class$("compare-selector"),
-        aria_pressed((() => {
-          let $ = contains(model.selected_team_trace_ids, trace.id);
-          if ($) {
-            return "true";
-          } else {
-            return "false";
-          }
-        })()),
-        aria_label("Select " + trace.id + " for comparison"),
-        on_click(new UserToggledTeamCompare(trace.id))
-      ]), toList([
-        text3((() => {
-          let $ = contains(model.selected_team_trace_ids, trace.id);
-          if ($) {
-            return "Selected";
-          } else {
-            return "Select";
-          }
-        })())
-      ]))
-    ])),
-    td(List$Empty$const, toList([
-      button(toList([
-        class$("event-link"),
-        on_click(new UserSelectedTeamTrace(trace.id))
-      ]), toList([text3(trace.id)]))
-    ])),
-    td(List$Empty$const, toList([
-      span(toList([class$("kind-pill")]), toList([text3(trace.delivery_status)]))
-    ])),
-    td(List$Empty$const, toList([
-      text3(trace.node + " · " + trace.module + ":" + trace.function + "/" + to_string(trace.arity))
-    ])),
-    td(List$Empty$const, toList([
-      text3(trace.privacy),
-      (() => {
-        let $ = trace.locked;
-        if ($) {
-          return span(toList([
-            class$("locked-badge"),
-            aria_label("Content locked")
-          ]), toList([text3(" Locked")]));
-        } else {
-          return span(List$Empty$const, List$Empty$const);
-        }
-      })()
-    ])),
-    td(List$Empty$const, toList([text3(to_string(trace.event_count))])),
-    td(List$Empty$const, toList([text3(to_string(trace.received_at_ms) + " ms")]))
-  ]));
+  return tr(prepend(class$((() => {
+    let $ = trace.locked;
+    if ($) {
+      return "locked";
+    } else {
+      return "";
+    }
+  })()), List$Empty$const), prepend(td(List$Empty$const, prepend(button(prepend(class$("compare-selector"), prepend(aria_pressed((() => {
+    let $ = contains(model.selected_team_trace_ids, trace.id);
+    if ($) {
+      return "true";
+    } else {
+      return "false";
+    }
+  })()), prepend(aria_label("Select " + trace.id + " for comparison"), prepend(on_click(new UserToggledTeamCompare(trace.id)), List$Empty$const)))), prepend(text3((() => {
+    let $ = contains(model.selected_team_trace_ids, trace.id);
+    if ($) {
+      return "Selected";
+    } else {
+      return "Select";
+    }
+  })()), List$Empty$const)), List$Empty$const)), prepend(td(List$Empty$const, prepend(button(prepend(class$("event-link"), prepend(on_click(new UserSelectedTeamTrace(trace.id)), List$Empty$const)), prepend(text3(trace.id), List$Empty$const)), List$Empty$const)), prepend(td(List$Empty$const, prepend(span(prepend(class$("kind-pill"), List$Empty$const), prepend(text3(trace.delivery_status), List$Empty$const)), List$Empty$const)), prepend(td(List$Empty$const, prepend(text3(trace.node + " · " + trace.module + ":" + trace.function + "/" + to_string(trace.arity)), List$Empty$const)), prepend(td(List$Empty$const, prepend(text3(trace.privacy), prepend((() => {
+    let $ = trace.locked;
+    if ($) {
+      return span(prepend(class$("locked-badge"), prepend(aria_label("Content locked"), List$Empty$const)), prepend(text3(" Locked"), List$Empty$const));
+    } else {
+      return span(List$Empty$const, List$Empty$const);
+    }
+  })(), List$Empty$const))), prepend(td(List$Empty$const, prepend(text3(to_string(trace.event_count)), List$Empty$const)), prepend(td(List$Empty$const, prepend(text3(to_string(trace.received_at_ms) + " ms"), List$Empty$const)), List$Empty$const))))))));
 }
 function team_trace_table(model) {
   let $ = model.team_traces;
   if ($ instanceof Empty) {
-    return div(toList([class$("empty-state")]), toList([
-      p(List$Empty$const, toList([text3("No team traces are available.")]))
-    ]));
+    return div(prepend(class$("empty-state"), List$Empty$const), prepend(p(List$Empty$const, prepend(text3("No team traces are available."), List$Empty$const)), List$Empty$const));
   } else {
     let traces = $;
-    return div(toList([class$("event-table-wrap team-trace-table")]), toList([
-      table(toList([aria_label("Team traces")]), toList([
-        thead(List$Empty$const, toList([
-          tr(List$Empty$const, toList([
-            th(List$Empty$const, toList([text3("Compare")])),
-            th(List$Empty$const, toList([text3("Trace")])),
-            th(List$Empty$const, toList([text3("Status")])),
-            th(List$Empty$const, toList([text3("Node / MFA")])),
-            th(List$Empty$const, toList([text3("Privacy")])),
-            th(List$Empty$const, toList([text3("Events")])),
-            th(List$Empty$const, toList([text3("Received")]))
-          ]))
-        ])),
-        tbody(List$Empty$const, map2(traces, (trace) => {
-          return team_trace_row(model, trace);
-        }))
-      ]))
-    ]));
+    return div(prepend(class$("event-table-wrap team-trace-table"), List$Empty$const), prepend(table(prepend(aria_label("Team traces"), List$Empty$const), prepend(thead(List$Empty$const, prepend(tr(List$Empty$const, prepend(th(List$Empty$const, prepend(text3("Compare"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Trace"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Status"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Node / MFA"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Privacy"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Events"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Received"), List$Empty$const)), List$Empty$const)))))))), List$Empty$const)), prepend(tbody(List$Empty$const, map2(traces, (trace) => {
+      return team_trace_row(model, trace);
+    })), List$Empty$const))), List$Empty$const));
   }
 }
 function team_compare_bar(model) {
   let count = length(model.selected_team_trace_ids);
-  return div(toList([class$("team-compare-bar")]), toList([
-    span(toList([aria_live("polite")]), toList([
-      text3(to_string(count) + " of 20 selected for comparison")
-    ])),
-    button(toList([
-      class$("quiet-button"),
-      disabled(count < 2 || count > 20),
-      on_click(Msg$UserRequestedTeamCompare$const)
-    ]), toList([text3("Compare selected traces")]))
-  ]));
+  return div(prepend(class$("team-compare-bar"), List$Empty$const), prepend(span(prepend(aria_live("polite"), List$Empty$const), prepend(text3(to_string(count) + " of 20 selected for comparison"), List$Empty$const)), prepend(button(prepend(class$("quiet-button"), prepend(disabled(count < 2 || count > 20), prepend(on_click(Msg$UserRequestedTeamCompare$const), List$Empty$const))), prepend(text3("Compare selected traces"), List$Empty$const)), List$Empty$const)));
 }
 function team_workspace(model) {
-  return section(toList([
-    class$("causal panel team-traces-panel"),
-    aria_label("Team trace library")
-  ]), toList([
-    div(toList([class$("panel-toolbar")]), toList([
-      div(List$Empty$const, toList([
-        p(toList([class$("eyebrow")]), toList([text3("team")])),
-        h2(List$Empty$const, toList([text3("Session-scoped traces")]))
-      ])),
-      span(toList([
-        class$("window-count"),
-        aria_live("polite")
-      ]), toList([text3(team_status(model))]))
-    ])),
-    (() => {
-      let $ = model.team_error;
-      if ($ instanceof Some) {
-        let reason = $[0];
-        return p(toList([class$("error-state"), role("alert")]), toList([text3(reason)]));
-      } else {
-        return div(List$Empty$const, List$Empty$const);
-      }
-    })(),
-    team_compare_bar(model),
-    team_trace_table(model),
-    (() => {
-      let $ = model.team_next_cursor;
-      if ($ instanceof Some) {
-        return button(toList([
-          class$("quiet-button"),
-          disabled(model.team_loading),
-          on_click(Msg$UserRequestedMoreTeamTraces$const)
-        ]), toList([text3("Load more traces")]));
-      } else {
-        return div(List$Empty$const, List$Empty$const);
-      }
-    })(),
-    team_event_section(model)
-  ]));
+  return section(prepend(class$("causal panel team-traces-panel"), prepend(aria_label("Team trace library"), List$Empty$const)), prepend(div(prepend(class$("panel-toolbar"), List$Empty$const), prepend(div(List$Empty$const, prepend(p(prepend(class$("eyebrow"), List$Empty$const), prepend(text3("team"), List$Empty$const)), prepend(h2(List$Empty$const, prepend(text3("Session-scoped traces"), List$Empty$const)), List$Empty$const))), prepend(span(prepend(class$("window-count"), prepend(aria_live("polite"), List$Empty$const)), prepend(text3(team_status(model)), List$Empty$const)), List$Empty$const))), prepend((() => {
+    let $ = model.team_error;
+    if ($ instanceof Some) {
+      let reason = $[0];
+      return p(prepend(class$("error-state"), prepend(role("alert"), List$Empty$const)), prepend(text3(reason), List$Empty$const));
+    } else {
+      return div(List$Empty$const, List$Empty$const);
+    }
+  })(), prepend(team_compare_bar(model), prepend(team_trace_table(model), prepend((() => {
+    let $ = model.team_next_cursor;
+    if ($ instanceof Some) {
+      return button(prepend(class$("quiet-button"), prepend(disabled(model.team_loading), prepend(on_click(Msg$UserRequestedMoreTeamTraces$const), List$Empty$const))), prepend(text3("Load more traces"), List$Empty$const));
+    } else {
+      return div(List$Empty$const, List$Empty$const);
+    }
+  })(), prepend(team_event_section(model), List$Empty$const)))))));
 }
 function event_table_empty_reason(model) {
   let $ = model.loading;
@@ -10369,124 +9837,60 @@ function evidence_overview(model) {
     }
   });
   let inference_basis = _block$2;
-  return section(toList([
-    class$("evidence-overview"),
-    aria_label("What this trace establishes and does not establish")
-  ]), toList([
-    div(List$Empty$const, toList([
-      span(List$Empty$const, toList([text3("Observation end")])),
-      strong(List$Empty$const, toList([text3(outcome)]))
-    ])),
-    div(List$Empty$const, toList([
-      span(List$Empty$const, toList([text3("Delivery verification")])),
-      strong(List$Empty$const, toList([text3(delivery)]))
-    ])),
-    div(List$Empty$const, toList([
-      span(List$Empty$const, toList([text3("Integrity / boundaries")])),
-      strong(List$Empty$const, toList([
-        text3(to_string(length(model.graph_boundaries)) + " causal boundaries · " + (() => {
-          let $3 = model.graph_error;
-          if ($3 instanceof Some) {
-            return "graph issue; reload or validate the archive";
-          } else {
-            return "no graph loader issue";
-          }
-        })())
-      ]))
-    ])),
-    div(List$Empty$const, toList([
-      span(List$Empty$const, toList([text3("Evidence basis")])),
-      strong(List$Empty$const, toList([
-        text3(to_string(exact) + " visible Exact · " + to_string(inferred) + " visible Inferred" + (() => {
-          if (inference_basis instanceof Ok) {
-            let value2 = inference_basis[0];
-            return " · first basis: " + value2;
-          } else {
-            return "";
-          }
-        })())
-      ]))
-    ])),
-    p(List$Empty$const, toList([
-      text3("Known: recorded ordering and stated inference inputs. Unknown: work outside the observation end, missing delivery, and every marked boundary.")
-    ]))
-  ]));
+  return section(prepend(class$("evidence-overview"), prepend(aria_label("What this trace establishes and does not establish"), List$Empty$const)), prepend(div(List$Empty$const, prepend(span(List$Empty$const, prepend(text3("Observation end"), List$Empty$const)), prepend(strong(List$Empty$const, prepend(text3(outcome), List$Empty$const)), List$Empty$const))), prepend(div(List$Empty$const, prepend(span(List$Empty$const, prepend(text3("Delivery verification"), List$Empty$const)), prepend(strong(List$Empty$const, prepend(text3(delivery), List$Empty$const)), List$Empty$const))), prepend(div(List$Empty$const, prepend(span(List$Empty$const, prepend(text3("Integrity / boundaries"), List$Empty$const)), prepend(strong(List$Empty$const, prepend(text3(to_string(length(model.graph_boundaries)) + " causal boundaries · " + (() => {
+    let $3 = model.graph_error;
+    if ($3 instanceof Some) {
+      return "graph issue; reload or validate the archive";
+    } else {
+      return "no graph loader issue";
+    }
+  })()), List$Empty$const)), List$Empty$const))), prepend(div(List$Empty$const, prepend(span(List$Empty$const, prepend(text3("Evidence basis"), List$Empty$const)), prepend(strong(List$Empty$const, prepend(text3(to_string(exact) + " visible Exact · " + to_string(inferred) + " visible Inferred" + (() => {
+    if (inference_basis instanceof Ok) {
+      let value2 = inference_basis[0];
+      return " · first basis: " + value2;
+    } else {
+      return "";
+    }
+  })()), List$Empty$const)), List$Empty$const))), prepend(p(List$Empty$const, prepend(text3("Known: recorded ordering and stated inference inputs. Unknown: work outside the observation end, missing delivery, and every marked boundary."), List$Empty$const)), List$Empty$const))))));
 }
 function event_workspace(model) {
   let visible = visible_events(model);
   let shown_count = length(visible);
   let total_count = model.total_events;
-  return section(toList([
-    class$("causal panel"),
-    aria_label("Causal timeline")
-  ]), toList([
-    div(toList([class$("panel-toolbar")]), toList([
-      div(List$Empty$const, toList([
-        p(toList([class$("eyebrow")]), toList([text3(mode_slug(model.mode))])),
-        h2(List$Empty$const, toList([
-          text3((() => {
-            let $ = model.mode;
-            let $1 = model.capture_phase;
-            if ($ instanceof Capture && $1 instanceof Ready) {
-              return "Sealed causal observation";
-            } else {
-              return mode_title(model.mode);
-            }
-          })())
-        ]))
-      ])),
-      div(toList([class$("toolbar-actions")]), toList([
-        button(toList([
-          class$("quiet-button"),
-          aria_pressed((() => {
-            let $ = model.show_internal;
-            if ($) {
-              return "true";
-            } else {
-              return "false";
-            }
-          })()),
-          on_click(Msg$UserToggledInternalNoise$const)
-        ]), toList([
-          text3((() => {
-            let $ = model.show_internal;
-            if ($) {
-              return "Fold OTP noise";
-            } else {
-              return "Expand OTP noise";
-            }
-          })())
-        ])),
-        span(toList([
-          class$("window-count"),
-          aria_live("polite")
-        ]), toList([
-          text3((() => {
-            let $ = model.loading;
-            let $1 = model.load_error;
-            if ($) {
-              return "Loading event window…";
-            } else if ($1 instanceof Some) {
-              let reason = $1[0];
-              return "Page unavailable · " + reason;
-            } else {
-              return to_string(shown_count) + " visible / " + to_string(total_count) + " total";
-            }
-          })())
-        ]))
-      ]))
-    ])),
-    evidence_overview(model),
-    div(toList([class$("canvas-frame")]), toList([
-      canvas(toList([
-        id("causal-canvas"),
-        attribute2("width", "1600"),
-        attribute2("height", "620"),
-        aria_hidden(true)
-      ]))
-    ])),
-    event_table(visible, event_table_empty_reason(model))
-  ]));
+  return section(prepend(class$("causal panel"), prepend(aria_label("Causal timeline"), List$Empty$const)), prepend(div(prepend(class$("panel-toolbar"), List$Empty$const), prepend(div(List$Empty$const, prepend(p(prepend(class$("eyebrow"), List$Empty$const), prepend(text3(mode_slug(model.mode)), List$Empty$const)), prepend(h2(List$Empty$const, prepend(text3((() => {
+    let $ = model.mode;
+    let $1 = model.capture_phase;
+    if ($ instanceof Capture && $1 instanceof Ready) {
+      return "Sealed causal observation";
+    } else {
+      return mode_title(model.mode);
+    }
+  })()), List$Empty$const)), List$Empty$const))), prepend(div(prepend(class$("toolbar-actions"), List$Empty$const), prepend(button(prepend(class$("quiet-button"), prepend(aria_pressed((() => {
+    let $ = model.show_internal;
+    if ($) {
+      return "true";
+    } else {
+      return "false";
+    }
+  })()), prepend(on_click(Msg$UserToggledInternalNoise$const), List$Empty$const))), prepend(text3((() => {
+    let $ = model.show_internal;
+    if ($) {
+      return "Fold OTP noise";
+    } else {
+      return "Expand OTP noise";
+    }
+  })()), List$Empty$const)), prepend(span(prepend(class$("window-count"), prepend(aria_live("polite"), List$Empty$const)), prepend(text3((() => {
+    let $ = model.loading;
+    let $1 = model.load_error;
+    if ($) {
+      return "Loading event window…";
+    } else if ($1 instanceof Some) {
+      let reason = $1[0];
+      return "Page unavailable · " + reason;
+    } else {
+      return to_string(shown_count) + " visible / " + to_string(total_count) + " total";
+    }
+  })()), List$Empty$const)), List$Empty$const))), List$Empty$const))), prepend(evidence_overview(model), prepend(div(prepend(class$("canvas-frame"), List$Empty$const), prepend(canvas(prepend(id("causal-canvas"), prepend(attribute2("width", "1600"), prepend(attribute2("height", "620"), prepend(aria_hidden(true), List$Empty$const))))), List$Empty$const)), prepend(event_table(visible, event_table_empty_reason(model)), List$Empty$const)))));
 }
 function compare_workspace(model) {
   let _block;
@@ -10503,124 +9907,34 @@ function compare_workspace(model) {
     _block = List$Empty$const;
   }
   let items = _block;
-  return section(toList([
-    class$("causal panel compare-panel"),
-    aria_label("Trace comparison")
-  ]), toList([
-    div(toList([class$("panel-toolbar")]), toList([
-      div(List$Empty$const, toList([
-        p(toList([class$("eyebrow")]), toList([text3("compare")])),
-        h2(List$Empty$const, toList([text3("PID-independent causal alignment")]))
-      ])),
-      span(toList([
-        class$("window-count"),
-        aria_live("polite")
-      ]), toList([text3(compare_summary(model))]))
-    ])),
-    (() => {
-      let $1 = model.compare_report;
-      if ($1 instanceof Some) {
-        let report = $1[0];
-        return div(toList([class$("compare-results")]), toList([
-          divergence_summary(report.reports),
-          div(toList([class$("canvas-frame")]), toList([
-            canvas(toList([
-              id("causal-canvas"),
-              attribute2("width", "1600"),
-              attribute2("height", "620"),
-              aria_hidden(true)
-            ]))
-          ])),
-          event_table(visible_events(model), event_table_empty_reason(model)),
-          alignment_table(items),
-          statistics_table(report.statistics)
-        ]));
-      } else {
-        return div(toList([class$("empty-state compare-empty")]), toList([
-          p(List$Empty$const, toList([
-            text3("Enter two or more local .beamtrace paths. The first run is the baseline.")
-          ]))
-        ]));
-      }
-    })()
-  ]));
+  return section(prepend(class$("causal panel compare-panel"), prepend(aria_label("Trace comparison"), List$Empty$const)), prepend(div(prepend(class$("panel-toolbar"), List$Empty$const), prepend(div(List$Empty$const, prepend(p(prepend(class$("eyebrow"), List$Empty$const), prepend(text3("compare"), List$Empty$const)), prepend(h2(List$Empty$const, prepend(text3("PID-independent causal alignment"), List$Empty$const)), List$Empty$const))), prepend(span(prepend(class$("window-count"), prepend(aria_live("polite"), List$Empty$const)), prepend(text3(compare_summary(model)), List$Empty$const)), List$Empty$const))), prepend((() => {
+    let $1 = model.compare_report;
+    if ($1 instanceof Some) {
+      let report = $1[0];
+      return div(prepend(class$("compare-results"), List$Empty$const), prepend(divergence_summary(report.reports), prepend(div(prepend(class$("canvas-frame"), List$Empty$const), prepend(canvas(prepend(id("causal-canvas"), prepend(attribute2("width", "1600"), prepend(attribute2("height", "620"), prepend(aria_hidden(true), List$Empty$const))))), List$Empty$const)), prepend(event_table(visible_events(model), event_table_empty_reason(model)), prepend(alignment_table(items), prepend(statistics_table(report.statistics), List$Empty$const))))));
+    } else {
+      return div(prepend(class$("empty-state compare-empty"), List$Empty$const), prepend(p(List$Empty$const, prepend(text3("Enter two or more local .beamtrace paths. The first run is the baseline."), List$Empty$const)), List$Empty$const));
+    }
+  })(), List$Empty$const)));
 }
 function live_row(model, row) {
   let findings = live_findings_for(model, row.pid);
-  return tr(toList([
-    class$((() => {
-      if (findings instanceof Empty) {
-        return "";
-      } else {
-        return "anomalous";
-      }
-    })()),
-    on_click(new UserSelectedLiveProcess(row.pid))
-  ]), toList([
-    td(List$Empty$const, toList([
-      button(toList([class$("event-link")]), toList([text3(row.label)]))
-    ])),
-    td(List$Empty$const, toList([text3(row.pid)])),
-    td(List$Empty$const, toList([text3(to_string(row.mailbox_len))])),
-    td(List$Empty$const, toList([text3(to_string(row.memory_bytes) + " B")])),
-    td(List$Empty$const, toList([text3(to_string(row.reductions))])),
-    td(List$Empty$const, toList([text3(row.status)])),
-    td(List$Empty$const, toList([text3(finding_names(findings))])),
-    td(List$Empty$const, toList([text3(live_evidence_label(findings))]))
-  ]));
+  return tr(prepend(class$((() => {
+    if (findings instanceof Empty) {
+      return "";
+    } else {
+      return "anomalous";
+    }
+  })()), prepend(on_click(new UserSelectedLiveProcess(row.pid)), List$Empty$const)), prepend(td(List$Empty$const, prepend(button(prepend(class$("event-link"), List$Empty$const), prepend(text3(row.label), List$Empty$const)), List$Empty$const)), prepend(td(List$Empty$const, prepend(text3(row.pid), List$Empty$const)), prepend(td(List$Empty$const, prepend(text3(to_string(row.mailbox_len)), List$Empty$const)), prepend(td(List$Empty$const, prepend(text3(to_string(row.memory_bytes) + " B"), List$Empty$const)), prepend(td(List$Empty$const, prepend(text3(to_string(row.reductions)), List$Empty$const)), prepend(td(List$Empty$const, prepend(text3(row.status), List$Empty$const)), prepend(td(List$Empty$const, prepend(text3(finding_names(findings)), List$Empty$const)), prepend(td(List$Empty$const, prepend(text3(live_evidence_label(findings)), List$Empty$const)), List$Empty$const)))))))));
 }
 function live_table(model, rows) {
-  return div(toList([class$("event-table-wrap")]), toList([
-    table(toList([aria_label("Accessible live process table")]), toList([
-      thead(List$Empty$const, toList([
-        tr(List$Empty$const, toList([
-          th(List$Empty$const, toList([text3("Process")])),
-          th(List$Empty$const, toList([text3("PID")])),
-          th(List$Empty$const, toList([text3("Mailbox")])),
-          th(List$Empty$const, toList([text3("Memory")])),
-          th(List$Empty$const, toList([text3("Reductions")])),
-          th(List$Empty$const, toList([text3("Status")])),
-          th(List$Empty$const, toList([text3("Anomalies")])),
-          th(List$Empty$const, toList([text3("Evidence")]))
-        ]))
-      ])),
-      tbody(List$Empty$const, map2(rows, (row) => {
-        return live_row(model, row);
-      }))
-    ]))
-  ]));
+  return div(prepend(class$("event-table-wrap"), List$Empty$const), prepend(table(prepend(aria_label("Accessible live process table"), List$Empty$const), prepend(thead(List$Empty$const, prepend(tr(List$Empty$const, prepend(th(List$Empty$const, prepend(text3("Process"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("PID"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Mailbox"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Memory"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Reductions"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Status"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Anomalies"), List$Empty$const)), prepend(th(List$Empty$const, prepend(text3("Evidence"), List$Empty$const)), List$Empty$const))))))))), List$Empty$const)), prepend(tbody(List$Empty$const, map2(rows, (row) => {
+    return live_row(model, row);
+  })), List$Empty$const))), List$Empty$const));
 }
 function live_workspace(model) {
   let rows = filtered_live_rows(model);
-  return section(toList([
-    class$("causal panel"),
-    aria_label("Live processes")
-  ]), toList([
-    div(toList([class$("panel-toolbar")]), toList([
-      div(List$Empty$const, toList([
-        p(toList([class$("eyebrow")]), toList([text3("live")])),
-        h2(List$Empty$const, toList([text3("Bounded process sampling")]))
-      ])),
-      div(toList([class$("toolbar-actions")]), toList([
-        span(toList([class$("window-count")]), toList([
-          text3("Topology · supervision " + to_string(length(model.live_supervision)) + " · spawn " + to_string(length(model.live_spawn)) + " · links " + to_string(length(model.live_links)))
-        ])),
-        span(toList([
-          class$("window-count"),
-          aria_live("polite")
-        ]), toList([text3(live_status(model, length(rows)))]))
-      ]))
-    ])),
-    div(toList([class$("canvas-frame")]), toList([
-      canvas(toList([
-        id("causal-canvas"),
-        attribute2("width", "1600"),
-        attribute2("height", "620"),
-        aria_hidden(true)
-      ]))
-    ])),
-    live_table(model, rows)
-  ]));
+  return section(prepend(class$("causal panel"), prepend(aria_label("Live processes"), List$Empty$const)), prepend(div(prepend(class$("panel-toolbar"), List$Empty$const), prepend(div(List$Empty$const, prepend(p(prepend(class$("eyebrow"), List$Empty$const), prepend(text3("live"), List$Empty$const)), prepend(h2(List$Empty$const, prepend(text3("Bounded process sampling"), List$Empty$const)), List$Empty$const))), prepend(div(prepend(class$("toolbar-actions"), List$Empty$const), prepend(span(prepend(class$("window-count"), List$Empty$const), prepend(text3("Topology · supervision " + to_string(length(model.live_supervision)) + " · spawn " + to_string(length(model.live_spawn)) + " · links " + to_string(length(model.live_links))), List$Empty$const)), prepend(span(prepend(class$("window-count"), prepend(aria_live("polite"), List$Empty$const)), prepend(text3(live_status(model, length(rows))), List$Empty$const)), List$Empty$const))), List$Empty$const))), prepend(div(prepend(class$("canvas-frame"), List$Empty$const), prepend(canvas(prepend(id("causal-canvas"), prepend(attribute2("width", "1600"), prepend(attribute2("height", "620"), prepend(aria_hidden(true), List$Empty$const))))), List$Empty$const)), prepend(live_table(model, rows), List$Empty$const))));
 }
 function causal_workspace(model) {
   let $ = model.mode;
@@ -10635,164 +9949,71 @@ function causal_workspace(model) {
   }
 }
 function mode_button(current, mode, label2, shortcut) {
-  return button(toList([
-    class$((() => {
-      let $ = isEqual(current, mode);
-      if ($) {
-        return "mode-button active";
-      } else {
-        return "mode-button";
-      }
-    })()),
-    aria_pressed((() => {
-      let $ = isEqual(current, mode);
-      if ($) {
-        return "true";
-      } else {
-        return "false";
-      }
-    })()),
-    aria_keyshortcuts(shortcut),
-    on_click(new UserSelectedMode(mode))
-  ]), toList([
-    span(toList([class$("mode-dot")]), List$Empty$const),
-    text3(label2)
-  ]));
+  return button(prepend(class$((() => {
+    let $ = isEqual(current, mode);
+    if ($) {
+      return "mode-button active";
+    } else {
+      return "mode-button";
+    }
+  })()), prepend(aria_pressed((() => {
+    let $ = isEqual(current, mode);
+    if ($) {
+      return "true";
+    } else {
+      return "false";
+    }
+  })()), prepend(aria_keyshortcuts(shortcut), prepend(on_click(new UserSelectedMode(mode)), List$Empty$const)))), prepend(span(prepend(class$("mode-dot"), List$Empty$const), List$Empty$const), prepend(text3(label2), List$Empty$const)));
 }
 function mobile_mode_navigation(model) {
-  return nav(toList([
-    class$("mobile-mode-navigation"),
-    aria_label("Mobile workspace mode")
-  ]), toList([
-    mode_button(model.mode, Mode$Capture$const, "Capture", "1"),
-    mode_button(model.mode, Mode$Live$const, "Live", "2"),
-    mode_button(model.mode, Mode$Compare$const, "Compare", "3"),
-    mode_button(model.mode, Mode$Team$const, "Team", "4")
-  ]));
+  return nav(prepend(class$("mobile-mode-navigation"), prepend(aria_label("Mobile workspace mode"), List$Empty$const)), prepend(mode_button(model.mode, Mode$Capture$const, "Capture", "1"), prepend(mode_button(model.mode, Mode$Live$const, "Live", "2"), prepend(mode_button(model.mode, Mode$Compare$const, "Compare", "3"), prepend(mode_button(model.mode, Mode$Team$const, "Team", "4"), List$Empty$const)))));
 }
 function compare_controls(model) {
-  return section(toList([
-    class$("capture-controls compare-controls"),
-    aria_label("Compare controls")
-  ]), toList([
-    label(List$Empty$const, toList([
-      span(List$Empty$const, toList([text3("Trace paths · baseline first")])),
-      textarea(toList([
-        aria_label("Trace paths"),
-        placeholder(`baseline.beamtrace
+  return section(prepend(class$("capture-controls compare-controls"), prepend(aria_label("Compare controls"), List$Empty$const)), prepend(label(List$Empty$const, prepend(span(List$Empty$const, prepend(text3("Trace paths · baseline first"), List$Empty$const)), prepend(textarea(prepend(aria_label("Trace paths"), prepend(placeholder(`baseline.beamtrace
 candidate.beamtrace
-optional-third.beamtrace`),
-        value(model.compare_paths_input),
-        on_input((var0) => {
-          return new UserChangedComparePaths(var0);
-        })
-      ]), model.compare_paths_input)
-    ])),
-    button(toList([
-      disabled(model.compare_loading),
-      on_click(Msg$UserRequestedCompare$const)
-    ]), toList([text3("Run comparison")])),
-    output(toList([
-      class$("capture-status"),
-      aria_live("polite")
-    ]), toList([
-      text3((() => {
-        let $ = model.compare_loading;
-        if ($) {
-          return "Comparing traces";
-        } else {
-          let $1 = model.compare_report;
-          if ($1 instanceof Some) {
-            let report = $1[0];
-            return "Compared " + to_string(report.run_count) + " runs";
-          } else {
-            return "Ready";
-          }
-        }
-      })()),
-      span(List$Empty$const, toList([
-        text3((() => {
-          let $ = model.compare_error;
-          if ($ instanceof Some) {
-            let reason = $[0];
-            return reason;
-          } else {
-            return "PID and clock origins are excluded from alignment";
-          }
-        })())
-      ]))
-    ]))
-  ]));
+optional-third.beamtrace`), prepend(value(model.compare_paths_input), prepend(on_input((var0) => {
+    return new UserChangedComparePaths(var0);
+  }), List$Empty$const)))), model.compare_paths_input), List$Empty$const))), prepend(button(prepend(disabled(model.compare_loading), prepend(on_click(Msg$UserRequestedCompare$const), List$Empty$const)), prepend(text3("Run comparison"), List$Empty$const)), prepend(output(prepend(class$("capture-status"), prepend(aria_live("polite"), List$Empty$const)), prepend(text3((() => {
+    let $ = model.compare_loading;
+    if ($) {
+      return "Comparing traces";
+    } else {
+      let $1 = model.compare_report;
+      if ($1 instanceof Some) {
+        let report = $1[0];
+        return "Compared " + to_string(report.run_count) + " runs";
+      } else {
+        return "Ready";
+      }
+    }
+  })()), prepend(span(List$Empty$const, prepend(text3((() => {
+    let $ = model.compare_error;
+    if ($ instanceof Some) {
+      let reason = $[0];
+      return reason;
+    } else {
+      return "PID and clock origins are excluded from alignment";
+    }
+  })()), List$Empty$const)), List$Empty$const))), List$Empty$const))));
 }
 function capture_save_controls(model) {
   let $ = capture_ready(model.capture_phase);
   if ($) {
-    return div(toList([class$("capture-save")]), toList([
-      label(List$Empty$const, toList([
-        span(List$Empty$const, toList([text3("Save path")])),
-        input(toList([
-          type_("text"),
-          aria_label("Save path"),
-          value(model.save_path),
-          on_input((var0) => {
-            return new UserChangedSavePath(var0);
-          })
-        ]))
-      ])),
-      button(toList([on_click(Msg$UserRequestedSave$const)]), toList([text3("Save capture")]))
-    ]));
+    return div(prepend(class$("capture-save"), List$Empty$const), prepend(label(List$Empty$const, prepend(span(List$Empty$const, prepend(text3("Save path"), List$Empty$const)), prepend(input(prepend(type_("text"), prepend(aria_label("Save path"), prepend(value(model.save_path), prepend(on_input((var0) => {
+      return new UserChangedSavePath(var0);
+    }), List$Empty$const))))), List$Empty$const))), prepend(button(prepend(on_click(Msg$UserRequestedSave$const), List$Empty$const), prepend(text3("Save capture"), List$Empty$const)), List$Empty$const)));
   } else {
-    return div(toList([class$("capture-save pending")]), List$Empty$const);
+    return div(prepend(class$("capture-save pending"), List$Empty$const), List$Empty$const);
   }
 }
 function capture_advanced(model) {
-  return details(toList([class$("capture-advanced")]), toList([
-    summary(List$Empty$const, toList([text3("Advanced")])),
-    div(toList([class$("capture-advanced-grid")]), toList([
-      label(List$Empty$const, toList([
-        span(List$Empty$const, toList([text3("AQL condition")])),
-        input(toList([
-          type_("text"),
-          aria_label("AQL condition"),
-          placeholder("arg.0.tag == order"),
-          value(model.capture_where),
-          on_input((var0) => {
-            return new UserChangedCaptureWhere(var0);
-          })
-        ]))
-      ])),
-      label(List$Empty$const, toList([
-        span(List$Empty$const, toList([text3("Framework preset")])),
-        select(toList([
-          aria_label("Framework preset"),
-          value(model.capture_preset),
-          on_input((var0) => {
-            return new UserChangedCapturePreset(var0);
-          })
-        ]), toList([
-          preset_option("generic", "Generic"),
-          preset_option("gleam-actor", "Gleam actor"),
-          preset_option("wisp-mist", "Wisp / Mist"),
-          preset_option("gen-server", "GenServer"),
-          preset_option("phoenix", "Phoenix"),
-          preset_option("erlang-supervisor", "Erlang supervisor")
-        ]))
-      ])),
-      label(List$Empty$const, toList([
-        span(List$Empty$const, toList([text3("Max roots")])),
-        input(toList([
-          type_("number"),
-          aria_label("Max roots"),
-          attribute2("min", "1"),
-          attribute2("max", "1000"),
-          value(model.capture_max_roots),
-          on_input((var0) => {
-            return new UserChangedMaxRoots(var0);
-          })
-        ]))
-      ]))
-    ]))
-  ]));
+  return details(prepend(class$("capture-advanced"), List$Empty$const), prepend(summary(List$Empty$const, prepend(text3("Advanced"), List$Empty$const)), prepend(div(prepend(class$("capture-advanced-grid"), List$Empty$const), prepend(label(List$Empty$const, prepend(span(List$Empty$const, prepend(text3("AQL condition"), List$Empty$const)), prepend(input(prepend(type_("text"), prepend(aria_label("AQL condition"), prepend(placeholder("arg.0.tag == order"), prepend(value(model.capture_where), prepend(on_input((var0) => {
+    return new UserChangedCaptureWhere(var0);
+  }), List$Empty$const)))))), List$Empty$const))), prepend(label(List$Empty$const, prepend(span(List$Empty$const, prepend(text3("Framework preset"), List$Empty$const)), prepend(select(prepend(aria_label("Framework preset"), prepend(value(model.capture_preset), prepend(on_input((var0) => {
+    return new UserChangedCapturePreset(var0);
+  }), List$Empty$const))), prepend(preset_option("generic", "Generic"), prepend(preset_option("gleam-actor", "Gleam actor"), prepend(preset_option("wisp-mist", "Wisp / Mist"), prepend(preset_option("gen-server", "GenServer"), prepend(preset_option("phoenix", "Phoenix"), prepend(preset_option("erlang-supervisor", "Erlang supervisor"), List$Empty$const))))))), List$Empty$const))), prepend(label(List$Empty$const, prepend(span(List$Empty$const, prepend(text3("Max roots"), List$Empty$const)), prepend(input(prepend(type_("number"), prepend(aria_label("Max roots"), prepend(attribute2("min", "1"), prepend(attribute2("max", "1000"), prepend(value(model.capture_max_roots), prepend(on_input((var0) => {
+    return new UserChangedMaxRoots(var0);
+  }), List$Empty$const))))))), List$Empty$const))), List$Empty$const)))), List$Empty$const)));
 }
 function archive_overview(model) {
   let _block;
@@ -10807,22 +10028,7 @@ function archive_overview(model) {
   let $ = _block;
   let count = $[0];
   let outcome = $[1];
-  return section(toList([
-    class$("capture-controls archive-overview"),
-    aria_label("Sealed archive")
-  ]), toList([
-    div(List$Empty$const, toList([
-      h2(List$Empty$const, toList([text3("Sealed archive")])),
-      p(List$Empty$const, toList([
-        text3(to_string(count) + " events · " + outcome + ". Choose a save path to retain this archive.")
-      ]))
-    ])),
-    capture_save_controls(model),
-    button(toList([
-      class$("quiet-button"),
-      on_click(Msg$UserOpenedCaptureForm$const)
-    ]), toList([text3("New capture")]))
-  ]));
+  return section(prepend(class$("capture-controls archive-overview"), prepend(aria_label("Sealed archive"), List$Empty$const)), prepend(div(List$Empty$const, prepend(h2(List$Empty$const, prepend(text3("Sealed archive"), List$Empty$const)), prepend(p(List$Empty$const, prepend(text3(to_string(count) + " events · " + outcome + ". Choose a save path to retain this archive."), List$Empty$const)), List$Empty$const))), prepend(capture_save_controls(model), prepend(button(prepend(class$("quiet-button"), prepend(on_click(Msg$UserOpenedCaptureForm$const), List$Empty$const)), prepend(text3("New capture"), List$Empty$const)), List$Empty$const))));
 }
 function capture_controls(model) {
   let sealed_landing = capture_ready(model.capture_phase) && !model.capture_form_open;
@@ -10831,55 +10037,18 @@ function capture_controls(model) {
     if (sealed_landing) {
       return archive_overview(model);
     } else {
-      return section(toList([
-        class$("capture-controls"),
-        aria_label("Capture controls")
-      ]), toList([
-        label(List$Empty$const, toList([
-          span(List$Empty$const, toList([text3("MFA trigger")])),
-          input(toList([
-            type_("text"),
-            aria_label("MFA trigger"),
-            placeholder("module:function/arity"),
-            attribute2("list", "mfa-candidates"),
-            value(model.trigger_input),
-            on_input((var0) => {
-              return new UserChangedTrigger(var0);
-            })
-          ])),
-          datalist(toList([id("mfa-candidates")]), map2(model.mfa_suggestions, (candidate) => {
-            return option(toList([value(candidate)]), candidate);
-          }))
-        ])),
-        button(toList([
-          disabled(capture_arm_disabled(model.capture_phase)),
-          on_click(Msg$UserRequestedArm$const)
-        ]), toList([text3("Arm capture")])),
-        button(toList([
-          disabled(!capture_busy(model.capture_phase)),
-          on_click(Msg$UserRequestedCancel$const)
-        ]), toList([text3("Cancel capture")])),
-        capture_advanced(model),
-        capture_save_controls(model),
-        (() => {
-          let $1 = capture_ready(model.capture_phase);
-          if ($1) {
-            return button(toList([
-              class$("quiet-button"),
-              on_click(Msg$UserClosedCaptureForm$const)
-            ]), toList([text3("Back to result")]));
-          } else {
-            return div(List$Empty$const, List$Empty$const);
-          }
-        })(),
-        output(toList([
-          class$("capture-status"),
-          aria_live("polite")
-        ]), toList([
-          text3(capture_phase_label(model.capture_phase)),
-          span(List$Empty$const, toList([text3(capture_recovery(model))]))
-        ]))
-      ]));
+      return section(prepend(class$("capture-controls"), prepend(aria_label("Capture controls"), List$Empty$const)), prepend(label(List$Empty$const, prepend(span(List$Empty$const, prepend(text3("MFA trigger"), List$Empty$const)), prepend(input(prepend(type_("text"), prepend(aria_label("MFA trigger"), prepend(placeholder("module:function/arity"), prepend(attribute2("list", "mfa-candidates"), prepend(value(model.trigger_input), prepend(on_input((var0) => {
+        return new UserChangedTrigger(var0);
+      }), List$Empty$const))))))), prepend(datalist(prepend(id("mfa-candidates"), List$Empty$const), map2(model.mfa_suggestions, (candidate) => {
+        return option(prepend(value(candidate), List$Empty$const), candidate);
+      })), List$Empty$const)))), prepend(button(prepend(disabled(capture_arm_disabled(model.capture_phase)), prepend(on_click(Msg$UserRequestedArm$const), List$Empty$const)), prepend(text3("Arm capture"), List$Empty$const)), prepend(button(prepend(disabled(!capture_busy(model.capture_phase)), prepend(on_click(Msg$UserRequestedCancel$const), List$Empty$const)), prepend(text3("Cancel capture"), List$Empty$const)), prepend(capture_advanced(model), prepend(capture_save_controls(model), prepend((() => {
+        let $1 = capture_ready(model.capture_phase);
+        if ($1) {
+          return button(prepend(class$("quiet-button"), prepend(on_click(Msg$UserClosedCaptureForm$const), List$Empty$const)), prepend(text3("Back to result"), List$Empty$const));
+        } else {
+          return div(List$Empty$const, List$Empty$const);
+        }
+      })(), prepend(output(prepend(class$("capture-status"), prepend(aria_live("polite"), List$Empty$const)), prepend(text3(capture_phase_label(model.capture_phase)), prepend(span(List$Empty$const, prepend(text3(capture_recovery(model)), List$Empty$const)), List$Empty$const))), List$Empty$const))))))));
     }
   } else if ($ instanceof Compare) {
     return compare_controls(model);
@@ -10888,74 +10057,16 @@ function capture_controls(model) {
   }
 }
 function workspace_header(model) {
-  return header(toList([class$("topbar")]), toList([
-    div(toList([class$("brand")]), toList([
-      span(toList([
-        class$("brand-mark"),
-        aria_hidden(true)
-      ]), toList([text3("BT")])),
-      div(List$Empty$const, toList([
-        h1(List$Empty$const, toList([text3("BeamTrace")])),
-        p(List$Empty$const, toList([text3("BEAM causal workbench")]))
-      ]))
-    ])),
-    nav(toList([aria_label("Workspace mode")]), toList([
-      mode_button(model.mode, Mode$Capture$const, "Capture", "1"),
-      mode_button(model.mode, Mode$Live$const, "Live", "2"),
-      mode_button(model.mode, Mode$Compare$const, "Compare", "3"),
-      mode_button(model.mode, Mode$Team$const, "Team traces", "4")
-    ])),
-    div(toList([class$("topbar-actions")]), toList([
-      label(toList([class$("search")]), toList([
-        span(toList([class$("sr-only")]), toList([text3("Search events")])),
-        input(toList([
-          id("event-search"),
-          type_("search"),
-          value(model.query),
-          placeholder("Search actor, message, MFA…"),
-          aria_label("Search events"),
-          aria_keyshortcuts("/"),
-          on_input((var0) => {
-            return new UserChangedQuery(var0);
-          })
-        ]))
-      ])),
-      button(toList([
-        class$("quiet-button"),
-        aria_keyshortcuts("Control+K Meta+K"),
-        on_click(Msg$UserOpenedPalette$const)
-      ]), toList([
-        text3("Commands  " + modifier_label() + "K")
-      ])),
-      button(toList([
-        class$("quiet-button theme-button"),
-        aria_label("Change color theme"),
-        on_click(Msg$UserCycledTheme$const)
-      ]), toList([text3("Theme · " + theme_label(model.theme))]))
-    ]))
-  ]));
+  return header(prepend(class$("topbar"), List$Empty$const), prepend(div(prepend(class$("brand"), List$Empty$const), prepend(span(prepend(class$("brand-mark"), prepend(aria_hidden(true), List$Empty$const)), prepend(text3("BT"), List$Empty$const)), prepend(div(List$Empty$const, prepend(h1(List$Empty$const, prepend(text3("BeamTrace"), List$Empty$const)), prepend(p(List$Empty$const, prepend(text3("BEAM causal workbench"), List$Empty$const)), List$Empty$const))), List$Empty$const))), prepend(nav(prepend(aria_label("Workspace mode"), List$Empty$const), prepend(mode_button(model.mode, Mode$Capture$const, "Capture", "1"), prepend(mode_button(model.mode, Mode$Live$const, "Live", "2"), prepend(mode_button(model.mode, Mode$Compare$const, "Compare", "3"), prepend(mode_button(model.mode, Mode$Team$const, "Team traces", "4"), List$Empty$const))))), prepend(div(prepend(class$("topbar-actions"), List$Empty$const), prepend(label(prepend(class$("search"), List$Empty$const), prepend(span(prepend(class$("sr-only"), List$Empty$const), prepend(text3("Search events"), List$Empty$const)), prepend(input(prepend(id("event-search"), prepend(type_("search"), prepend(value(model.query), prepend(placeholder("Search actor, message, MFA…"), prepend(aria_label("Search events"), prepend(aria_keyshortcuts("/"), prepend(on_input((var0) => {
+    return new UserChangedQuery(var0);
+  }), List$Empty$const)))))))), List$Empty$const))), prepend(button(prepend(class$("quiet-button"), prepend(aria_keyshortcuts("Control+K Meta+K"), prepend(on_click(Msg$UserOpenedPalette$const), List$Empty$const))), prepend(text3("Commands  " + modifier_label() + "K"), List$Empty$const)), prepend(button(prepend(class$("quiet-button theme-button"), prepend(aria_label("Change color theme: Theme · " + theme_label(model.theme)), prepend(on_click(Msg$UserCycledTheme$const), List$Empty$const))), prepend(text3("Theme · " + theme_label(model.theme)), List$Empty$const)), List$Empty$const)))), List$Empty$const))));
 }
 function workspace(model) {
-  return main(toList([
-    class$("workspace"),
-    attribute2("data-mode", mode_slug(model.mode))
-  ]), toList([
-    workspace_header(model),
-    capture_controls(model),
-    mobile_mode_navigation(model),
-    div(toList([class$("workspace-grid")]), toList([
-      session_navigator(model),
-      causal_workspace(model),
-      inspector(model)
-    ])),
-    mobile_drawers(model),
-    minimap(model),
-    palette2(model)
-  ]));
+  return main(prepend(class$("workspace"), prepend(attribute2("data-mode", mode_slug(model.mode)), List$Empty$const)), prepend(workspace_header(model), prepend(capture_controls(model), prepend(mobile_mode_navigation(model), prepend(div(prepend(class$("workspace-grid"), List$Empty$const), prepend(session_navigator(model), prepend(causal_workspace(model), prepend(inspector(model), List$Empty$const)))), prepend(mobile_drawers(model), prepend(minimap(model), prepend(palette2(model), List$Empty$const))))))));
 }
 
 // build/dev/javascript/beamtrace_web/beamtrace_web.mjs
-var FILEPATH = "src/beamtrace_web.gleam";
+var FILEPATH = "src\\beamtrace_web.gleam";
 function page_limit(model) {
   let requested = model.viewport_size * 2;
   let $ = requested < 200;
@@ -10994,12 +10105,12 @@ function update3(loop$model, loop$message) {
     if (message instanceof UserSelectedMode) {
       let $ = message[0];
       if ($ instanceof Live) {
-        return finish_update(update2(model, message), toList([load2()]));
+        return finish_update(update2(model, message), prepend(load2(), List$Empty$const));
       } else if ($ instanceof Team) {
         let next = update2(model, message);
         let $1 = next.team_traces;
         if ($1 instanceof Empty) {
-          return finish_update(next, toList([load_traces("")]));
+          return finish_update(next, prepend(load_traces(""), List$Empty$const));
         } else {
           return finish_update(next, List$Empty$const);
         }
@@ -11031,44 +10142,42 @@ function update3(loop$model, loop$message) {
       }
     } else if (message instanceof UserChangedTrigger) {
       let query = message[0];
-      return finish_update(update2(model, message), toList([search_mfas(query)]));
+      return finish_update(update2(model, message), prepend(search_mfas(query), List$Empty$const));
     } else if (message instanceof UserRequestedArm) {
       let next = update2(model, message);
       let $ = next.capture_phase;
       if ($ instanceof Arming) {
-        return finish_update(next, toList([
-          arm(next.trigger_input, next.capture_where, next.capture_preset, next.capture_max_roots)
-        ]));
+        return finish_update(next, prepend(arm(next.trigger_input, next.capture_where, next.capture_preset, next.capture_max_roots), List$Empty$const));
       } else {
         return finish_update(next, List$Empty$const);
       }
     } else if (message instanceof CaptureArmAccepted) {
-      return finish_update(update2(model, message), toList([poll_after(150)]));
+      return finish_update(update2(model, message), prepend(poll_after(150), List$Empty$const));
     } else if (message instanceof PollCaptureStatus) {
-      return finish_update(update2(model, message), toList([status()]));
+      return finish_update(update2(model, message), prepend(status(), List$Empty$const));
     } else if (message instanceof CaptureStatusLoaded) {
       let phase = message[0];
       let next = update2(model, message);
       if (phase instanceof Arming) {
-        return finish_update(next, toList([poll_after(150)]));
+        return finish_update(next, prepend(poll_after(150), List$Empty$const));
       } else if (phase instanceof Armed) {
-        return finish_update(next, toList([poll_after(150)]));
+        return finish_update(next, prepend(poll_after(150), List$Empty$const));
       } else if (phase instanceof Cancelling) {
-        return finish_update(next, toList([poll_after(150)]));
+        return finish_update(next, prepend(poll_after(150), List$Empty$const));
       } else if (phase instanceof Ready) {
-        return finish_update(next, toList([load()]));
+        return finish_update(next, prepend(load(), List$Empty$const));
       } else {
         return finish_update(next, List$Empty$const);
       }
     } else if (message instanceof UserRequestedCancel) {
-      return finish_update(update2(model, message), toList([cancel()]));
+      return finish_update(update2(model, message), prepend(cancel(), List$Empty$const));
     } else if (message instanceof UserRequestedSave) {
-      return finish_update(update2(model, message), toList([save(model.save_path)]));
+      return finish_update(update2(model, message), prepend(save(model.save_path), List$Empty$const));
     } else if (message instanceof PollLive) {
       let next = update2(model, message);
       let $ = next.mode;
       if ($ instanceof Live) {
-        return finish_update(next, toList([load2()]));
+        return finish_update(next, prepend(load2(), List$Empty$const));
       } else {
         return finish_update(next, List$Empty$const);
       }
@@ -11076,7 +10185,7 @@ function update3(loop$model, loop$message) {
       let next = update2(model, message);
       let $ = next.mode;
       if ($ instanceof Live) {
-        return finish_update(next, toList([poll_after2(1000)]));
+        return finish_update(next, prepend(poll_after2(1000), List$Empty$const));
       } else {
         return finish_update(next, List$Empty$const);
       }
@@ -11084,7 +10193,7 @@ function update3(loop$model, loop$message) {
       let next = update2(model, message);
       let $ = next.mode;
       if ($ instanceof Live) {
-        return finish_update(next, toList([poll_after2(2000)]));
+        return finish_update(next, prepend(poll_after2(2000), List$Empty$const));
       } else {
         return finish_update(next, List$Empty$const);
       }
@@ -11092,18 +10201,18 @@ function update3(loop$model, loop$message) {
       let next = update2(model, message);
       let $ = next.compare_loading;
       if ($) {
-        return finish_update(next, toList([run2(compare_paths(next))]));
+        return finish_update(next, prepend(run2(compare_paths(next)), List$Empty$const));
       } else {
         return finish_update(next, List$Empty$const);
       }
     } else if (message instanceof UserRequestedTeamTraces) {
-      return finish_update(update2(model, message), toList([load_traces("")]));
+      return finish_update(update2(model, message), prepend(load_traces(""), List$Empty$const));
     } else if (message instanceof UserRequestedMoreTeamTraces) {
       let next = update2(model, message);
       let $ = model.team_next_cursor;
       if ($ instanceof Some) {
         let cursor = $[0];
-        return finish_update(next, toList([load_traces(cursor)]));
+        return finish_update(next, prepend(load_traces(cursor), List$Empty$const));
       } else {
         return finish_update(next, List$Empty$const);
       }
@@ -11114,7 +10223,7 @@ function update3(loop$model, loop$message) {
       if ($ instanceof Some) {
         let trace = $[0];
         if (!trace.locked) {
-          return finish_update(next, toList([load_events(trace_id, "")]));
+          return finish_update(next, prepend(load_events(trace_id, ""), List$Empty$const));
         } else {
           return finish_update(next, List$Empty$const);
         }
@@ -11125,7 +10234,7 @@ function update3(loop$model, loop$message) {
       let next = update2(model, message);
       let $ = next.compare_loading;
       if ($) {
-        return finish_update(next, toList([run2(compare_paths(next))]));
+        return finish_update(next, prepend(run2(compare_paths(next)), List$Empty$const));
       } else {
         return finish_update(next, List$Empty$const);
       }
@@ -11136,32 +10245,25 @@ function update3(loop$model, loop$message) {
       if ($ instanceof Some && $1 instanceof Some) {
         let trace_id = $[0];
         let cursor = $1[0];
-        return finish_update(next, toList([load_events(trace_id, cursor)]));
+        return finish_update(next, prepend(load_events(trace_id, cursor), List$Empty$const));
       } else {
         return finish_update(next, List$Empty$const);
       }
     } else if (message instanceof UserRequestedTraceHold) {
       let trace_id = message.trace_id;
       let enabled = message.enabled;
-      return finish_update(update2(model, message), toList([set_hold(trace_id, enabled)]));
+      return finish_update(update2(model, message), prepend(set_hold(trace_id, enabled), List$Empty$const));
     } else {
       return finish_update(update2(model, message), List$Empty$const);
     }
   }
 }
 function startup_effect(model) {
-  return batch(toList([
-    draw_effect(model),
-    load3(0, 200, remote_query(model)),
-    load(),
-    status(),
-    install_cleanup(),
-    from2((dispatch2) => {
-      return installShortcuts((key) => {
-        return dispatch2(new UserPressedKey(key));
-      });
-    })
-  ]));
+  return batch(prepend(draw_effect(model), prepend(load3(0, 200, remote_query(model)), prepend(load(), prepend(status(), prepend(install_cleanup(), prepend(from2((dispatch2) => {
+    return installShortcuts((key) => {
+      return dispatch2(new UserPressedKey(key));
+    });
+  }), List$Empty$const)))))));
 }
 function init2(_) {
   let model = init_remote();
@@ -11181,10 +10283,7 @@ function init2(_) {
     if ($1) {
       return [
         next,
-        batch(toList([
-          startup_effect(next),
-          run2(compare_paths(next))
-        ]))
+        batch(prepend(startup_effect(next), prepend(run2(compare_paths(next)), List$Empty$const)))
       ];
     } else {
       return [next, startup_effect(next)];

@@ -216,8 +216,8 @@ $releasePleaseWorkflow = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.gi
 foreach ($marker in @(
     'branches: [main]',
     'environment: release-automation',
-    'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1',
-    'googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7',
+    'actions/create-github-app-token@',
+    'googleapis/release-please-action@',
     'auth-method: oidc',
     'doppler-project: beamtrace',
     'doppler-config: automation',
