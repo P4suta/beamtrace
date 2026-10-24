@@ -61,7 +61,9 @@ jobs:
         run: npm ci
       - name: Use locked web bundler
         shell: pwsh
-        run: (Join-Path $PWD 'node_modules/.bin') >> $env:GITHUB_PATH
+        run: |
+          $bin = if ($IsWindows) { 'node_modules/bun/bin' } else { 'node_modules/.bin' }
+          (Join-Path $PWD $bin) >> $env:GITHUB_PATH
       - name: TDD gate
         shell: pwsh
         env:
@@ -138,7 +140,9 @@ jobs:
         run: npm ci
       - name: Use locked web bundler
         shell: pwsh
-        run: (Join-Path $PWD 'node_modules/.bin') >> $env:GITHUB_PATH
+        run: |
+          $bin = if ($IsWindows) { 'node_modules/bun/bin' } else { 'node_modules/.bin' }
+          (Join-Path $PWD $bin) >> $env:GITHUB_PATH
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: Browser acceptance tests

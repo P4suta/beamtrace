@@ -9210,7 +9210,7 @@ function workspace(model) {
 }
 
 // build/dev/javascript/beamtrace_web/beamtrace_web.mjs
-var FILEPATH = "src\\beamtrace_web.gleam";
+var FILEPATH = "src/beamtrace_web.gleam";
 function page_limit(model) {
   let requested = model.viewport_size * 2;
   let $ = requested < 200;

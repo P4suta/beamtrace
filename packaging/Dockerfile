@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 FROM oven/bun:1.4.4-alpine@sha256:4cf82f5686b196504fe119db3fcd9185b191f82ece82c40680e597228ec6070a AS bun
 
-FROM ghcr.io/gleam-lang/gleam:v1.18.1-erlang-alpine@sha256:7c82e4a284b7c05c26eac34db497ea0e63ce7cb04bd019d966d70338eb172b68 AS builder
+FROM ghcr.io/gleam-lang/gleam:v1.19.2-erlang-alpine@sha256:64b1df35a9611332d51f77c97f16f50ec97863162ba8824400ed4c8dff6378ac AS builder
 
 RUN apk add --no-cache build-base git
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
