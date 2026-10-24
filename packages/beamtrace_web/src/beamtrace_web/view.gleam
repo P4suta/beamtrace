@@ -368,7 +368,9 @@ fn workspace_header(model: workspace.Model) -> Element(workspace.Msg) {
       html.button(
         [
           attribute.class("quiet-button theme-button"),
-          attribute.aria_label("Change color theme"),
+          attribute.aria_label(
+            "Change color theme: Theme · " <> theme_label(model.theme),
+          ),
           event.on_click(workspace.UserCycledTheme),
         ],
         [html.text("Theme · " <> theme_label(model.theme))],

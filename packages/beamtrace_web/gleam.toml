@@ -15,6 +15,9 @@ lustre = { git = "https://github.com/P4suta/lustre.git", ref = "2d0b444a52bab6da
 gleeunit = ">= 1.9.0 and < 2.0.0"
 lustre_dev_tools = ">= 2.3.0 and < 3.0.0"
 
+[tools.lustre.bin]
+bun = "system"
+
 [tools.lustre.build]
 no_html = true
 no_tailwind = true

@@ -24,6 +24,7 @@ function Remove-PackageTestDirectory {
 
 $archiveOutput = & (Join-Path $PSScriptRoot 'package.ps1') -SkipTests
 if ($LASTEXITCODE -ne 0) {
+    $archiveOutput | ForEach-Object { Write-Host $_ }
     exit $LASTEXITCODE
 }
 

@@ -45,9 +45,10 @@ if ($RequireElixir) {
     $env:BEAMTRACE_REQUIRE_ELIXIR = '1'
 }
 
+[string] $checkShell = Join-Path $PSHOME $(if ($IsWindows) { 'pwsh.exe' } else { 'pwsh' })
 foreach ($step in $steps) {
     Write-Host "TDD gate: $step"
-    & (Join-Path $PSScriptRoot $step)
+    & $checkShell -NoProfile -File (Join-Path $PSScriptRoot $step)
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }
