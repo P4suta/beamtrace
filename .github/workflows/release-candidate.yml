@@ -47,6 +47,9 @@ jobs:
           otp-version: '29'
           gleam-version: 'v1.19.2'
           rebar3-version: '3.27.3'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.4'
       - name: Build and smoke-test release archive without publishing
         shell: pwsh
         run: ./scripts/test-package.ps1
