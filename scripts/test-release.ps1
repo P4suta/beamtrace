@@ -216,10 +216,13 @@ $releasePleaseWorkflow = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.gi
 foreach ($marker in @(
     'branches: [main]',
     'environment: release-automation',
-    'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1',
-    'googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7',
-    'client-id: ${{ vars.RELEASE_PLEASE_APP_CLIENT_ID }}',
-    'private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}',
+    'actions/create-github-app-token@',
+    'googleapis/release-please-action@',
+    'auth-method: oidc',
+    'doppler-project: beamtrace',
+    'doppler-config: automation',
+    'outputs.GITHUB_APP_CLIENT_ID',
+    'outputs.GITHUB_APP_PRIVATE_KEY',
     'permission-contents: write',
     'permission-pull-requests: write',
     'permission-issues: write'
@@ -405,6 +408,7 @@ foreach ($marker in @(
     'Get-FileHash',
     '[string] $RepositoryRoot',
     "Join-Path `$repoRoot 'scripts/project-version.ps1'",
+    'HEXPM_API_KEY',
     "'I am not using semantic versioning' | & gleam publish --yes",
     'already exists',
     'repo.hex.pm/tarballs'

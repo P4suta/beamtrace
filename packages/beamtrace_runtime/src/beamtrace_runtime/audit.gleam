@@ -4,7 +4,8 @@ import gleam/int
 import gleam/list
 import gleam/string
 
-pub const genesis_hash = "0000000000000000000000000000000000000000000000000000000000000000"
+pub const genesis_hash =
+  "0000000000000000000000000000000000000000000000000000000000000000"
 
 pub type AuditEntry {
   AuditEntry(

@@ -4,7 +4,8 @@ import gleam/list
 import gleam/string
 import gleeunit/should
 
-const verifier = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
+const verifier =
+  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
 
 pub fn token_request_is_https_pkce_only_and_form_encoded_test() {
   let assert Ok(request) =

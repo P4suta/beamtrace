@@ -8,6 +8,7 @@ node_modules
 test-results
 playwright-report
 **/build
+**/.lustre
 **/dist
 **/erl_crash.dump
 **/*.beam

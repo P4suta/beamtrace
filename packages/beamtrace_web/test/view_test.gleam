@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 import beamtrace_web/view
 import beamtrace_web/workspace
+import gleam/list
 import gleam/option.{None}
 import gleam/string
 import gleeunit/should
@@ -121,6 +122,22 @@ pub fn workspace_has_bt_brand_theme_mobile_drawers_and_evidence_summary_test() {
   html |> string.contains("What this trace establishes") |> should.be_true()
   html |> string.contains("Delivery verification") |> should.be_true()
   html |> string.contains("Evidence basis") |> should.be_true()
+}
+
+pub fn theme_button_names_include_visible_modes_test() {
+  let system = workspace.init([])
+  let light = workspace.update(system, workspace.UserCycledTheme)
+  let dark = workspace.update(light, workspace.UserCycledTheme)
+  [#(system, "System"), #(light, "Light"), #(dark, "Dark")]
+  |> list.each(fn(pair) {
+    let #(model, mode) = pair
+    let label = "aria-label=\"Change color theme: Theme · " <> mode <> "\""
+    model
+    |> view.workspace
+    |> element.to_string
+    |> string.contains(label)
+    |> should.be_true()
+  })
 }
 
 pub fn capture_workspace_renders_only_candidates_returned_by_the_target_test() {
