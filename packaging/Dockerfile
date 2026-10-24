@@ -1,7 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
+FROM oven/bun:1.4.4-alpine@sha256:4cf82f5686b196504fe119db3fcd9185b191f82ece82c40680e597228ec6070a AS bun
+
 FROM ghcr.io/gleam-lang/gleam:v1.18.1-erlang-alpine@sha256:7c82e4a284b7c05c26eac34db497ea0e63ce7cb04bd019d966d70338eb172b68 AS builder
 
 RUN apk add --no-cache build-base git
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /src
 COPY packages/beamtrace_core packages/beamtrace_core
 COPY packages/beamtrace_tui packages/beamtrace_tui
