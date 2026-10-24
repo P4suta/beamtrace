@@ -79,6 +79,7 @@ if ($ContainerBoundary) {
         '--volume', $mount,
         '--workdir', '/src/packages/beamtrace_core',
         # renovate: datasource=docker depName=ghcr.io/gleam-lang/gleam
+        # renovate: datasource=docker depName=ghcr.io/gleam-lang/gleam
         'ghcr.io/gleam-lang/gleam:v1.19.2-erlang-alpine@sha256:64b1df35a9611332d51f77c97f16f50ec97863162ba8824400ed4c8dff6378ac',
         'gleam', 'export', 'hex-tarball'
     )
