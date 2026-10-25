@@ -46,7 +46,7 @@ jobs:
         with:
           otp-version: '29'
           gleam-version: 'v1.19.2'
-          rebar3-version: '3.27.3'
+          rebar3-version: '3.28.0'
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
@@ -95,7 +95,7 @@ jobs:
         with:
           otp-version: '29'
           gleam-version: 'v1.19.2'
-          rebar3-version: '3.27.3'
+          rebar3-version: '3.28.0'
       - name: Build and inspect Hex tarball without publishing
         shell: pwsh
         run: ./scripts/test-hex-package.ps1

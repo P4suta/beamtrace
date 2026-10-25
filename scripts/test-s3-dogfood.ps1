@@ -14,7 +14,7 @@ $containerName = "beamtrace-s3-dogfood-$PID"
 # renovate: datasource=docker depName=alpine/openssl
 $opensslImage = 'alpine/openssl:3.5.9@sha256:59c5cb51e536d40587667229468b007a2a6cae1705397e59e5f7774c08b74029'
 # renovate: datasource=docker depName=versity/versitygw
-$gatewayImage = 'versity/versitygw:v1.9.0@sha256:eb7f786fcd91e72194e48fcf1ac16302d686bf8e3a71434bdbc067a6efd3fdc7'
+$gatewayImage = 'versity/versitygw:v1.10.0@sha256:89cad13cc981986ee284cbafea4613f9533ce6fd5f37a2c96c4c4fb8adb3a316'
 $accessKey = 'beamtrace-dogfood'
 $secretKey = 'beamtrace-dogfood-only-2026'
 $containerStarted = $false
