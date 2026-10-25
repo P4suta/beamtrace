@@ -7,8 +7,8 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $toolDir = Join-Path $repoRoot '.tools'
 $rebar = Join-Path $toolDir 'rebar3'
 # renovate: datasource=github-release-attachments depName=erlang/rebar3
-$rebar3Version = '3.27.3'
-$expectedSha256 = 'f1d87d78decfc56b87d971c75ee6355698ec0c49fadd57f2c056043b7ca291b5'
+$rebar3Version = '3.28.0'
+$expectedSha256 = '5a28b1cca082d3b023ec0f5df9d9f9d52557036c6f2a21c1ffa11b93a984dd42'
 
 New-Item -ItemType Directory -Path $toolDir -Force | Out-Null
 
