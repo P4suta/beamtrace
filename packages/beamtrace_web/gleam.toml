@@ -1,5 +1,5 @@
 name = "beamtrace_web"
-version = "0.2.0"
+version = "0.3.0"
 target = "javascript"
 gleam = ">= 1.18.0 and < 2.0.0"
 licences = ["Apache-2.0", "MIT"]
