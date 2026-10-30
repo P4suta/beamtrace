@@ -213,13 +213,100 @@ foreach ($marker in @('* @P4suta', '/.github/ @P4suta', '/SECURITY.md @P4suta'))
 }
 
 $ci = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/workflows/ci.yml')
+function Get-WorkflowJob([string] $Source, [string] $Id) {
+    $match = [regex]::Match($Source, "(?ms)^  $([regex]::Escape($Id)):\r?\n.*?(?=^  [a-z][a-z0-9-]*:|\z)")
+    if (-not $match.Success) { throw "Workflow job is missing: $Id" }
+    return $match.Value
+}
+
+function Get-WorkflowGate([string] $Source) {
+    $runs = [regex]::Matches($Source, '(?m)^        run: \|\r?\n((?:          [^\r\n]*\r?\n|\r?\n)+)')
+    if ($runs.Count -ne 1 -or $Source -notmatch '(?m)^        shell: pwsh\r?$') {
+        throw 'A workflow gate must have exactly one PowerShell run block.'
+    }
+    $body = [regex]::Replace($runs[0].Groups[1].Value, '(?m)^          ', '')
+    $tokens = $null
+    $errors = $null
+    $ast = [System.Management.Automation.Language.Parser]::ParseInput($body, [ref] $tokens, [ref] $errors)
+    if ($errors.Count -ne 0 -or $null -ne $ast.Find({ param($node) $node -is [System.Management.Automation.Language.ExitStatementAst] }, $true)) {
+        throw 'Workflow gates must parse and return or throw without exiting the test process.'
+    }
+    return [scriptblock]::Create($body)
+}
+
+function Assert-GateResult([scriptblock] $Gate, [bool] $Expected, [string] $Case) {
+    $accepted = $true
+    try { & $Gate | Out-Null } catch { $accepted = $false }
+    if ($accepted -ne $Expected) { throw "Workflow gate returned an unexpected verdict: $Case" }
+}
+
+function Test-NeedsGate([string] $Job, [string[]] $Keys) {
+    $needsMatch = [regex]::Match($Job, '(?m)^    needs: \[([^\]]+)\]\r?$')
+    $actual = @($needsMatch.Groups[1].Value.Split(',').Trim() | Sort-Object)
+    if (($actual -join ',') -cne (($Keys | Sort-Object) -join ',') -or $Job -notmatch 'if: \$\{\{ always\(\) \}\}') {
+        throw 'Aggregate dependencies must match the complete job inventory and run after failures.'
+    }
+    if (-not $Job.Contains('NEEDS_JSON: ${{ toJSON(needs) }}')) { throw 'Aggregate input is not bound to GitHub needs.' }
+    $gate = Get-WorkflowGate $Job
+    $saved = $env:NEEDS_JSON
+    try {
+        $needs = [ordered]@{}
+        foreach ($key in $Keys) { $needs[$key] = @{ result = 'success' } }
+        $env:NEEDS_JSON = ConvertTo-Json -InputObject $needs -Compress
+        Assert-GateResult $gate $true 'all required jobs succeeded'
+        foreach ($invalid in @('', '{}', 'null', '[]', '{')) {
+            $env:NEEDS_JSON = $invalid
+            Assert-GateResult $gate $false "invalid needs: $invalid"
+        }
+        foreach ($key in $Keys) {
+            $needs.Remove($key)
+            $env:NEEDS_JSON = ConvertTo-Json -InputObject $needs -Compress
+            Assert-GateResult $gate $false "missing $key"
+            foreach ($result in @('failure', 'cancelled', 'skipped', '', 'SUCCESS', $null, 1)) {
+                $needs[$key] = @{ result = $result }
+                $env:NEEDS_JSON = ConvertTo-Json -InputObject $needs -Compress
+                Assert-GateResult $gate $false "invalid result for $key"
+            }
+            $needs[$key] = @{}
+            $env:NEEDS_JSON = ConvertTo-Json -InputObject $needs -Compress
+            Assert-GateResult $gate $false "missing result for $key"
+            $needs[$key] = @{ result = 'success' }
+        }
+        $needs['unexpected'] = @{ result = 'success' }
+        $env:NEEDS_JSON = ConvertTo-Json -InputObject $needs -Compress
+        Assert-GateResult $gate $false 'extra successful job'
+    } finally { $env:NEEDS_JSON = $saved }
+}
+
+$ciJobs = @([regex]::Matches(($ci -split '(?m)^jobs:\r?$', 2)[1], '(?m)^  ([a-z][a-z0-9-]*):') | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
+if (($ciJobs -join ',') -cne 'fast,pull-request-title,repository-governance,required,tdd-gate') {
+    throw 'Ordinary CI must contain exactly the five fast and governance jobs.'
+}
+$triggers = ($ci -split '(?m)^on:\r?$', 2)[1] -split '(?m)^\S', 2 | Select-Object -First 1
+$events = @([regex]::Matches($triggers, '(?m)^  ([a-z_]+):') | ForEach-Object { $_.Groups[1].Value } | Sort-Object)
+if (($events -join ',') -cne 'merge_group,pull_request,workflow_dispatch') { throw 'Ordinary CI must run only for pull requests, merge groups, and manual dispatch.' }
+$fast = Get-WorkflowJob $ci 'fast'
+foreach ($script in @('check-format', 'test-brand', 'test-brand-portability', 'test-gleam-network-retry', 'test-unit', 'test-docs', 'test-oci', 'test-cleanliness')) {
+    if (-not $fast.Contains("./scripts/$script.ps1")) { throw "Fast CI is missing $script." }
+}
+$governance = Get-WorkflowJob $ci 'repository-governance'
+foreach ($command in @('./scripts/test-release.ps1 -ValidateUpstreamSchema', './scripts/test-repository-governance.ps1')) {
+    if (-not $governance.Contains($command) -or [regex]::Matches($ci, [regex]::Escape($command)).Count -ne 1) {
+        throw "Repository governance must run exactly once in its own job: $command"
+    }
+}
+if ($fast -match 'test-(release|repository-governance)\.ps1') { throw 'Fast CI must not repeat repository governance.' }
+foreach ($heavy in @('test-all', 'test-performance', 'test-agent', 'test-runtime', 'test-package', 'test-hex-package', 'test-web-e2e', 'test-s3-dogfood', 'test-tui-pty')) {
+    if ($ci.Contains("./scripts/$heavy.ps1")) { throw "Ordinary CI must not run $heavy." }
+}
+if ($fast -match 'test-oci\.ps1\s+-Build') { throw 'Fast CI must use static OCI validation.' }
+Test-NeedsGate (Get-WorkflowJob $ci 'tdd-gate') @('pull-request-title', 'fast', 'repository-governance')
+Test-NeedsGate (Get-WorkflowJob $ci 'required') @('tdd-gate')
 foreach ($marker in @(
     'name: TDD Gate',
     'name: Conventional pull request title',
     'Pull request title must use type(scope): subject',
     'if: ${{ always() }}',
-    'needs: [pull-request-title, compatibility, distribution, language-fixtures, browser-e2e, oci, s3-compatible, repository-governance]',
-    './scripts/test-s3-dogfood.ps1',
     './scripts/test-release.ps1 -ValidateUpstreamSchema',
     './scripts/test-repository-governance.ps1'
 )) {
@@ -242,6 +329,35 @@ foreach ($marker in @(
 }
 
 $release = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/workflows/release.yml')
+Test-NeedsGate (Get-WorkflowJob $release 'verification') @('draft-release', 'compatibility', 'functional', 'browser-e2e', 's3-compatible', 'package', 'hex', 'image', 'metadata')
+$compatibility = Get-WorkflowJob $release 'compatibility'
+$protocolStep = [regex]::Match($compatibility, '(?ms)^      - [^\r\n]*\r?\n(?:(?!^      - ).)*?        id: protocol-gate\r?\n(?:(?!^      - ).)*')
+if (-not $protocolStep.Success -or -not $protocolStep.Value.Contains('if: ${{ always() }}')) { throw 'Protocol outcomes must be checked after every execution result.' }
+foreach ($pair in @(@('SHORT', 'short'), @('LONG', 'long'), @('TLS', 'tls'))) {
+    $binding = $pair[0] + '_OUTCOME: ${{ steps.agent-' + $pair[1] + '.outcome }}'
+    if (-not $protocolStep.Value.Contains($binding)) { throw "Protocol outcome is not bound to its step: $binding" }
+}
+$protocolGate = Get-WorkflowGate $protocolStep.Value
+$savedProtocol = @{}
+foreach ($name in @('RUNNER_OS', 'SHORT_OUTCOME', 'LONG_OUTCOME', 'TLS_OUTCOME')) { $savedProtocol[$name] = [Environment]::GetEnvironmentVariable($name) }
+try {
+    foreach ($os in @('Linux', 'Windows', 'macOS', '', 'linux', 'unknown')) {
+        $env:RUNNER_OS = $os
+        foreach ($short in @('success', 'failure', 'cancelled', 'skipped', '')) {
+            $env:SHORT_OUTCOME = $short
+            foreach ($long in @('success', 'failure', 'cancelled', 'skipped', '')) {
+                $env:LONG_OUTCOME = $long
+                foreach ($tls in @('success', 'failure', 'cancelled', 'skipped', '')) {
+                    $env:TLS_OUTCOME = $tls
+                    $expected = ($short -ceq 'success') -and (($os -ceq 'Linux' -and $long -ceq 'success' -and $tls -ceq 'success') -or ($os -cin @('Windows', 'macOS') -and $long -ceq 'skipped' -and $tls -ceq 'skipped'))
+                    Assert-GateResult $protocolGate $expected "$os/$short/$long/$tls"
+                }
+            }
+        }
+    }
+} finally {
+    foreach ($name in $savedProtocol.Keys) { [Environment]::SetEnvironmentVariable($name, $savedProtocol[$name]) }
+}
 if (-not $release.Contains('environment: release')) {
     throw 'The publishing job is not protected by the release environment.'
 }

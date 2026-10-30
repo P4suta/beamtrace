@@ -297,7 +297,7 @@ foreach ($marker in @(
     'Get-Item -LiteralPath "packages/beamtrace_core/build/beamtrace_core-$version.tar"',
     './scripts/test-oci.ps1 -Build',
     './scripts/build-distribution-metadata.ps1',
-    'needs: [package, hex, image, metadata]',
+    'needs: [package, hex, image, metadata, verification]',
     'ref: ${{ github.workflow_sha }}',
     'path: release-source',
     'path: release-tools',
@@ -355,8 +355,53 @@ $releaseCheckoutCount = [regex]::Matches(
     $releaseWorkflow,
     [regex]::Escape('ref: ${{ env.RELEASE_SHA }}')
 ).Count
-if ($releaseCheckoutCount -ne 6) {
+if ($releaseCheckoutCount -ne 10) {
     throw "Every release source checkout must use the verified immutable commit; found $releaseCheckoutCount."
+}
+$verificationJobs = @('compatibility', 'functional', 'browser-e2e', 's3-compatible')
+$jobBodies = @{}
+foreach ($job in $verificationJobs) {
+    $match = [regex]::Match($releaseWorkflow, "(?ms)^  ${job}:\r?\n.*?(?=^  [a-z][a-z0-9-]*:|\z)")
+    if (-not $match.Success) { throw "Release verification job is missing: $job" }
+    $jobBodies[$job] = $match.Value
+    if (-not $match.Value.Contains('needs: draft-release') -or -not $match.Value.Contains('ref: ${{ env.RELEASE_SHA }}')) {
+        throw "Release verification must use the resolved release source: $job"
+    }
+}
+$compatibility = $jobBodies['compatibility']
+foreach ($marker in @(
+    'os: [ubuntu-latest, windows-latest, macos-latest]',
+    "otp: ['27', '28', '29']",
+    'fail-fast: false',
+    'BEAMTRACE_REQUIRE_SHELLS:',
+    'test-core.ps1', 'test-runtime.ps1', 'test-mcp.ps1',
+    'test-record-dogfood.ps1', 'test-web.ps1', 'test-tui.ps1',
+    'test-tui-pty.ps1', 'test-fixtures.ps1', 'test-cli-smoke.ps1',
+    'test-web-dist.ps1'
+)) {
+    if (-not $compatibility.Contains($marker)) { throw "Native release compatibility is missing: $marker" }
+}
+foreach ($excluded in @('test-all.ps1', 'test-package.ps1', 'test-hex-package.ps1', 'test-performance.ps1', 'test-repository-governance.ps1', 'test-release.ps1')) {
+    if ($compatibility.Contains($excluded)) { throw "Native compatibility repeats a separate release gate: $excluded" }
+}
+foreach ($protocol in @('short', 'long', 'tls')) {
+    $step = [regex]::Match($compatibility, "(?ms)^      - [^\r\n]*\r?\n(?:(?!^      - ).)*?        id: agent-$protocol\r?\n(?:(?!^      - ).)*")
+    if (-not $step.Success -or -not $step.Value.Contains("./scripts/test-agent.ps1 -Distribution $protocol")) {
+        throw "Release distribution protocol needs an independent execution step: $protocol"
+    }
+    if ($protocol -ne 'short' -and -not $step.Value.Contains("if: `${{ always() && runner.os == 'Linux' }}")) {
+        throw "Linux distribution must continue after another protocol fails: $protocol"
+    }
+}
+$functional = $jobBodies['functional']
+foreach ($marker in @("otp-version: '27'", "elixir-version: '1.18'", "BEAMTRACE_REQUIRE_ELIXIR: '1'", 'test-runtime.ps1', 'test-fixtures.ps1', 'test-format-conformance.ps1', 'test-core-consumer.ps1', 'test-performance.ps1')) {
+    if (-not $functional.Contains($marker)) { throw "Functional release acceptance is missing: $marker" }
+}
+if ([regex]::Matches($releaseWorkflow, 'test-performance\.ps1').Count -ne 1 -or -not $functional.Contains('runs-on: ubuntu-latest')) {
+    throw 'Performance acceptance must run exactly once on Linux.'
+}
+if (-not $jobBodies['browser-e2e'].Contains('./scripts/test-web-e2e.ps1') -or -not $jobBodies['s3-compatible'].Contains('./scripts/test-s3-dogfood.ps1')) {
+    throw 'Release verification must retain browser and S3-compatible acceptance.'
 }
 $releaseToolingCheckoutCount = [regex]::Matches(
     $releaseWorkflow,

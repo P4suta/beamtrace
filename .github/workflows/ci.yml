@@ -2,8 +2,6 @@
 name: TDD
 
 on:
-  push:
-    branches: [main]
   pull_request:
   merge_group:
   workflow_dispatch:
@@ -35,138 +33,49 @@ jobs:
             exit 1
           fi
 
-  compatibility:
-    name: ${{ matrix.os }} / OTP ${{ matrix.otp }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        otp: ['27', '28', '29']
+  fast:
+    name: Linux fast checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
         with:
-          otp-version: ${{ matrix.otp }}
+          otp-version: '29'
           gleam-version: '1.18.1'
           rebar3-version: '3.27.0'
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '24'
           cache: npm
-      - name: Install locked MCP client
+      - name: Install locked unit tooling
         run: npm ci --ignore-scripts
-      - name: TDD gate
+      - name: Check formatting
         shell: pwsh
-        env:
-          BEAMTRACE_REQUIRE_SHELLS: ${{ runner.os == 'Windows' && 'bash' || 'bash,powershell' }}
-        run: ./scripts/test-all.ps1 -SkipBrowserE2E
-
-  distribution:
-    name: OTP ${{ matrix.otp }} / ${{ matrix.distribution }} distribution
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        otp: ['27', '28', '29']
-        distribution: [short, long, tls]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
-        with:
-          otp-version: ${{ matrix.otp }}
-          gleam-version: '1.18.1'
-          rebar3-version: '3.27.0'
-      - name: Distribution capture tests
+        run: ./scripts/check-format.ps1
+      - name: Run deterministic unit tests
         shell: pwsh
-        env:
-          BEAMTRACE_DISTRIBUTION_MATRIX: ${{ matrix.distribution }}
-        run: ./scripts/test-agent.ps1 -Distribution $env:BEAMTRACE_DISTRIBUTION_MATRIX
-
-  language-fixtures:
-    name: Gleam / Elixir / Erlang fixtures
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
-        with:
-          otp-version: '27'
-          elixir-version: '1.18'
-          gleam-version: '1.18.1'
-          rebar3-version: '3.27.0'
-      - name: Fixture acceptance tests
+        run: ./scripts/test-unit.ps1
+      - name: Check project names
         shell: pwsh
-        run: ./scripts/test-fixtures.ps1
-        env:
-          BEAMTRACE_REQUIRE_ELIXIR: '1'
-      - name: Mix record wrapper acceptance
+        run: ./scripts/test-brand.ps1
+      - name: Check portable name validation
         shell: pwsh
-        run: ./scripts/test-runtime.ps1
-        env:
-          BEAMTRACE_REQUIRE_ELIXIR: '1'
-
-  browser-e2e:
-    name: Chromium workspace acceptance
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
-        with:
-          otp-version: '29'
-          gleam-version: '1.18.1'
-          rebar3-version: '3.27.0'
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: '24'
-          cache: npm
-      - name: Install locked browser tooling
-        run: npm ci
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
-      - name: Browser acceptance tests
+        run: ./scripts/test-brand-portability.ps1
+      - name: Check dependency download retry behavior
         shell: pwsh
-        run: ./scripts/test-web-e2e.ps1
-
-  oci:
-    name: OCI image boundary
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Build and smoke-test OCI image
+        run: ./scripts/test-gleam-network-retry.ps1
+      - name: Check documentation contracts
         shell: pwsh
-        run: ./scripts/test-oci.ps1 -Build
-
-  s3-compatible:
-    name: S3-compatible TLS round trip
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
-        with:
-          otp-version: '29'
-          gleam-version: '1.18.1'
-          rebar3-version: '3.27.0'
-      - name: Exercise signed object writes, reads, conflicts, and deletion over TLS
+        run: ./scripts/test-docs.ps1
+      - name: Check static OCI contracts
         shell: pwsh
-        run: ./scripts/test-s3-dogfood.ps1
+        run: ./scripts/test-oci.ps1
+      - name: Check test cleanliness
+        shell: pwsh
+        run: ./scripts/test-cleanliness.ps1
 
   repository-governance:
     name: Repository governance
@@ -186,14 +95,56 @@ jobs:
   tdd-gate:
     name: TDD Gate
     if: ${{ always() }}
-    needs: [pull-request-title, compatibility, distribution, language-fixtures, browser-e2e, oci, s3-compatible, repository-governance]
+    needs: [pull-request-title, fast, repository-governance]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require every TDD job to succeed
-        shell: bash
+      - name: Require every fast job to succeed
+        shell: pwsh
         env:
           NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
-          set -euo pipefail
-          echo "$NEEDS_JSON" | jq --exit-status 'all(.[]; .result == "success")'
+          $ErrorActionPreference = 'Stop'
+          $expected = @('pull-request-title', 'fast', 'repository-governance')
+          $needs = ConvertFrom-Json -InputObject $env:NEEDS_JSON -AsHashtable -ErrorAction Stop
+          if ($needs -isnot [System.Collections.IDictionary] -or $needs.Count -ne $expected.Count) {
+              throw 'Fast gate requires the complete job inventory.'
+          }
+          foreach ($key in $needs.Keys) {
+              if ($key -cnotin $expected) { throw "Unexpected fast job: $key" }
+          }
+          foreach ($key in $expected) {
+              $job = $needs[$key]
+              if ($job -isnot [System.Collections.IDictionary] -or $job['result'] -isnot [string] -or $job['result'] -cne 'success') {
+                  throw "Fast job did not succeed: $key"
+              }
+          }
+
+  required:
+    name: required
+    if: ${{ always() }}
+    needs: [tdd-gate]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require the completed TDD gate
+        shell: pwsh
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = @('tdd-gate')
+          $needs = ConvertFrom-Json -InputObject $env:NEEDS_JSON -AsHashtable -ErrorAction Stop
+          if ($needs -isnot [System.Collections.IDictionary] -or $needs.Count -ne $expected.Count) {
+              throw 'Required gate requires the complete job inventory.'
+          }
+          foreach ($key in $needs.Keys) {
+              if ($key -cnotin $expected) { throw "Unexpected required job: $key" }
+          }
+          foreach ($key in $expected) {
+              $job = $needs[$key]
+              if ($job -isnot [System.Collections.IDictionary] -or $job['result'] -isnot [string] -or $job['result'] -cne 'success') {
+                  throw "Required job did not succeed: $key"
+              }
+          }
