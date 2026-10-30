@@ -63,6 +63,182 @@ jobs:
           echo "The matching release-please draft prerelease does not exist." >&2
           exit 1
 
+  compatibility:
+    name: ${{ matrix.os }} / OTP ${{ matrix.otp }}
+    needs: draft-release
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        otp: ['27', '28', '29']
+    env:
+      BEAMTRACE_REQUIRE_SHELLS: ${{ matrix.os == 'windows-latest' && 'bash' || 'bash,powershell' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          persist-credentials: false
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: ${{ matrix.otp }}
+          gleam-version: '1.18.1'
+          rebar3-version: '3.27.0'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install locked native test tooling
+        run: npm ci
+      - name: Verify native runtime boundaries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($script in @(
+              'test-core.ps1',
+              'test-runtime.ps1',
+              'test-mcp.ps1',
+              'test-record-dogfood.ps1',
+              'test-web.ps1',
+              'test-tui.ps1',
+              'test-tui-pty.ps1',
+              'test-fixtures.ps1',
+              'test-cli-smoke.ps1',
+              'test-web-dist.ps1'
+          )) {
+              & (Join-Path './scripts' $script)
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Short-name distribution
+        id: agent-short
+        shell: pwsh
+        run: ./scripts/test-agent.ps1 -Distribution short
+      - name: Long-name distribution
+        id: agent-long
+        if: ${{ always() && runner.os == 'Linux' }}
+        shell: pwsh
+        run: ./scripts/test-agent.ps1 -Distribution long
+      - name: TLS distribution
+        id: agent-tls
+        if: ${{ always() && runner.os == 'Linux' }}
+        shell: pwsh
+        run: ./scripts/test-agent.ps1 -Distribution tls
+      - name: Require every applicable distribution protocol
+        id: protocol-gate
+        if: ${{ always() }}
+        shell: pwsh
+        env:
+          SHORT_OUTCOME: ${{ steps.agent-short.outcome }}
+          LONG_OUTCOME: ${{ steps.agent-long.outcome }}
+          TLS_OUTCOME: ${{ steps.agent-tls.outcome }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = switch -CaseSensitive ($env:RUNNER_OS) {
+              'Linux' { @{ short = 'success'; long = 'success'; tls = 'success' } }
+              'Windows' { @{ short = 'success'; long = 'skipped'; tls = 'skipped' } }
+              'macOS' { @{ short = 'success'; long = 'skipped'; tls = 'skipped' } }
+              default { throw 'Unknown runner OS for distribution verification.' }
+          }
+          $outcomes = @{
+              short = $env:SHORT_OUTCOME
+              long = $env:LONG_OUTCOME
+              tls = $env:TLS_OUTCOME
+          }
+          foreach ($protocol in $expected.Keys) {
+              if ($outcomes[$protocol] -cne $expected[$protocol]) {
+                  throw "Distribution protocol has an invalid outcome: $protocol"
+              }
+          }
+      - name: Verify native test cleanliness
+        if: ${{ always() }}
+        shell: pwsh
+        run: ./scripts/test-cleanliness.ps1
+
+  functional:
+    name: Required language fixtures and functional contracts
+    needs: draft-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BEAMTRACE_REQUIRE_ELIXIR: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          persist-credentials: false
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: '27'
+          elixir-version: '1.18'
+          gleam-version: '1.18.1'
+          rebar3-version: '3.27.0'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Verify required fixtures, formats and performance
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($script in @(
+              'test-runtime.ps1',
+              'test-fixtures.ps1',
+              'test-format-conformance.ps1',
+              'test-core-consumer.ps1',
+              'test-performance.ps1',
+              'test-cleanliness.ps1'
+          )) {
+              & (Join-Path './scripts' $script)
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+  browser-e2e:
+    name: Chromium workspace acceptance
+    needs: draft-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          persist-credentials: false
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: '29'
+          gleam-version: '1.18.1'
+          rebar3-version: '3.27.0'
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install locked browser tooling
+        run: npm ci
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Browser acceptance tests
+        shell: pwsh
+        run: ./scripts/test-web-e2e.ps1
+
+  s3-compatible:
+    name: S3-compatible TLS round trip
+    needs: draft-release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+          persist-credentials: false
+      - uses: erlef/setup-beam@54075bcc5e249e4758d363f27d099f55d843f124 # v1.24.1
+        with:
+          otp-version: '29'
+          gleam-version: '1.18.1'
+          rebar3-version: '3.27.0'
+      - name: Exercise signed object writes, reads, conflicts, and deletion over TLS
+        shell: pwsh
+        run: ./scripts/test-s3-dogfood.ps1
+
   package:
     name: Package / ${{ matrix.platform }} / ${{ matrix.architecture }}
     needs: draft-release
@@ -273,9 +449,37 @@ jobs:
             dist/beamtrace.json
           if-no-files-found: error
 
+  verification:
+    name: Release verification
+    if: ${{ always() }}
+    needs: [draft-release, compatibility, functional, browser-e2e, s3-compatible, package, hex, image, metadata]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require the complete release verification inventory
+        shell: pwsh
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = @('draft-release', 'compatibility', 'functional', 'browser-e2e', 's3-compatible', 'package', 'hex', 'image', 'metadata')
+          $needs = ConvertFrom-Json -InputObject $env:NEEDS_JSON -AsHashtable -ErrorAction Stop
+          if ($needs -isnot [System.Collections.IDictionary] -or $needs.Count -ne $expected.Count) {
+              throw 'Release verification requires the complete job inventory.'
+          }
+          foreach ($key in $needs.Keys) {
+              if ($key -cnotin $expected) { throw "Unexpected release job: $key" }
+          }
+          foreach ($key in $expected) {
+              $job = $needs[$key]
+              if ($job -isnot [System.Collections.IDictionary] -or $job['result'] -isnot [string] -or $job['result'] -cne 'success') {
+                  throw "Release job did not succeed: $key"
+              }
+          }
+
   publish-hex:
     name: Publish Hex
-    needs: [package, hex, image, metadata]
+    needs: [package, hex, image, metadata, verification]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: release
