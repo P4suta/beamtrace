@@ -10,6 +10,7 @@
 ### Features
 
 * **cli:** add `beamtrace help aql` and `docs/aql-reference.md` — grammar, operators, duration literals, the full field vocabulary rendered from `aql.event_fields`, evaluation rules, and examples; `--where` help links to it
+* **core:** every Gleam block in the beamtrace_core README is a complete module compiled on both targets by a new snippet gate, and four runnable `examples/` projects (facade comparison, event builder, AQL diagnostics, threshold tuning) run in CI against pinned output
 
 * **core:** replace `aql.AqlError` with typed variants rendered by `error_message` and the caret-annotated `error_report`; add `aql.parse_for` field validation with did-you-mean suggestions and the `aql.event_fields` vocabulary — `--where` and `beamtrace.toml` typos now fail at parse time on every path
 * **core:** parameterize the offline diagnostics — `diagnostics.Thresholds`/`analyze`/`analyze_capture` and the facade's `findings_with`/`capture_findings` make every threshold explicit and give dangling calls a structural home instead of a silent omission

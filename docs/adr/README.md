@@ -1,6 +1,5 @@
 <!-- SPDX-License-Identifier: Apache-2.0 OR MIT -->
 # Architecture decision records
-
 - [0001](0001-record-architecture-decisions.md) — Record architecture decisions as MADR files
 - [0002](0002-demo-runs-on-bundled-runtime.md) — Demo runs on the bundled runtime; record runs on the user's toolchain
 - [0003](0003-single-cli-error-catalogue.md) — One CLI error catalogue for human and JSON output
@@ -13,6 +12,7 @@
 - [0010](0010-checked-in-web-dist-gate.md) — The checked-in Web distribution must reproduce from source
 - [0011](0011-core-vocabulary-finalized-before-first-stable-release.md) — Core vocabulary is finalized before the first stable release
 - [0012](0012-aql-errors-are-typed-and-field-checked.md) — AQL errors are typed, caret-rendered, and field-checked
-- [0014](0014-diagnostic-thresholds-are-explicit-records.md) — Diagnostic thresholds are explicit records
-- [0016](0016-cli-error-catalogue-is-closed.md) — The CLI error catalogue is closed
 - [0013](0013-event-builder-is-pipe-shaped-and-total.md) — The event builder is pipe-shaped and total
+- [0014](0014-diagnostic-thresholds-are-explicit-records.md) — Diagnostic thresholds are explicit records
+- [0015](0015-readme-snippets-compile-and-examples-run.md) — README snippets compile and examples run in CI
+- [0016](0016-cli-error-catalogue-is-closed.md) — The CLI error catalogue is closed
