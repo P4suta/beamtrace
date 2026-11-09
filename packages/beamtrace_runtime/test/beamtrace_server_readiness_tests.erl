@@ -13,7 +13,7 @@ readiness_follows_signal_installation_test() ->
                 fun shutdown_handler/1,
                 gen_event:which_handlers(erl_signal_server)
             )),
-            ok = gen_event:notify(erl_signal_server, sigterm),
+            ?assertEqual({ok, self()}, beamtrace_server_ffi:handle_event(sigterm, self())),
             nil
         end,
         ?assertEqual({ok, nil}, beamtrace_server_ffi:await_shutdown(Listener, Ready)),
