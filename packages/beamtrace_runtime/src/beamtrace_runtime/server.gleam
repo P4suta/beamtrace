@@ -104,9 +104,8 @@ pub fn start_with_browser(
   )
 }
 
-/// Start a local comparison workspace whose bounded path list is consumed
-/// once from the bootstrap redirect. The browser history is cleaned by the Web
-/// client immediately after initialization.
+/// Start a local comparison workspace whose bounded path list is consumed once from the bootstrap redirect.
+/// The browser history is cleaned by the Web client immediately after initialization.
 pub fn start_compare_with_browser(
   bind bind: String,
   port port: Int,
@@ -213,6 +212,7 @@ fn start_local(
   bootstrap_query: String,
 ) -> Result(Nil, String) {
   let runtime = new_local(static_root, archive_path, capture_store)
+  let bound_port = process.new_subject()
   let listener =
     fn(request) { api.handle(request, runtime.context) }
     |> wisp_mist.handler(secret_key_base)
@@ -220,26 +220,7 @@ fn start_local(
     |> mist.bind(bind)
     |> mist.port(port)
     |> mist.after_start(fn(actual_port, _scheme, _address) {
-      let url = local_url(bind, actual_port)
-      log.emit(log.Info, "server.ready", [
-        log.Field("mode", "local"),
-        log.Field("bind", bind),
-        log.Field("port", int.to_string(actual_port)),
-      ])
-      io.println("BeamTrace workspace: " <> url)
-      let bootstrap_url =
-        url <> "/bootstrap/" <> runtime.bootstrap_token <> bootstrap_query
-      case open_browser {
-        False -> io.println("One-time bootstrap URL: " <> bootstrap_url)
-        True ->
-          case launch_browser(bootstrap_url) {
-            Ok(Nil) -> io.println("Opened the one-time bootstrap URL.")
-            Error(reason) -> {
-              io.println_error("Could not open the default browser: " <> reason)
-              io.println("One-time bootstrap URL: " <> bootstrap_url)
-            }
-          }
-      }
+      process.send(bound_port, actual_port)
     })
 
   let previous_trap_exit = begin_listener_start()
@@ -247,7 +228,32 @@ fn start_local(
   end_listener_start(previous_trap_exit)
   case listener_start {
     Ok(started) -> {
-      let outcome = await_shutdown(started.pid)
+      let outcome =
+        await_shutdown(started.pid, fn() {
+          let actual_port = process.receive_forever(bound_port)
+          let url = local_url(bind, actual_port)
+          log.emit(log.Info, "server.ready", [
+            log.Field("mode", "local"),
+            log.Field("bind", bind),
+            log.Field("port", int.to_string(actual_port)),
+          ])
+          io.println("BeamTrace workspace: " <> url)
+          let bootstrap_url =
+            url <> "/bootstrap/" <> runtime.bootstrap_token <> bootstrap_query
+          case open_browser {
+            False -> io.println("One-time bootstrap URL: " <> bootstrap_url)
+            True ->
+              case launch_browser(bootstrap_url) {
+                Ok(Nil) -> io.println("Opened the one-time bootstrap URL.")
+                Error(reason) -> {
+                  io.println_error(
+                    "Could not open the default browser: " <> reason,
+                  )
+                  io.println("One-time bootstrap URL: " <> bootstrap_url)
+                }
+              }
+          }
+        })
       stop_listener(started.pid)
       close_local(runtime)
       log.emit(log.Info, "server.closed", [log.Field("mode", "local")])
@@ -532,24 +538,25 @@ pub fn start_team(
         |> mist.new
         |> mist.bind(config.bind)
         |> mist.port(config.port)
-        |> mist.after_start(fn(_actual_port, _scheme, _address) {
-          log.emit(log.Info, "server.ready", [
-            log.Field("mode", "team"),
-            log.Field("bind", config.bind),
-            log.Field("port", int.to_string(config.port)),
-          ])
-          io.println("BeamTrace team workspace: " <> config.origin)
-          io.println(
-            "One-time relay enrollment code: " <> runtime.enrollment_code,
-          )
-        })
+        |> mist.after_start(fn(_actual_port, _scheme, _address) { Nil })
 
       let previous_trap_exit = begin_listener_start()
       let listener_start = mist.start(listener)
       end_listener_start(previous_trap_exit)
       case listener_start {
         Ok(started) -> {
-          let outcome = await_shutdown(started.pid)
+          let outcome =
+            await_shutdown(started.pid, fn() {
+              log.emit(log.Info, "server.ready", [
+                log.Field("mode", "team"),
+                log.Field("bind", config.bind),
+                log.Field("port", int.to_string(config.port)),
+              ])
+              io.println("BeamTrace team workspace: " <> config.origin)
+              io.println(
+                "One-time relay enrollment code: " <> runtime.enrollment_code,
+              )
+            })
           stop_listener(started.pid)
           close_team(runtime)
           log.emit(log.Info, "server.closed", [log.Field("mode", "team")])
@@ -639,7 +646,10 @@ fn local_url(bind: String, port: Int) -> String {
 }
 
 @external(erlang, "beamtrace_server_ffi", "await_shutdown")
-fn await_shutdown(listener: process.Pid) -> Result(Nil, String)
+fn await_shutdown(
+  listener: process.Pid,
+  on_ready: fn() -> Nil,
+) -> Result(Nil, String)
 
 @external(erlang, "beamtrace_server_ffi", "begin_listener_start")
 fn begin_listener_start() -> Bool

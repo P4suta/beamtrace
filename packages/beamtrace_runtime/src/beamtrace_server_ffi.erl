@@ -4,6 +4,7 @@
 
 -export([
     await_shutdown/1,
+    await_shutdown/2,
     begin_listener_start/0,
     end_listener_start/1,
     stop_worker/1,
@@ -19,17 +20,28 @@
     code_change/3
 ]).
 
-await_shutdown(Listener) when is_pid(Listener) ->
+-spec await_shutdown(pid()) -> {ok, nil} | {error, binary()}.
+await_shutdown(Listener) ->
+    await_shutdown(Listener, fun() -> nil end).
+
+-spec await_shutdown(pid(), fun(() -> nil)) -> {ok, nil} | {error, binary()}.
+await_shutdown(Listener, Ready) when is_pid(Listener), is_function(Ready, 0) ->
     Monitor = erlang:monitor(process, Listener),
     Handler = {?MODULE, make_ref()},
     case install_signal_handler(Handler, self()) of
         {ok, Installation} ->
-            await_shutdown_event(Listener, Monitor, Handler, Installation);
+            try
+                Ready(),
+                await_shutdown_event(Listener, Monitor)
+            after
+                restore_signal_handler(Handler, Installation),
+                erlang:demonitor(Monitor, [flush])
+            end;
         {error, Reason} ->
             erlang:demonitor(Monitor, [flush]),
             {error, reason_binary({signal_handler_failed, Reason})}
     end;
-await_shutdown(_Listener) ->
+await_shutdown(_Listener, _Ready) ->
     {error, <<"invalid_listener">>}.
 
 begin_listener_start() ->
@@ -39,16 +51,13 @@ end_listener_start(Previous) when is_boolean(Previous) ->
     _ = erlang:process_flag(trap_exit, Previous),
     nil.
 
-await_shutdown_event(Listener, Monitor, Handler, Installation) ->
-    Result = receive
+await_shutdown_event(Listener, Monitor) ->
+    receive
         {beamtrace_shutdown, sigint} -> {ok, nil};
         {beamtrace_shutdown, sigterm} -> {ok, nil};
         {'DOWN', Monitor, process, Listener, Reason} ->
             {error, reason_binary({listener_stopped, Reason})}
-    end,
-    restore_signal_handler(Handler, Installation),
-    erlang:demonitor(Monitor, [flush]),
-    Result.
+    end.
 
 install_signal_handler(Handler, Owner) ->
     case os:type() of
