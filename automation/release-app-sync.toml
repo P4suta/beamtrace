@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0 OR MIT
+
+workplace = "8f95af89faf8535b63a6"
+repository = "P4suta/beamtrace"
+repository_id = 1343313550
+owner_id = 42543015
+environment = "release-automation"
+branches = ["main"]
+project = "beamtrace"
+source_config = "automation"
+config = "github_automation"
+
+[fields]
+RELEASE_APP_CLIENT_ID = "GITHUB_APP_CLIENT_ID"
+RELEASE_APP_PRIVATE_KEY = "GITHUB_APP_PRIVATE_KEY"

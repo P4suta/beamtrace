@@ -84,7 +84,8 @@ $expectations = [ordered]@{
     )
     'docs/releasing.md' = @(
         'release-automation',
-        'DOPPLER_AUTOMATION_IDENTITY_ID',
+        'RELEASE_APP_CLIENT_ID',
+        'RELEASE_APP_PRIVATE_KEY',
         'DOPPLER_HEX_IDENTITY_ID',
         'HEXPM_API_KEY',
         'Merging a release pull request is the sole human approval',
@@ -128,7 +129,8 @@ if (-not $readme.Contains("VERSION=$projectVersion # x-release-please-version"))
 }
 
 $adrIndex = Get-Content -Raw -LiteralPath (Join-Path $repoRoot 'docs/adr/README.md')
-foreach ($adr in Get-ChildItem -LiteralPath (Join-Path $repoRoot 'docs/adr') -Filter '0*.md') {
+foreach ($adr in Get-ChildItem -LiteralPath (Join-Path $repoRoot 'docs/adr') -Filter '*.md') {
+    if ($adr.Name -eq 'README.md') { continue }
     if (-not $adrIndex.Contains("($($adr.Name))")) {
         throw "docs/adr/README.md does not index $($adr.Name)"
     }

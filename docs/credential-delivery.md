@@ -4,32 +4,32 @@ doppler_automation_app: release_please
 
 # Credential delivery
 
-GitHub Actions exchanges its workload identity for a short-lived Doppler token at the credential-consuming step.
-Each purpose has its own read-only service account, config, and environment variable.
-The release App stays in the canonical automation project and is referenced from the consumer config.
-The Hex package token stays in this repository's dedicated publishing config.
-Retrieved credentials retain their provider permissions, so minted App tokens and the Hex key also need narrow scopes.
+The release App stays in the canonical shared Doppler config, with references in `beamtrace.automation`.
+A purpose-specific config, `beamtrace.github_automation`, maps the approved fields to `RELEASE_APP_CLIENT_ID` and `RELEASE_APP_PRIVATE_KEY`.
+[Native GitHub synchronization](https://docs.doppler.com/docs/github-actions) writes the named secrets to the release-automation environment.
+The [sync manifest](../automation/release-app-sync.toml) binds the destination repository and owner IDs, environment, main branch policy, and field mapping.
 
-| Purpose | Doppler config | GitHub environment variable | Environments |
-| --- | --- | --- | --- |
-| automation | `beamtrace.automation` | `DOPPLER_AUTOMATION_IDENTITY_ID` | release-automation |
-| publish_hex | `beamtrace.release` | `DOPPLER_HEX_IDENTITY_ID` | release |
+Restrict release-automation to main and turn off administrator bypass.
+Protected main and environment policies guard the GitHub copies instead of Doppler workflow and event claims.
+The shared App key still grants authority across its installations, even when the installation token has a narrower scope.
+Pass the named secrets only to the pinned official App token action with explicit owner, repository, and permissions.
+Reject missing values and unresolved references before minting a token.
+The action revokes its token after the job.
 
-The manual **Verify credential access** workflow checks automation credentials and rejects access to an unrelated config.
-Automation also creates a repository-scoped App token with contents read access.
-This workflow performs no signing, notarization, registry publication, release creation, or deployment.
-Existing environment protections remain in force; their approval does not grant authority for another operation.
+The manual **Verify credential access** workflow creates only a token restricted to `P4suta/beamtrace` with contents read access.
+It accepts only a manual dispatch from main in the expected repository and protected environment.
+It performs no checkout, signing, registry publication, release creation, or deployment.
+The release contract parses both App workflows and rejects broader permissions, other secret consumers, changed trust conditions, and token revocation bypasses.
+Run `npm run test:release-credentials` locally through `scripts/test-release.ps1`.
 
-After the reviewed workflows reach the default branch, run the credential-access check for that exact revision.
-Keep the current credential delivery until every purpose and environment succeeds and the denial checks pass.
-Confirm an explicit access-denied response for each negative check.
-Keep the selected identity fixed for that scope check.
-A workflow can exchange for every identity whose claims it satisfies; separate accounts alone don't isolate stages with matching claim policies.
-Network, authentication, and runner failures leave that evidence inconclusive.
-Then disconnect the corresponding Doppler-to-GitHub sync while preserving its target fields, check for remaining consumers, and remove the obsolete GitHub fields and legacy configs.
-An expired or revoked registry key is a retirement candidate and must not be copied into a replacement config.
-The owner has selected a stored package token for Hex while its native Workload Identity registration is unavailable.
+Before merging the migration, verify the sync destination, enabled state, and successful first synchronization without reading values.
+Pause the proposal workflow during the merge, dispatch the read-only check from the exact reviewed main commit, and confirm token revocation.
+Restore the proposal workflow after the check and read back its active state.
+Keep the previous App delivery identity and public variable until a separate retirement review checks every remaining consumer.
+Migration grants no authority to merge a release pull request or publish a tag.
 
+Hex publishing keeps Doppler OIDC through `beamtrace.release`, the release environment, and `DOPPLER_HEX_IDENTITY_ID`.
+Use only a current package token with verified provider permissions.
 Store only field names, identity metadata, source revisions, and verification outcomes in issues and logs.
 Keep credential values and native authentication state out of the repository.
 
@@ -53,4 +53,4 @@ The manual **Verify Hex credential delivery** workflow checks credential retriev
 Run it only after the owner prepares the key and its delivery identity.
 That check establishes delivery, while key permissions, lifetime, and revocation require provider-side evidence.
 Publication remains a separate authorized operation.
-Reconsider native Hex Workload Identity only after its production availability and the exact package binding are confirmed.
+Reconsider native Hex Workload Identity only after confirming its production availability and the exact package binding.

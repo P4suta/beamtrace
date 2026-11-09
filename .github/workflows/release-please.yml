@@ -9,36 +9,28 @@ concurrency:
   group: release-please-main
   cancel-in-progress: false
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   release-please:
-    permissions:
-      contents: read
-      id-token: write
+    if: >-
+      github.repository_id == '1343313550' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    permissions: {}
     name: Update release pull request
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: release-automation
+    env:
+      APP_INPUTS_VALID: >-
+        ${{ secrets.RELEASE_APP_CLIENT_ID != '' &&
+        !startsWith(secrets.RELEASE_APP_CLIENT_ID, '${') &&
+        secrets.RELEASE_APP_PRIVATE_KEY != '' &&
+        !startsWith(secrets.RELEASE_APP_PRIVATE_KEY, '${') }}
     steps:
-      - name: Fetch automation credentials
-        id: doppler_automation_0
-        uses: dopplerhq/secrets-fetch-action@451892f16195f9ac360e1a5bcbf0b5fd0e957534
-        with:
-          auth-method: oidc
-          doppler-identity-id: ${{ vars.DOPPLER_AUTOMATION_IDENTITY_ID }}
-          doppler-project: beamtrace
-          doppler-config: automation
-          inject-env-vars: false
       - name: Reject missing or unresolved automation credentials
-        if: >-
-          ${{ steps.doppler_automation_0.outcome == 'success' && (
-          steps.doppler_automation_0.outputs.GITHUB_APP_CLIENT_ID == '' ||
-          startsWith(steps.doppler_automation_0.outputs.GITHUB_APP_CLIENT_ID, '${') ||
-          steps.doppler_automation_0.outputs.GITHUB_APP_PRIVATE_KEY == '' ||
-          startsWith(steps.doppler_automation_0.outputs.GITHUB_APP_PRIVATE_KEY, '${')
-          ) }}
+        if: env.APP_INPUTS_VALID != 'true'
         shell: bash
         run: exit 1
 
@@ -46,8 +38,10 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
-          client-id: ${{ steps.doppler_automation_0.outputs.GITHUB_APP_CLIENT_ID }}
-          private-key: ${{ steps.doppler_automation_0.outputs.GITHUB_APP_PRIVATE_KEY }}
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: beamtrace
           permission-contents: write
           permission-pull-requests: write
           permission-issues: write
