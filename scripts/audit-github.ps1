@@ -114,8 +114,10 @@ $automationPolicies = Get-GitHubApi -Endpoint "repos/$Repository/environments/re
 $hasMainPolicy = @($automationPolicies.branch_policies) | Where-Object { $_.name -eq 'main' -and $_.type -eq 'branch' }
 Assert-Policy ($null -ne $hasMainPolicy) 'Release automation environment is not restricted to main.'
 
-$automationVariables = Get-GitHubApi -Endpoint "repos/$Repository/environments/release-automation/variables?per_page=100"
-Assert-Policy (@($automationVariables.variables.name) -contains 'DOPPLER_AUTOMATION_IDENTITY_ID') 'Doppler automation identity environment variable is missing.'
+$automationSecrets = Get-GitHubApi -Endpoint "repos/$Repository/environments/release-automation/secrets?per_page=100"
+foreach ($name in @('RELEASE_APP_CLIENT_ID', 'RELEASE_APP_PRIVATE_KEY')) {
+    Assert-Policy (@($automationSecrets.secrets.name) -contains $name) "Release automation environment secret is missing: $name"
+}
 $releaseVariables = Get-GitHubApi -Endpoint "repos/$Repository/environments/release/variables?per_page=100"
 Assert-Policy (@($releaseVariables.variables.name) -contains 'DOPPLER_HEX_IDENTITY_ID') 'Doppler Hex identity environment variable is missing.'
 

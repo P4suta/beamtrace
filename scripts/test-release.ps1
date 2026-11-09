@@ -212,25 +212,8 @@ finally {
     }
 }
 
-$releasePleaseWorkflow = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/workflows/release-please.yml')
-foreach ($marker in @(
-    'branches: [main]',
-    'environment: release-automation',
-    'actions/create-github-app-token@',
-    'googleapis/release-please-action@',
-    'auth-method: oidc',
-    'doppler-project: beamtrace',
-    'doppler-config: automation',
-    'outputs.GITHUB_APP_CLIENT_ID',
-    'outputs.GITHUB_APP_PRIVATE_KEY',
-    'permission-contents: write',
-    'permission-pull-requests: write',
-    'permission-issues: write'
-)) {
-    if (-not $releasePleaseWorkflow.Contains($marker)) {
-        throw "Release Please workflow is missing: $marker"
-    }
-}
+& npm --prefix $repoRoot run test:release-credentials
+if ($LASTEXITCODE -ne 0) { throw 'The protected release App credential contract failed.' }
 
 $candidate = Get-Content -Raw -LiteralPath (Join-Path $repoRoot '.github/workflows/release-candidate.yml')
 foreach ($marker in @(
