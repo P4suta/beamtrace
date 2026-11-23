@@ -16,6 +16,7 @@
 * **cli:** close the error catalogue — fourteen previously ad-hoc failure codes join `cli_errors` (31 → 45), the JSON envelope enum, `beamtrace help errors`, and the reference table; `init`/`config`/`doctor` failures now report the same code on the human and JSON channels
 * **core:** add the `beamtrace/event` builder — identity helpers plus one finisher per event kind, deriving the node from the process so codec-valid events take six lines instead of twenty
 * **tui:** the key guide now matches the implementation — `q` is labelled "quit (list view)" and the always-available `Alt+q` / `Ctrl+C` quit chords are listed
+* **docs:** add `docs/environment-variables.md` — a three-tier reference (user contract, Team server, reserved internals) for every `BEAMTRACE_*` variable, kept in sync with the sources both ways by a new `check-env-docs.mjs` gate
 
 * **core:** add opaque prepared traces and reusable multi-run comparison APIs
 * **codec:** add direct typed validators and single-parse versioned decoding
